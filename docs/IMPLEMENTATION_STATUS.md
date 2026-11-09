@@ -95,16 +95,25 @@
 - V12：tests/test_ui_v12.py（fresh run→Web=CLI=JSON 逐字段、CSV/trace 逐行、
   HTML 身份、stale 不覆盖）。
 
-### M3 资源事件核 — 部分完成（解析档全通；资源核未接）
+### M3 资源事件核 — 核心完成（流水调度已入产品；请求级超前未做）
 - [x] 指标归约器（execute/reduce.py）：请求口径 ITL（同刻=0 合法/N≤1=None）、
   窗口 token 事件 vs 完成请求两口径、goodput(SLO，取消单列)、busy 并集积分、
   最近秩分位；人工轨迹独立 oracle 全对账（tests/test_metrics_v08.py，V08）。
 - [x] 事件验证器（execute/validate.py）：missing_dependency/
   starts_before_dependency_end/resource_overlap/consume_unknown_message/
   consume_before_send_end/missing_message_edge 六类检查，负例逐条捕获（V07）。
-- [ ] 资源约束事件核（两微批流水/单请求超前/取消浪费）——未实现：合法事件
-  生成器未接（execute/serial 为串行解析链）。流水部署不入矩阵（UI 无假并行条），
-  contract 留待扩展；这是 M3 剩余主体。
+- [x] 资源约束事件核（execute/resource_core.py）：最早开始调度（互斥资源+
+  半双工链路）、两微批 DT 流水与单请求串行、cohort 周期（中位差，避 warmup/
+  drain）、资源 busy/利用率；事件流过 validate_trace（48 事件 0 违规实测）。
+- [x] 产品接通：部署模式 dt_pipeline_sim（ScenarioV2.pipeline_microbatches/
+  rounds）→ M18 周期/每轮等价吞吐/利用率指标 + M01 附"周期≠单请求延迟"注
+  （分列不混用）；UI 部署下拉可选；浏览器实测通过（截图
+  docs/evidence/workbench_pipeline_mode.png）。
+- [x] 实测行为（ctx8k blk16）：target-gpu 利用率 99.2%、draft 10.2%（verify
+  主导），cohort 周期 11.512ms、每轮等价 5.81ms < 串行轮和——收益来自具体
+  调度而非 max 通则。
+- [ ] 单请求超前（lookahead>0 的分支/取消/浪费资源账）与请求级事件轨迹
+  （M17 TTFT 等）未做；取消/浪费字段在事件 schema 已留。
 
 ### M4 服务与校准 — 契约就绪，能力未开放（如实标注）
 - 服务特性 UNSUPPORTED 注册：chunked_prefill/pd_disaggregation/prefix_cache
@@ -133,7 +142,7 @@
 | V04 lowering 与守恒 | 部分 | TP 校验/collectives 入账/容量对象；TP/EP 分片总量守恒断言未做全 |
 | V05 方法、协议与状态 | 部分 | 接受律/端点/未知传播/DFlash 计划绑定；事件级 transition trace 未做（M3）|
 | V06 显存生命周期 | 部分 | 静态+每请求对象、同卡去重；生命周期交错峰值未做（M3）|
-| V07 事件因果与资源 | 部分 | 验证器六类检查+负例；资源约束事件核未做（M3）|
+| V07 事件因果与资源 | 大部分 | 验证器六类检查+负例；资源调度核+两微批流水已接；单请求超前未做 |
 | V08 系统指标归约 | 通过（人工轨迹）| execute/reduce + test_metrics_v08 |
 | V09 比较与旧仓对账 | 部分 | 比较资格/多目标/资源披露（V09a）；旧仓三方对账（V09b）未做（M5）|
 | V10 扫描与运行隔离 | 部分 | 不可变快照/独立身份/无交点 null；取消/恢复未做（单任务门控待做）|
@@ -164,5 +173,5 @@
 - 证据产物（已入册 docs/evidence/）：workbench_desktop_run.png、
   workbench_mobile_run.png、run_v2_qwen36_dflash.json、ops_v2.csv、
   trace_v2.csv、report_v2.html。
-- 下一工作项：M3 资源约束事件生成器（两微批/超前/取消浪费）→ 三轨时间轴接真
-  并发事件；V04 TP/EP 分片守恒全断言；V09b 三方对账（model-verse 已有适配器）。
+- 下一工作项：单请求超前事件（分支/取消/浪费账）→ M17 请求级指标；
+  V04 TP/EP 分片守恒全断言；V09b 三方对账（model-verse 适配器已就位）。
