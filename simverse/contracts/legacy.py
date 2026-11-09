@@ -23,7 +23,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
-from . import SCHEMA_VERSION, __version__
+from .. import SCHEMA_VERSION, __version__  # v0.1 根包常量，不随 v0.2 漂移
 
 # ---------------------------------------------------------------------------
 # 通用工具

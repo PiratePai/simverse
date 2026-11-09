@@ -17,8 +17,9 @@ from typing import Dict, List
 from . import acceptance as ACC
 from . import formulas as F
 from .cost import link_ms, roofline_ms
-from .contracts import (DeviceSpec, RunResult, ScenarioSpec, StageTiming,
-                        TimelineEvent, digest)
+from .contracts import (DeviceSpec, RunResult, ScenarioSpec, StageTiming,  # v0.1 数据类
+                        TimelineEvent)
+from .contracts.legacy import digest as _digest_v01  # 16-hex 截断版，钉死 v0.1 存档
 from .devices import get_device, get_link
 from .ledger import build_draft_ledger, build_model_ledger
 from .models import get_draft, get_model
@@ -271,9 +272,9 @@ def run(scenario: ScenarioSpec) -> RunResult:
     res = RunResult(
         status="oom" if oom_target else "ok",
         status_detail="每卡权重驻留 + KV 保留超出设备容量（逻辑算量仍完整输出）" if oom_target else "",
-        scenario_digest=digest(scenario.to_json()),
-        model_digest=digest(model.to_json()),
-        device_digest=digest({"target": target.to_json(), "draft": draft_dev.to_json(),
+        scenario_digest=_digest_v01(scenario.to_json()),
+        model_digest=_digest_v01(model.to_json()),
+        device_digest=_digest_v01({"target": target.to_json(), "draft": draft_dev.to_json(),
                               "link": link.to_json() if hasattr(link, "to_json") else link.__dict__}),
         scenario=scenario.to_json(),
         model=model.to_json(),
