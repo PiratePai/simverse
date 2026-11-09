@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .identity import digest
+from .metrics import metrics_to_json
 
 STATUS = ("queued", "running", "completed", "failed", "cancelled")
 
@@ -80,7 +81,7 @@ class ResultBundle:
             "memory": self.memory,
             "cost": self.cost,
             "execution": self.execution,
-            "metrics": self.metrics,
+            "metrics": metrics_to_json(self.metrics),
             "capability": self.capability,
             "evidence_refs": list(self.evidence_refs),
             "formula_dict": self.formula_dict,

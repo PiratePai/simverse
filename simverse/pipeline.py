@@ -1,0 +1,481 @@
+"""v0.2 计算管线：ScenarioV2 → ResultBundle（CLI/Web/导出唯一入口）。
+
+数据流：Scenario + ModelIR → MethodPlan → Work(Count) → Lowering(TP/容量/通信)
+→ Cost(T0) → Execute(串行轮事件) → ResultBundle（指标/能力/证据/公式）。
+"""
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from . import formula_registry as FR
+from .contracts import (CapabilityReport, Evidence, Feasibility, Metric,
+                        ResultBundle, ResultKind, RunManifest, Scope, Statistic,
+                        Support, TimeBasis, metric_from, digest)
+from .count import build_model_work, totals
+from .count.draft import chain_step_rows, dflash_round_rows, mtp_step_rows
+from .devices import DEVICES, LINKS  # v0.1 设备注册表（v0.2 沿用数值+分层预算）
+from .cost.t0 import dtype_route, price_rows, stage_total
+from .execute.serial import build_serial_round
+from .lowering import (DeviceBudget, LinkLike, colocated_rank_memory,
+                       kv_shard_note, validate_tp)
+from .methods import build_method_plan, acceptance_summary
+from .methods.plans import UNSUPPORTED
+from .model_ir import build_catalog
+from .validation import code_revision
+from .scenario import ScenarioV2
+
+
+def _link_like(link_id: str) -> LinkLike:
+    lk = LINKS[link_id]
+    return LinkLike(bw=lk.bw, fixed_ms=lk.fixed_ms, label=lk.label)
+
+
+def _device_budget(device_id: str) -> DeviceBudget:
+    d = DEVICES[device_id]
+    return DeviceBudget(device_id, int(d.mem_capacity), None, source="spec",
+                        budget_note="标称容量；可分配预算未提供 → feasible 判定 unknown（§7.4）")
+
+
+def run_v2(scenario: ScenarioV2) -> ResultBundle:
+    scenario.validate()
+    cat = build_catalog()
+    cap = CapabilityReport()
+
+    # ---- 模型解析 + 能力检查 ----
+    model = cat["models"].get(scenario.model_id)
+    if model is None:
+        raise ValueError(f"未知模型 {scenario.model_id}")
+    cap.add("model_registered", "supported", model.id)
+    if not model.structure_complete:
+        cap.add("model_structure_complete", "unsupported",
+                "存在 unsupported-semantic 字段（Engram/hc 等）",
+                affected_metrics=["M06 每卡显存", "M02/M04 完整模型性能", "M05 MoE 完整读"])
+    else:
+        cap.add("model_structure_complete", "supported", "全部结构字段已映射")
+    draft = cat["drafts"].get(scenario.draft_id) if scenario.draft_id else None
+
+    # ---- 方法 ----
+    if scenario.method_id in UNSUPPORTED:
+        return _bundle_error(scenario, cap, "unsupported_method",
+                             f"{scenario.method_id}: {UNSUPPORTED[scenario.method_id]}")
+    if scenario.method_id == "baseline":
+        plan = build_method_plan("baseline", {}, 1)
+        draft_ir = None
+    else:
+        if draft is None and scenario.method_id == "dflash_v1":
+            return _bundle_error(scenario, cap, "unsupported_method",
+                                 "dflash_v1 需要 DraftIR（catalog.drafts）")
+        try:
+            plan = build_method_plan(
+                scenario.method_id, scenario.acceptance, scenario.k,
+                draft_ir=draft, mtp_layers=model.mtp_layers,
+                block_size=scenario.block_size)
+        except ValueError as exc:
+            return _bundle_error(scenario, cap, "unsupported_combo", str(exc))
+        draft_ir = draft
+    acc = acceptance_summary(plan)
+
+    # ---- 部署合法性 ----
+    dep = scenario.deployment
+    tp_errors = validate_tp(model, dep.target_tp)
+    if tp_errors:
+        cap.add("tp_valid", "invalid", "; ".join(tp_errors[:2]),
+                affected_metrics=["全部"])
+        return _bundle_error(scenario, cap, "unsupported_combo",
+                             f"TP{dep.target_tp} 非法：{tp_errors[0]}")
+    cap.add("tp_valid", "supported",
+            f"TP{dep.target_tp}；KV 分片：{kv_shard_note(model, dep.target_tp)['strategy']}")
+    if scenario.method_id == "dflash_v1" and dep.mode == "dt_serial":
+        cap.add("dflash_serving_integration", "unknown",
+                "SGLang DFLASH/vLLM PR#40898 未逐行核对：模拟按 HF 语义，"
+                "不冒充已部署验证", affected_metrics=["部署矩阵 served 标记"])
+
+    # ---- 计数与计价 ----
+    quant, dquant = scenario.quant, scenario.draft_quant
+    gemm_dt, ew_dt = dtype_route(quant)
+    target_dev = DEVICES[dep.target_device]
+    draft_dev = DEVICES[dep.draft_device]
+    B, ctx = scenario.workload.batch, scenario.workload.ctx_tokens
+    work: Dict[str, Any] = {}
+    cost: Dict[str, Any] = {}
+    tp_link = _link_like(dep.link)
+
+    base_rows = build_model_work(model, "target_decode", B, ctx, 1, quant,
+                                 dep.target_tp, role="target")
+    base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt)
+    t_base = stage_total(base_prices)
+    # TP collectives（baseline decode 每层 2 次）
+    col_base = _collectives_cost(model, dep.target_tp, B, quant, tp_link)
+    t_base += col_base["t_ms"]
+    work["target_decode"] = _rows_json(base_rows)
+    cost["target_decode"] = {"t_ms": t_base, "collectives": col_base["detail"]}
+
+    stage_costs: Dict[str, float] = {}
+    if scenario.method_id == "baseline":
+        stage_costs["decode"] = t_base
+        e_n = 1.0
+        round_obj = build_serial_round(plan, stage_costs, 1.0)
+        draft_rows: List = []
+        msg_bytes = {"d2t": 0, "t2d": 0}
+    else:
+        e_n = acc["E_N"]
+        if e_n is None:
+            return _bundle_error(
+                scenario, cap, "unknown_acceptance",
+                f"E[N] 未知：{acc['reason']}（受影响：TPOT/收益比较全部 null）")
+        if scenario.method_id == "dflash_v1":
+            draft_rows = dflash_round_rows(
+                "draft_block", draft, model.vocab, e_n, ctx, dquant,
+                quant["act"] / 8)
+            d_gemm, d_ew = dtype_route(dquant)
+            d_dev = target_dev if dep.mode == "colocated" else draft_dev
+            d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew)
+            t_draft = stage_total(d_prices)
+            verify_rows = build_model_work(model, "verify_block", B, ctx,
+                                           plan.block_size, quant, dep.target_tp,
+                                           role="target")
+            v_prices = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
+            t_verify = stage_total(v_prices)
+            col_v = _collectives_cost(model, dep.target_tp, B * plan.block_size,
+                                      quant, tp_link)
+            t_verify += col_v["t_ms"]
+            blk = plan.block_size
+            greedy = scenario.acceptance.get("kind") == "geometric"  # 概率随采样策略
+            msg_bytes = {
+                "d2t": int((blk - 1) * (4 + (2 if not greedy else 0))),
+                "t2d": int(e_n * len(draft.target_layer_ids) * draft.hidden
+                           * (quant["act"] / 8)),
+            }
+            stage_costs = {"draft_block": t_draft, "verify_block": t_verify}
+            work["draft_block"] = _rows_json(draft_rows)
+            work["verify_block"] = _rows_json(verify_rows)
+            cost["draft_block"] = {"t_ms": t_draft, "device": d_dev.id}
+            cost["verify_block"] = {"t_ms": t_verify,
+                                    "collectives": col_v["detail"]}
+        elif scenario.method_id == "mtp":
+            draft_rows = mtp_step_rows("draft_step_0", model, 1, ctx, quant,
+                                       model.mtp_layers or 1)
+            d_prices = price_rows(draft_rows, target_dev, gemm_dt, ew_dt)
+            t_draft = stage_total(d_prices)
+            verify_rows = build_model_work(model, "verify", B, ctx,
+                                           plan.k_effective + 1, quant,
+                                           dep.target_tp, role="target")
+            t_verify = stage_total(price_rows(verify_rows, target_dev, gemm_dt, ew_dt))
+            msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
+                         "t2d": int(e_n * model.hidden * (quant["act"] / 8))}
+            stage_costs = {"draft_step_0": t_draft, "verify": t_verify}
+            work["draft_step_0"] = _rows_json(draft_rows)
+            work["verify"] = _rows_json(verify_rows)
+        else:  # chain_draft / chain_moe_proxy：草稿用 tiny_gqa 结构演示闭环
+            draft_model = cat["models"]["tiny_gqa"]
+            rows_all = []
+            t_draft = 0.0
+            p_full = acc["P_full"] or 0.0
+            for j in range(plan.k_effective):
+                m = 2 if j == 0 else 1
+                weight = (1 - p_full if j == 0 else 1.0)
+                rows = chain_step_rows(f"draft_step_{j}", draft_model, m, ctx,
+                                       dquant, 1)
+                t = stage_total(price_rows(rows, target_dev, gemm_dt, ew_dt))
+                t_draft += t * (weight if j == 0 else 1.0) + (
+                    p_full * t if j == 0 else 0.0)
+                rows_all += rows
+            verify_rows = build_model_work(model, "verify", B, ctx,
+                                           plan.k_effective + 1, quant,
+                                           dep.target_tp, role="target")
+            t_verify = stage_total(price_rows(verify_rows, target_dev, gemm_dt, ew_dt))
+            msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
+                         "t2d": int(B * 256)}
+            stage_costs = {f"draft_step_{j}": t_draft / max(1, plan.k_effective)
+                           for j in range(plan.k_effective)}
+            stage_costs["verify"] = t_verify
+            draft_rows = rows_all
+            work["draft_steps"] = _rows_json(rows_all)
+            work["verify"] = _rows_json(verify_rows)
+        # 链路
+        if dep.mode == "dt_serial":
+            lk = LINKS[dep.link]
+            t_d2t = lk.fixed_ms + msg_bytes["d2t"] / lk.bw * 1e3
+            t_t2d = lk.fixed_ms + msg_bytes["t2d"] / lk.bw * 1e3
+        else:
+            t_d2t = t_t2d = 0.0
+        step_map = {"d2t": t_d2t, "t2d": t_t2d}
+        for sid in list(stage_costs):
+            pass
+        stage_costs.update({k: v for k, v in step_map.items() if v or dep.mode == "dt_serial"})
+        cost["link"] = {"t_d2t_ms": t_d2t, "t_t2d_ms": t_t2d, "bytes": msg_bytes}
+        round_obj = build_serial_round(plan, stage_costs, e_n)
+        # 串行时间线补 link 事件（计划步骤已含 d2t/t2d）
+
+    # ---- 容量 ----
+    memory = _memory_block(model, draft if scenario.method_id == "dflash_v1" else None,
+                           quant, dquant, dep, B, ctx, cap)
+
+    # ---- 指标 ----
+    metrics = _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
+                             base_rows, memory, cap, model, draft)
+    manifest = RunManifest(run_id="", status="completed",
+                           input_digest=scenario.scenario_digest(),
+                           model_ir_digest=digest(model.to_json()),
+                           method_digest=digest(plan.to_json()),
+                           cost_digest=digest({"t0": FR.F_ROOFLINE}),
+                           device_snapshot_digest=digest(
+                               {"target": dep.target_device, "tp": dep.target_tp,
+                                "draft": dep.draft_device, "link": dep.link}),
+                           code_revision=code_revision())
+    manifest.compute_run_id()
+    bundle = ResultBundle(
+        manifest=manifest,
+        scenario_snapshot=scenario.to_json(),
+        model_ref={"id": model.id, "label": model.label, "family": model.family,
+                   "structure_complete": model.structure_complete,
+                   "gaps": model.gaps, "kind_counts": model.kind_counts(),
+                   "source": model.source.to_json(),
+                   "coverage": model.coverage,
+                   "digest": manifest.model_ir_digest},
+        method_plan=plan.to_json(),
+        work={k: v for k, v in work.items()},
+        cost=cost,
+        execution={"rounds": [round_obj.to_json()],
+                   "mode": "serial-analytical",
+                   "note": "串行解析档：阶段和=轮墙钟（无重叠）；M3 事件核接入后"
+                           "本值作同假设对照"},
+        metrics=metrics,
+        capability=cap.to_json(),
+        evidence_refs=["ev-qwen36-main-config", "ev-qwen36-dflash-config",
+                       "ev-dflash-impl", "ev-dflash-readme", "ev-v41-config"],
+        formula_dict=FR.formulas_json()["formulas"],
+        assumption_dict=_assumptions(scenario, plan),
+    )
+    return bundle
+
+
+def _collectives_cost(model, tp: int, tokens: int, quant: dict, link: LinkLike):
+    from .lowering import tp_layer_collectives
+    if tp < 2:
+        return {"t_ms": 0.0, "detail": {"note": "TP1 无集合通信",
+                                        "total_t_ms": 0.0}}
+    cols = tp_layer_collectives(model, tp, model.hidden, quant["act"] / 8,
+                                tokens, link)
+    t = sum(c.t_ms for c in cols)
+    return {"t_ms": t, "detail": {
+        "per_layer": [c.to_json() for c in cols[:2]],
+        "n_collectives_per_layer": 2, "layers": len(model.layers),
+        "total_t_ms": t}}
+
+
+def _rows_json(rows):
+    t = totals(rows)
+    return {"totals": {k: v for k, v in t.items()},
+            "rows": [r.to_json() for r in rows]}
+
+
+def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap):
+    from .lowering.memory import kv_allocations, target_weight_allocations
+    blocks: Dict[str, Any] = {}
+    if dep.mode == "colocated":
+        rank = colocated_rank_memory(
+            model, draft_ir, quant, dquant, dep.target_tp, B, ctx,
+            _device_budget(dep.target_device))
+        blocks["colocated_r0"] = rank.peak_vs_budget()
+        for a in rank.allocations:
+            pass
+    else:
+        tb = _device_budget(dep.target_device)
+        w = sum(a.bytes for a in target_weight_allocations(model, quant, dep.target_tp))
+        kv = sum(a.bytes for a in kv_allocations(model, quant, B, ctx))
+        blocks["target_r0"] = {"live_bytes": w + kv, "weights": w, "kv": kv,
+                               **{k: v for k, v in tb.to_json().items()},
+                               "status": ("unknown" if tb.allocatable_bytes is None
+                                          else ("oom" if w + kv > tb.effective_budget
+                                                else "feasible"))}
+        if draft_ir is not None and dep.mode == "dt_serial":
+            db = _device_budget(dep.draft_device)
+            dw = sum(a.bytes for a in target_weight_allocations(
+                _draft_as_model(draft_ir), dquant, 1, role="draft"))
+            dkv = sum(a.bytes for a in kv_allocations(
+                _draft_as_model(draft_ir), dquant, B, ctx, role="draft"))
+            blocks["draft_r0"] = {"live_bytes": dw + dkv, "weights": dw, "kv": dkv,
+                                  **{k: v for k, v in db.to_json().items()},
+                                  "status": ("unknown" if db.allocatable_bytes is None
+                                             else ("oom" if dw + dkv > db.effective_budget
+                                                   else "feasible"))}
+    for rk, blk in blocks.items():
+        if blk["status"] == "oom":
+            cap.add(f"memory_{rk}", "unsupported",
+                    f"{rk} OOM：live={blk['live_bytes']} > 预算",
+                    affected_metrics=["M02 加速比", "M06 显存"])
+        else:
+            cap.add(f"memory_{rk}", "unknown" if blk["status"] == "unknown" else "supported",
+                    f"{rk} live={blk['live_bytes']}B；"
+                    + ("仅标称容量，feasible 判定 unknown" if blk["status"] == "unknown"
+                       else "在可分配预算内"),
+                    affected_metrics=["M06 显存"])
+    return blocks
+
+
+def _draft_as_model(draft_ir):
+    from .lowering.memory import _as_model
+    return _as_model(draft_ir)
+
+
+def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
+                   base_rows, memory, cap, model, draft) -> Dict[str, Any]:
+    m: Dict[str, Any] = {}
+    common = dict(result_kind=ResultKind.ANALYTICAL_ESTIMATE,
+                  evidence=[Evidence.COUNTED], formula=FR.F_ROOFLINE)
+    sc = Scope(role="target", phase="steady-decode", aggregation="per-run",
+               time_basis=TimeBasis.COMMITTED.value)
+    # M01 TPOT（解析平稳档）
+    if round_obj.tpot_ms is not None:
+        m["M01_tpot_analytical"] = metric_from(
+            round_obj.tpot_ms, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION,
+            scope=sc, evidence=(Evidence.COUNTED,),
+            assumptions=["串行解析档 E[T_round]/E[N]；无排队/prefill（M01 口径分列）"])
+    else:
+        m["M01_tpot_analytical"] = Metric.unknown("ms", round_obj.reason or "unknown")
+    m["M01_tpot_baseline"] = metric_from(
+        t_base, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION, scope=sc,
+        evidence=(Evidence.COUNTED,), assumptions=["无投机基线同 B/ctx"])
+    # M02 加速比（与自身基线同 run 配对；资格检查）
+    elig = _eligibility(cap)
+    if round_obj.tpot_ms and t_base:
+        m["M02_speedup_vs_baseline"] = metric_from(
+            t_base / round_obj.tpot_ms, "ratio", FR.F_ROOFLINE,
+            statistic=Statistic.EXPECTATION, scope=sc,
+            evidence=(Evidence.COUNTED,),
+            assumptions=["同 B/ctx/精度/设备；分子分母同为解析估算"],
+        ) if elig else Metric(
+            value=t_base / round_obj.tpot_ms, unit="ratio", scope=sc,
+            statistic=Statistic.EXPECTATION,
+            support=Support.APPROXIMATED, feasibility=Feasibility.UNKNOWN,
+            evidence_refs=[], formula_ref=FR.F_ROOFLINE,
+            reason="资格不合格（结构缺口/OOM/unknown 容量）：数值保留，不参与排名")
+    else:
+        m["M02_speedup_vs_baseline"] = Metric.unknown("ratio", "TPOT 缺失")
+    # M03 每轮产出（baseline：恒 1 精确值）
+    if plan.method_id == "baseline":
+        m["M03_E_N"] = metric_from(1.0, "tokens/round", "internal",
+                                   statistic=Statistic.EXACT, scope=sc,
+                                   evidence=(Evidence.COUNTED,))
+        m["M03_K"] = metric_from(0, "tokens", "internal",
+                                 statistic=Statistic.EXACT, scope=sc,
+                                 evidence=(Evidence.COUNTED,))
+    elif acc["E_N"] is not None:
+        m["M03_E_N"] = metric_from(acc["E_N"], "tokens/round", plan.en_formula,
+                                   statistic=Statistic.EXPECTATION, scope=sc,
+                                   evidence=(Evidence.ASSUMED,),
+                                   assumptions=["Q8 hypothesis 接受率输入"])
+        m["M03_K"] = metric_from(plan.k_effective or 0, "tokens", "internal",
+                                 statistic=Statistic.EXACT, scope=sc,
+                                 evidence=(Evidence.CONFIG,))
+        if acc["P_full"] is not None:
+            m["M03_P_full"] = metric_from(acc["P_full"], "probability",
+                                          plan.en_formula,
+                                          statistic=Statistic.EXPECTATION, scope=sc,
+                                          evidence=(Evidence.ASSUMED,))
+    else:
+        m["M03_E_N"] = Metric.unknown("tokens/round", acc["reason"] or "")
+    # M04 单轮分解
+    m["M04_round_ms"] = metric_from(round_obj.t_round_ms, "ms", FR.F_ROOFLINE,
+                                    statistic=Statistic.EXPECTATION, scope=sc,
+                                    evidence=(Evidence.COUNTED,))
+    m["M04_stage_breakdown_ms"] = {
+        e.stage: metric_from(e.t_ms, "ms", FR.F_ROOFLINE,
+                             statistic=Statistic.EXPECTATION, scope=sc,
+                             evidence=(Evidence.COUNTED,))
+        for e in round_obj.events}
+    # M05 MoE 并集（从账本聚合）
+    moe_u = _moe_union_summary(base_rows)
+    if moe_u:
+        m["M05_moe_union"] = moe_u
+    # M06 显存：状态传播（oom→OOM；仅标称→unknown 不称 feasible §7.4）
+    for rk, blk in memory.items():
+        feas = {"oom": Feasibility.OOM, "unknown": Feasibility.UNKNOWN,
+                "feasible": Feasibility.FEASIBLE}[blk["status"]]
+        m[f"M06_memory_{rk}"] = Metric(
+            value=blk["live_bytes"], unit="B", statistic=Statistic.EXACT,
+            support=Support.SUPPORTED, feasibility=feas,
+            formula_ref="v2.moe_routed",
+            scope=Scope(role="target" if "target" in rk or "colocated" in rk else "draft",
+                        phase="steady-decode", rank=rk),
+            evidence_refs=["ev-qwen36-main-config"],
+            reason=None if blk["status"] != "unknown"
+            else "仅标称容量：低于标称不能证明 runtime feasible")
+    # M11 五类字节（target decode）
+    t = totals(base_rows)
+    m["M11_bytes_target_decode"] = {
+        k: metric_from(v if not isinstance(v, float) else v,
+                       "B" if k != "flops" else "FLOPs",
+                       "v2.gemm" if k == "flops" else "v2.kv_rw",
+                       statistic=Statistic.EXPECTATION if k == "weight_read_expected"
+                       else Statistic.EXACT, scope=sc, evidence=(Evidence.COUNTED,))
+        for k, v in t.items() if k != "rows"}
+    # M19 通信
+    if msg_bytes.get("d2t") or msg_bytes.get("t2d"):
+        m["M19_msg_bytes"] = {
+            "d2t": metric_from(msg_bytes["d2t"], "B/round", FR.F_DFLASH_MSG,
+                               statistic=Statistic.EXPECTATION, scope=sc,
+                               evidence=(Evidence.SOURCE_CHECKED,),
+                               assumptions=["协议绑定 z-lab/dflash pin"]),
+            "t2d": metric_from(msg_bytes["t2d"], "B/round", FR.F_DFLASH_MSG,
+                               statistic=Statistic.EXPECTATION, scope=sc,
+                               evidence=(Evidence.SOURCE_CHECKED,)),
+        }
+    # M07 状态
+    m["M07_support_summary"] = {
+        "capability_checks": {k: v["status"] for k, v in cap.checks.items()},
+        "structure_complete": model.structure_complete,
+        "result_kind": "analytical-estimate",
+    }
+    return m
+
+
+def _eligibility(cap: CapabilityReport) -> bool:
+    """比较资格：结构完整 + 无 OOM + 容量非 unknown（§7.2）。"""
+    for cid, chk in cap.checks.items():
+        if cid == "model_structure_complete" and chk["status"] != "supported":
+            return False
+        if cid.startswith("memory_") and chk["status"] in ("unsupported", "unknown"):
+            return False
+    return True
+
+
+def _moe_union_summary(rows) -> Optional[Dict[str, Any]]:
+    routed = [r for r in rows if r.op == "moe_routed"]
+    if not routed:
+        return None
+    first = routed[0]
+    return metric_from(first.weight_read_expected or 0.0, "B/layer",
+                       FR.F_MOE_UNION, statistic=Statistic.EXPECTATION,
+                       scope=Scope(role="target", phase="steady-decode"),
+                       evidence=(Evidence.COUNTED, Evidence.ASSUMED),
+                       assumptions=["均匀独立路由假设（无 trace）"])
+
+
+def _assumptions(scenario, plan) -> Dict[str, str]:
+    out = {
+        "A1_performance": "全部时延为 T0 解析估算（roofline；Q2 首版无实测/拟合）",
+        "A2_serial": "串行解析档：阶段和=轮墙钟；无重叠/流水（M3 事件核后扩展）",
+        "A3_acceptance": f"接受率为显式假设输入（Q8 hypothesis）：{scenario.acceptance}",
+        "A4_routing": "MoE 路由按均匀独立假设；期望并集非精确计数",
+        "A5_workload": f"负载假设：B={scenario.workload.batch} ctx={scenario.workload.ctx_tokens}"
+                       "（可编辑演示默认值，非用户确认）",
+        "A6_budget": "设备容量为标称规格；可分配预算未提供 → feasible 判定 unknown",
+    }
+    for a in plan.approximations:
+        out[f"plan:{a[:24]}"] = a
+    return out
+
+
+def _bundle_error(scenario: ScenarioV2, cap: CapabilityReport, status: str,
+                  detail: str) -> ResultBundle:
+    manifest = RunManifest(run_id="", status="failed",
+                           input_digest=scenario.scenario_digest(),
+                           code_revision=code_revision())
+    manifest.compute_run_id()
+    return ResultBundle(
+        manifest=manifest, scenario_snapshot=scenario.to_json(),
+        capability=cap.to_json(),
+        metrics={"error": Metric.unsupported("none", detail)},
+        assumption_dict={"error": status})

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from . import formulas as F
-from .contracts import DeviceSpec, LinkSpec
+from .. import formulas as F  # 根包公式表（v0.1）
+from ..contracts import DeviceSpec, LinkSpec
 
 # 每类算子的精度路由（决定取哪档峰值算力）——RecipeSpec 的最小子集，v0.1 隐式 vllm-cuda
 DTYPE_ROUTE = {

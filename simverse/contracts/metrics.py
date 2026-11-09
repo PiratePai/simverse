@@ -126,3 +126,14 @@ def metric_from(value, unit: str, formula: str, *, statistic: Statistic,
                   scope=scope or Scope(), statistic=statistic, result_kind=result_kind,
                   support=support, evidence_refs=list(evidence), formula_ref=formula,
                   input_refs=inputs or [], assumption_refs=assumptions or [])
+
+
+def metrics_to_json(obj):
+    """递归把 Metric/Scope 对象转为 JSON 结构（ResultBundle.to_json 用）。"""
+    if isinstance(obj, Metric):
+        return obj.to_json()
+    if isinstance(obj, dict):
+        return {k: metrics_to_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [metrics_to_json(v) for v in obj]
+    return obj

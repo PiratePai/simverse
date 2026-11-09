@@ -51,7 +51,7 @@ class CapabilityReport:
 
     def add(self, check_id: str, status: str, reason: str,
             affected_metrics: Optional[List[str]] = None) -> None:
-        if status not in ("supported", "approximated", "unsupported", "unknown"):
+        if status not in ("supported", "approximated", "unsupported", "unknown", "invalid"):
             raise ValueError(f"未知能力状态 {status}")
         self.checks[check_id] = {"status": status, "reason": reason,
                                  "affected_metrics": affected_metrics or []}
