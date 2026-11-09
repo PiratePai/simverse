@@ -1,0 +1,764 @@
+[
+ {
+  "id": "nerkyor/Qwen3.8-27B-Coder390-EfficientThink-Opus5.5-GPT6Astra-Grok4.7-DSV4Pro-K3-SFT-RLOO-MTP-DFlash2",
+  "tags": [
+   "safetensors",
+   "gguf",
+   "qwen3.8",
+   "efficient-thinking",
+   "reasoning",
+   "coding",
+   "uncensored",
+   "sft",
+   "simpo",
+   "rloo",
+   "fp8",
+   "bf16"
+  ]
+ },
+ {
+  "id": "ricursiveAI/Ripple-65B-Preview-DFlash2",
+  "tags": [
+   "safetensors",
+   "qwen3",
+   "dflash2",
+   "speculative-decoding",
+   "ripple",
+   "base_model:ricursiveAI/Ripple-65B-Preview",
+   "base_model:finetune:ricursiveAI/Ripple-65B-Preview",
+   "license:apache-2.0",
+   "region:us"
+  ]
+ },
+ {
+  "id": "z-lab/Qwen3.8-27B-DFlash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "vllm",
+   "text-generation",
+   "base_model:Qwen/Qwen3.8-27B",
+   "base_model:finetune:Qwen/Qwen3.8-27B"
+  ]
+ },
+ {
+  "id": "incoai/Qwen3.8-Flash-Next-DFlash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "text-generation",
+   "base_model:Qwen/Qwen3.8-Flash-Next",
+   "base_model:finetune:Qwen/Qwen3.8-Flash-Next",
+   "license:apache-2.0"
+  ]
+ },
+ {
+  "id": "lapalaba/Qwen3.8-27B-DFlash2-ru",
+  "tags": [
+   "safetensors",
+   "qwen3",
+   "speculative-decoding",
+   "dflash2",
+   "draft-model",
+   "sglang",
+   "vllm",
+   "ru",
+   "en",
+   "base_model:Qwen/Qwen3.8-27B",
+   "base_model:finetune:Qwen/Qwen3.8-27B",
+   "license:other"
+  ]
+ },
+ {
+  "id": "incoai/Qwen3.8-27B-DFlash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "vllm",
+   "text-generation",
+   "base_model:Qwen/Qwen3.8-27B",
+   "base_model:finetune:Qwen/Qwen3.8-27B"
+  ]
+ },
+ {
+  "id": "RadixArk/Kimi-K3.1-Dflash2-Preview",
+  "tags": [
+   "safetensors",
+   "qwen3",
+   "speculative-decoding",
+   "dflash2",
+   "sglang",
+   "kimi",
+   "text-generation",
+   "base_model:moonshotai/Kimi-K3.1-Pro",
+   "base_model:finetune:moonshotai/Kimi-K3.1-Pro",
+   "license:apache-2.0",
+   "region:us"
+  ]
+ },
+ {
+  "id": "nerkyor/Qwen3.8-27B-EfficientThink-Uncensored-K3-Opus5-Grok4.6-GPT5.6Sol-SFT-SimPO-DFlash2-GGUF",
+  "tags": [
+   "gguf",
+   "qwen3.8",
+   "efficient-thinking",
+   "dflash2",
+   "speculative-decoding",
+   "mtp",
+   "llama.cpp",
+   "q2-lynnstyle",
+   "mixed-precision",
+   "gsq-rco",
+   "gsq",
+   "iq"
+  ]
+ },
+ {
+  "id": "nerkyor/Qwen3.8-27B-EfficientThink-Uncensored-K3-Opus5-Grok4.6-GPT5.6Sol-SFT-SimPO-DFlash2",
+  "tags": [
+   "safetensors",
+   "gguf",
+   "qwen",
+   "qwen3.8",
+   "dense",
+   "efficient-thinking",
+   "thinking",
+   "reasoning",
+   "coding",
+   "agent",
+   "conversational",
+   "uncensored"
+  ]
+ },
+ {
+  "id": "nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-DFlash2",
+  "tags": [
+   "safetensors",
+   "qwen3",
+   "nvidia",
+   "nemotron-3.5",
+   "speculative-decoding",
+   "dflash2",
+   "draft-model",
+   "speech",
+   "asr",
+   "vllm",
+   "base_model:nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B",
+   "base_model:finetune:nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B"
+  ]
+ },
+ {
+  "id": "incoai/Flint-DFlash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "text-generation",
+   "base_model:RecursiveSI/flint",
+   "base_model:finetune:RecursiveSI/flint",
+   "license:apache-2.0"
+  ]
+ },
+ {
+  "id": "incoai/GLM-5.3-DFlash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "text-generation",
+   "base_model:zai-org/GLM-5.3",
+   "base_model:finetune:zai-org/GLM-5.3"
+  ]
+ },
+ {
+  "id": "kaushikvira/Qwen3.8-27B-swift15-nvfp4full-dflash2-NInfer-v3",
+  "tags": [
+   "ninfer",
+   "ninfer-v3",
+   "qwen3.8",
+   "qwen3_5",
+   "swift",
+   "swift-1.5",
+   "nvfp4",
+   "w4a4",
+   "blackwell",
+   "multimodal",
+   "conversational",
+   "cuda"
+  ]
+ },
+ {
+  "id": "kaushikvira/Qwen3.8-27B-swift15-uncensored-ajgazin-nvfp4full-dflash2-NInfer-v3",
+  "tags": [
+   "ninfer",
+   "ninfer-v3",
+   "qwen3.8",
+   "swift",
+   "swift-1.5",
+   "abliterated",
+   "uncensored",
+   "nvfp4",
+   "w4a4",
+   "blackwell",
+   "multimodal",
+   "rtx-5090"
+  ]
+ },
+ {
+  "id": "SubconsciousDev/glm-5.3-dflash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "text-generation",
+   "base_model:zai-org/GLM-5.3",
+   "base_model:finetune:zai-org/GLM-5.3"
+  ]
+ },
+ {
+  "id": "incoai/Qwen3.8-Flash-Next-DFlash2-GGUF",
+  "tags": [
+   "llama.cpp",
+   "gguf",
+   "dflash2",
+   "speculative-decoding",
+   "draft-model",
+   "text-generation",
+   "base_model:Qwen/Qwen3.8-Flash-Next",
+   "base_model:quantized:Qwen/Qwen3.8-Flash-Next",
+   "license:apache-2.0",
+   "region:us",
+   "conversational"
+  ]
+ },
+ {
+  "id": "hotocooo/Qwen3.8-Flash-Next-Abliterated-Uncensored-Turbo-Brilliance-50x-Reasoning-Instruct-GSQ-RCO-DFlash",
+  "tags": [
+   "gguf",
+   "safetensors",
+   "dflash2",
+   "speculative-decoding",
+   "draft-model",
+   "strata",
+   "metal",
+   "text-generation",
+   "base_model:incoai/Qwen3.8-Flash-Next-DFlash2",
+   "base_model:finetune:incoai/Qwen3.8-Flash-Next-DFlash2",
+   "license:apache-2.0",
+   "region:us"
+  ]
+ },
+ {
+  "id": "nazeshinjite/Qwen3.8-Flash-Next-DFlash2-GGUF",
+  "tags": [
+   "gguf",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "llama.cpp",
+   "text-generation",
+   "base_model:incoai/Qwen3.8-Flash-Next-DFlash2",
+   "base_model:quantized:incoai/Qwen3.8-Flash-Next-DFlash2",
+   "license:apache-2.0",
+   "endpoints_compatible",
+   "region:us"
+  ]
+ },
+ {
+  "id": "SPK1337/Huihui-Qwen3.8-27B-Uncensored-GSQ-RCO-IQ3S-Vision-DFlash2-MTP-NInfer",
+  "tags": [
+   "ninfer",
+   "qwen3.8",
+   "qwen3.8-27b",
+   "huihui",
+   "uncensored",
+   "abliterated",
+   "ninfer-v3",
+   "gguf-blocks",
+   "gsq-rco",
+   "iq3_s",
+   "mixed-precision",
+   "vision"
+  ]
+ },
+ {
+  "id": "z-lab/Qwen3.6-27B-DFlash",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "feature-extraction",
+   "dflash",
+   "speculative-decoding",
+   "diffusion",
+   "efficiency",
+   "flash-decoding",
+   "qwen",
+   "diffusion-language-model",
+   "text-generation"
+  ]
+ },
+ {
+  "id": "z-lab/gemma-4-26B-A4B-it-DFlash",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "efficiency",
+   "qwen",
+   "gemma",
+   "diffusion-language-model",
+   "text-generation"
+  ]
+ },
+ {
+  "id": "williamliao/gemma-4-12B-it-DFlash-GGUF",
+  "tags": [
+   "llama.cpp",
+   "gguf",
+   "dflash",
+   "speculative-decoding",
+   "speculator",
+   "draft-model",
+   "gemma4",
+   "gemma",
+   "text-generation",
+   "base_model:z-lab/gemma4-12B-it-DFlash",
+   "base_model:quantized:z-lab/gemma4-12B-it-DFlash",
+   "license:apache-2.0"
+  ]
+ },
+ {
+  "id": "Lucebox/Laguna-XS-2.1-DFlash-GGUF",
+  "tags": [
+   "gguf",
+   "dflash",
+   "speculative-decoding",
+   "laguna",
+   "lucebox",
+   "base_model:poolside/Laguna-XS-2.1-DFlash",
+   "base_model:quantized:poolside/Laguna-XS-2.1-DFlash",
+   "license:openmdw-1.1",
+   "endpoints_compatible",
+   "region:us"
+  ]
+ },
+ {
+  "id": "poolside/Laguna-S-2.1-DFlash-NVFP4",
+  "tags": [
+   "speculators",
+   "safetensors",
+   "laguna",
+   "speculative-decoding",
+   "dflash",
+   "base_model:poolside/Laguna-S-2.1-NVFP4",
+   "base_model:finetune:poolside/Laguna-S-2.1-NVFP4",
+   "region:us"
+  ]
+ },
+ {
+  "id": "z-lab/Qwen3.8-27B-DFlash2-GGUF",
+  "tags": [
+   "llama.cpp",
+   "gguf",
+   "dflash2",
+   "speculative-decoding",
+   "draft-model",
+   "text-generation",
+   "base_model:Qwen/Qwen3.8-27B",
+   "base_model:quantized:Qwen/Qwen3.8-27B",
+   "license:apache-2.0",
+   "region:us",
+   "conversational"
+  ]
+ },
+ {
+  "id": "incoai/Qwen3.8-27B-DFlash2-GGUF",
+  "tags": [
+   "llama.cpp",
+   "gguf",
+   "dflash2",
+   "speculative-decoding",
+   "draft-model",
+   "text-generation",
+   "base_model:Qwen/Qwen3.8-27B",
+   "base_model:quantized:Qwen/Qwen3.8-27B",
+   "license:apache-2.0",
+   "region:us",
+   "conversational"
+  ]
+ },
+ {
+  "id": "lued/Qwen3.8-27B-INT8-W8A16-DFlash2",
+  "tags": [
+   "vllm",
+   "safetensors",
+   "qwen3_5",
+   "qwen3.8",
+   "compressed-tensors",
+   "w8a16",
+   "int8",
+   "quantized",
+   "dflash2",
+   "speculative-decoding",
+   "vision",
+   "conversational"
+  ]
+ },
+ {
+  "id": "cfontes/qwen3.8-27b-mlx-dflash2",
+  "tags": [
+   "mlx",
+   "speculative-decoding",
+   "qwen",
+   "apple-silicon",
+   "dflash2",
+   "license:mit",
+   "region:us"
+  ]
+ },
+ {
+  "id": "HermiHg/Qwen3.8-27B-DFlash2-Q2_K_S-MIX-GGUF",
+  "tags": [
+   "llama.cpp",
+   "gguf",
+   "dflash2",
+   "speculative-decoding",
+   "draft-model",
+   "mixed-precision",
+   "low-bit",
+   "memory-efficient",
+   "text-generation",
+   "base_model:incoai/Qwen3.8-27B-DFlash2",
+   "base_model:quantized:incoai/Qwen3.8-27B-DFlash2",
+   "license:apache-2.0"
+  ]
+ },
+ {
+  "id": "tcclaviger/Qwen3.8-27B-DFlash2-FP8",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "vllm",
+   "fp8",
+   "text-generation",
+   "base_model:z-lab/Qwen3.8-27B-DFlash2"
+  ]
+ },
+ {
+  "id": "jzinno/Ornith-1.5-35B-A3B-DFlash2",
+  "tags": [
+   "sglang",
+   "safetensors",
+   "qwen3",
+   "speculative-decoding",
+   "speculative-decoding-draft",
+   "dflash2",
+   "block-diffusion",
+   "draft-model",
+   "ornith",
+   "qwen",
+   "qwen3.5",
+   "arxiv:2602.06036"
+  ]
+ },
+ {
+  "id": "jfan/Qwen3.8-27B-heretic-dflash2",
+  "tags": [
+   "mlx",
+   "safetensors",
+   "qwen3",
+   "speculative-decoding",
+   "dflash",
+   "dflash2",
+   "mlx-vlm",
+   "qwen",
+   "llama",
+   "text-generation",
+   "en",
+   "zh"
+  ]
+ },
+ {
+  "id": "incoai/GLM-5.3-Flash-DFlash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "text-generation",
+   "base_model:zai-org/GLM-5.3-Flash",
+   "base_model:finetune:zai-org/GLM-5.3-Flash"
+  ]
+ },
+ {
+  "id": "gpillon/Qwen3.8-27B-nvfp4full-dflash2-NInfer",
+  "tags": [
+   "ninfer",
+   "ignis",
+   "qwen3.8",
+   "nvfp4",
+   "w4a4",
+   "blackwell",
+   "multimodal",
+   "conversational",
+   "cuda",
+   "rtx-5090",
+   "dflash2",
+   "speculative-decoding"
+  ]
+ },
+ {
+  "id": "cs-qyzhang/MiniCPM-o-4_5-tts-dflash",
+  "tags": [
+   "speculators",
+   "safetensors",
+   "speculative-decoding",
+   "dflash",
+   "draft-model",
+   "tts",
+   "minicpm-o-4.5",
+   "qwen3",
+   "codec",
+   "custom_code",
+   "base_model:openbmb/MiniCPM-o-4_5",
+   "base_model:finetune:openbmb/MiniCPM-o-4_5"
+  ]
+ },
+ {
+  "id": "Solstice-AI/GLM-5.3-Flash-UNCENSORED-NVFP4-DFlash2",
+  "tags": [
+   "Model Optimizer",
+   "safetensors",
+   "gguf",
+   "glm5_next",
+   "glm",
+   "glm5",
+   "glm-5.3-flash",
+   "vision",
+   "video",
+   "multimodal",
+   "modelopt",
+   "nvfp4"
+  ]
+ },
+ {
+  "id": "Solstice-AI/GLM-5.3-Flash-UNCENSORED-mlx-oQ4e-DFlash2",
+  "tags": [
+   "mlx",
+   "safetensors",
+   "gguf",
+   "glm5_next",
+   "solstice-ai",
+   "glm",
+   "glm5",
+   "glm-5.3-flash",
+   "oq4e",
+   "mixed-precision",
+   "apple-silicon",
+   "metal"
+  ]
+ },
+ {
+  "id": "DaoCloud/Ornith-1.5-35B-A3B-DFlash2-2.6B-A0.3B-NVFP4",
+  "tags": [
+   "safetensors",
+   "speculative-decoding",
+   "dflash2",
+   "draft-model",
+   "moe",
+   "speculators",
+   "vllm",
+   "nvfp4",
+   "base_model:ornith-ai/Ornith-1.5-35B-A3B",
+   "base_model:quantized:ornith-ai/Ornith-1.5-35B-A3B",
+   "license:apache-2.0",
+   "8-bit"
+  ]
+ },
+ {
+  "id": "Cobra91310/Ornith-1.5-35B-A3B-DFlash2-draft-GGUF",
+  "tags": [
+   "gguf",
+   "llama.cpp",
+   "speculative-decoding",
+   "dflash",
+   "dflash2",
+   "ornith",
+   "base_model:jzinno/Ornith-1.5-35B-A3B-DFlash2",
+   "base_model:quantized:jzinno/Ornith-1.5-35B-A3B-DFlash2",
+   "license:apache-2.0",
+   "endpoints_compatible",
+   "region:us",
+   "conversational"
+  ]
+ },
+ {
+  "id": "3ntr0py-t4m3r/Ornith-1.5-DFlash2-Draft-GGUF",
+  "tags": [
+   "llama.cpp",
+   "gguf",
+   "dflash",
+   "dflash2",
+   "speculative-decoding",
+   "draft-model",
+   "ornith-1.5-35b-a3b",
+   "base_model:z-lab/Qwen3.6-35B-A3B-DFlash",
+   "base_model:quantized:z-lab/Qwen3.6-35B-A3B-DFlash",
+   "license:apache-2.0",
+   "endpoints_compatible",
+   "region:us"
+  ]
+ },
+ {
+  "id": "incoai/Qwen3.6-35B-A3B-DFlash2",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash2",
+   "speculative-decoding",
+   "block-diffusion",
+   "draft-model",
+   "sglang",
+   "vllm",
+   "text-generation",
+   "base_model:Qwen/Qwen3.6-35B-A3B",
+   "base_model:finetune:Qwen/Qwen3.6-35B-A3B"
+  ]
+ },
+ {
+  "id": "ornith-ai/Ornith-1.5-35B-A3B-DFlash",
+  "tags": [
+   "safetensors",
+   "qwen3",
+   "dflash",
+   "speculative-decoding",
+   "speculative-decoding-draft",
+   "block-diffusion",
+   "draft-model",
+   "diffusion-language-model",
+   "efficiency",
+   "qwen",
+   "qwen3.5",
+   "sglang"
+  ]
+ },
+ {
+  "id": "kvnxiao/swift-1.5-qwen3.8-27b-orcarouter-dflash2-nvfp4-ninfer",
+  "tags": [
+   "ninfer",
+   "swift-1.5",
+   "qwen3_8",
+   "nvfp4",
+   "fp8",
+   "mtp",
+   "dflash2",
+   "speculative-decoding",
+   "uncensored",
+   "abliterated",
+   "text-generation",
+   "vision-language"
+  ]
+ },
+ {
+  "id": "na0x2c6/Ornith-1.5-35B-A3B-DFlash-GGUF",
+  "tags": [
+   "gguf",
+   "llama.cpp",
+   "dflash",
+   "speculative-decoding",
+   "base_model:ornith-ai/Ornith-1.5-35B-A3B-DFlash",
+   "base_model:quantized:ornith-ai/Ornith-1.5-35B-A3B-DFlash",
+   "license:mit",
+   "endpoints_compatible",
+   "region:us",
+   "conversational"
+  ]
+ },
+ {
+  "id": "abenzerps/Ornith-1.5-9B-DFlash-GGUF",
+  "tags": [
+   "gguf",
+   "text-generation",
+   "dflash",
+   "speculative-decoding",
+   "draft-model",
+   "block-diffusion",
+   "llama.cpp",
+   "quantized",
+   "reasoning",
+   "ornith",
+   "en",
+   "base_model:ornith-ai/Ornith-1.5-9B-GGUF"
+  ]
+ },
+ {
+  "id": "AEON-7/AEON-DFlash2-Qwen3.8-27B",
+  "tags": [
+   "transformers",
+   "safetensors",
+   "qwen3",
+   "dflash",
+   "dflash2",
+   "speculative-decoding",
+   "draft-model",
+   "nvfp4",
+   "vllm",
+   "dgx-spark",
+   "gb10",
+   "blackwell"
+  ]
+ }
+]

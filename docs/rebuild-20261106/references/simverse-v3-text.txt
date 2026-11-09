@@ -1,0 +1,396 @@
+simverse 统一推理仿真仓库重构方案 v3.0（含原理底座与四联动工作台原型） 
+simverse v3.0 
+
+统一推理仿真仓库重构方案与原理底座 
+model-verse × pi-viewer 融合重构 · Codex 初审 + Gemini 终审修订版 
+1 · 评审报告与 v3.0 修订总览 必读 2 · 统一重构方案 v3.0 主方案 3 · 仿真原理与机制底座 v2.0 机制还原 4 · 一屏四联动工作台原型 可交互沙盒 
+
+
+
+对 ZCode + Codex 两份方案 HTML 的深度评审与 v3.0 修订说明 
+评审基线：《重构方案_新仿真仓库.html (v2.1)》 + 《仿真原理_当前机制抽象.html (v1.0)》 · 结合用户 6 大核心诉求逐项核查 
+保留优势：五层一管线 · 三段流水抽象 · RecipeSpec 显式化 · Codex 15 项修订全部继承 本次新增修复：3 项 P0 机制漏洞 + 3 项 P1 架构/交互断层 + 单文件四合一交付 
+1 · 总体评价：原方案（v2.1 + 原理 v1.0）做对了什么？ 
+
+
+优势 1 · 病因诊断极准 
+《仿真原理》用 Count（整数算术）→ Cost（物理近似）→ Execute（组合器） 三段流水 + 统一改写器表 ，一针见血解释了为什么两个旧仓“模式太多、功能太乱”：不是功能本质复杂，而是同一条三段流水在后端分析器、 structure_ir 、前端 spec_gain_model.js 和 4 个管线仿真器里被重复写了 6 份以上。 
+
+优势 2 · 工程纪律严密 
+经过 Codex 第一轮评审后，v2.1 已补齐了 公式单一维护点（前端零物理计算） 、 三层独立验证（手算 oracle / 旧仓对账 / 解析×事件交叉） 、 vLLM V1 单步语义收窄 、 CUDA Graph 三态建模 以及 RecipeSpec（vllm-cuda / vllm-ascend） 分层。 
+
+优势 3 · 迁移锚点扎实 
+明确了首发模型 DeepSeek V4.1 Flash + 自定义草稿模型 ，锁死了 v1 投机方法集（MTP / DSpark / DFlash / DFlash2 / 自定义草稿），并把 127k 行的 vendored Frontier 隔离在默认迁移范围之外，避免了新仓起步即背负巨石。 
+2 · 本次评审发现的 6 个关键问题（Codex 第一轮漏检或修订后新引入的矛盾） 
+对照你的核心诉求（主模型+自定义草稿、输入输出长度与 α/τ、异构 DT 分离与服务化加速比、推理时间轴、逐算子 7 维透视、对齐 vLLM 且界面合理整合不拆散），原两份 HTML 仍存在 3 个 P0 级物理/契约矛盾 和 3 个 P1 级架构/界面整合缺陷 ： 
+编号 / 级别 原方案（v2.1 / 原理 v1.0）中的问题 为什么会造成严重后果（技术根因） v3.0 修订方案（已落实到本 HTML） 
+G-P0-1 块并行草稿与链式参数矛盾 §4.1 接受模型仅按单参数 $\gamma$ 定义链式公式 $E[n]=\sum_{i=0}^\gamma \alpha^i$；而 §4.2/D-6 纳入了并行块方法 DFlash （iters=2）和 DFlash2 （block=8, iters=1）。 用同一个 $\gamma$ 既代表“草稿串行前向步数”又代表“验证候选数”，会导致 DFlash2 被错算成 8 次串行草稿 decode（时延高估约 7 倍） ，或者草稿单步 GEMM 的 $M$ 被错算成 $1$ 而非块大小 $8$！ 在 SpecMethod 与 IterationTemplate 中解耦三个正交参数： 1. propose_steps ($S_{draft}$，草稿串行步数) 2. draft_step_tokens ($M_{draft}$，每步并行生成数) 3. verify_tokens ($K$，目标验证候选数) 链式方法 $(S=\gamma, M=1, K=\gamma)$；DFlash2 $(S=1, M=8, K=8)$；DFlash $(S=2, M=B, K=B)$。 
+G-P0-2 验证回退与下一轮 Bonus Catch-up 漏算 §4.2/§4.5 提到“接受/回退”，但未定义 $n < K+1$ 时的 KV 回退成本，更漏掉了 下一轮草稿首步如何消化上一轮目标产出的 bonus token 。 在 vLLM V1 SpecDecode 中，当目标验证接受了 $n$ 个 token（含 1 个目标采样出的 bonus token），草稿模型上一轮并未算过该 bonus token 的 KV（若 $n=K+1$，草稿连第 $K$ 个草稿 token 的 KV 也没写！）。因此 下一轮草稿第 1 步的输入 token 数是 $M_{draft,0}=2$（而非 1） ，且在 DT 分离下目标必须向草稿回传 $(n, \text{bonus\_id}, \text{hidden}[1..n])$！ 新增 RoundTransitionSpec （轮次边界状态转换契约） ： 1. 目标侧写 $K+1$ 槽位 KV，拒绝槽位 $(K+1-n)$ 执行 Paged KV 逻辑指针回退； 2. 下一轮草稿首步显式计入 catchup_tokens = 2 （链式）的算子与 KV 写账本； 3. DT 通信双向化：不仅计 draft→target 候选消息，还计 target→draft 验证结果与 bonus/hidden 回传消息。 
+G-P0-3 异构 DT 分离的 Recipe 单一化与流水线悖论 ① §4.9/§4.10 将 RecipeSpec 定为全局唯一字段； ② §2 将“④ DT 分离流水线（草稿轮与验证轮重叠）”放入 M2 单请求解析矩阵。 ① 异构 DT 分离 下（如主模型在 H200 跑 vllm-cuda FP8 FlashMLA ，草稿在 L40S 或昇腾 910B 跑 BF16 FA / vllm-ascend ），主模型和草稿模型的设备与 Recipe 根本不同，全局单一 RecipeSpec 无法表达！ ② 单请求下第 $t+1$ 轮草稿依赖第 $t$ 轮验证结果，若强行重叠必有 分支猜错冲刷率 $(1-\beta)$ ；只有 跨微批（Micro-batch $B\ge 2$）交错流水 才能无损重叠。 ① 将 DeviceSpec + ParallelPlan + RecipeSpec 绑定到每个 RoleBinding （target / draft / prefill / decode） ，支持跨卡型、跨精度、跨引擎异构 DT； ② 将 DT 流水线拆分为两个显式模式： dt_pipe_microbatch （双微批交错无损重叠）与 dt_pipe_speculative （单请求超前投机，带分支命中率 $\beta$ 与冲刷惩罚）。 
+G-P1-1 首发模型 DeepSeek V4.1 Flash 验证步的 MoE 与稀疏 KV 非线性放大遗漏 《仿真原理》§5 写“verify 一次 M=5 的大前向，权重读不变”；《重构方案》§4.2 仅给 DSpark 标注“仅 MoE 草稿随批量放大”。 首发主模型 DeepSeek V4.1 Flash 本身就是 MoE + CSA2 稀疏注意力模型！ 当 verify 一次输入 $K+1$ 个 token 时： ① 主模型 MoE 层的路由专家并集随 $M_{eff}=B(K+1)$ 按超几何分布显著放大， 主模型权重读取绝非不变 ； ② CSA2 稀疏注意力（topk=512+swa=128）在 $K+1$ 个连续查询 token 上既有前缀共享收益，又有稀疏块并集扩散系数 $\eta_{sparse} \in [1, K+1]$。 在 L1 cost_kernel 中将 MoE 专家并集函数 $U(M_{\text{tokens}}, E_{\text{total}}, k_{\text{top}})$ 与 Verify 共享前缀 / 稀疏块并集系数 $\eta_{\text{sparse}}(K+1)$ 提升为主模型与草稿模型通用的第一性公式，不再局限于 DSpark 草稿。 
+G-P1-2 界面“形合神离”：工作台与对比页被再次拆开 §4.7 设计了“工作台（结构+算子+时间轴）”，却又把“加速比矩阵、K与γ扫描、方法对比”拆到独立的 “对比页” 。 这直接违背了你提出的 “界面上尽量把这几个功能合理的整合起来，而不是为了方便，把所有功能完全拆开” ！如果看加速比矩阵在 A 页、看时间轴和算子 roofline 在 B 页，用户在分析“为什么异构 DT 在 $\gamma=6$ 时加速比拐头”时就必须来回切页。 重构为真正的 “一屏四联动工作台（Single-Canvas 4-Way Workbench）” ： 1. 左上面板 即为【加速比矩阵与扫描导航器】； 2. 点击矩阵任意格 $\rightarrow$ 同屏联动刷新【右上：逐层网络结构 DAG】、【右下：算子 7 维透视卡 + 交互式 Roofline】、【底部：主/草稿/通信双轨时间轴】； 3. 支持 “钉住基线（Pin Baseline）” ：同屏所有视图同时显示当前方案相对基线的 $\Delta\text{ms}$ 与加速比拆解（见 Tab 4 交互原型）。 
+G-P1-3 两份 HTML 拆分交付、层级命名漂移与本地死链 分成两个 HTML 文件并用相对路径互链；且《重构方案》称 lowering 在 L0 内，而《仿真原理》§6 称作 L0.5 lowering 。 在单文件预览器 / Canvas 中点击本地链接直接报错；两份文档对架构层级的称呼出现漂移，不利于作为 M0 冻结契约直接落地。 合二为一交付本 v3.0 全自包含单文件 HTML ，内置四大视图 Tab，统一固定为 L0a（数学结构 ModelIR）+ L0b（RecipeLowering → OpGraph） 的五层架构命名。 
+3 · 你的六大核心诉求在 v3.0 中的闭环映射 
+你的核心诉求 v3.0 架构落点与机制保障 对应章节 / 原型入口 
+① 主模型 + 自定义草稿模型 + ISL/OSL + α 或 τ 主模型（首发 DeepSeek V4.1 Flash）与自定义草稿走统一 ModelIR 导入通道；支持 $\alpha$（链式条件接受率）、$\tau$（平均接受长度，含 includes_bonus 开关）与经验分布 committed_hist 三种互斥输入；解耦 $(S_{\text{draft}}, M_{\text{draft}}, K)$ 兼容链式与并行块草稿。 Tab 2 §4.1, §4.2 Tab 4 顶部配置栏 
+② 不同部署方式（含异构 DT 分离）× 不同服务化特性加速比 DeploymentSpec 按角色绑定异构设备组与 RecipeSpec （如 H200 TP8 + L40S TP1），覆盖 7 种部署拓扑 × 服务化特性（Chunked Prefill、Prefix Cache、CUDA Graph、分层 KV），一键产出加速比矩阵并支持钉住基线对比。 Tab 2 §4.4, §4.6 Tab 4 左上【加速比矩阵】 
+③ 观察不同模型推理的时间轴 双档时间轴：迭代级 Gantt（Target 轨道 + Draft 轨道 + DT 链路传输轨道 + 接受/回退/Bonus Catch-up 高亮）与请求级 Serving 时间轴；点击任意时间轴切片直接高亮对应网络层与算子，支持导出 Perfetto / Chrome Trace。 Tab 2 §4.5, §4.7 Tab 4 底部【多轨时间轴】 
+④ 可视化网络结构 + 逐计算单元 7 维透视 mv_model_structure 产出数学层图，经 lowering(ModelIR, RecipeSpec) 生成 OpGraph ；点选任意算子即可查看： ① 理论时延 ② 计算量 (FLOPs) ③ 显存占用 ④ 五类访存字节 ⑤ 激活张量形状 ⑥ 符号公式与溯源 ID ⑦ 交互式 Roofline 坐标图 。 Tab 2 §4.3, §4.10 Tab 4 中/右面板 
+⑤ 与 vLLM 推理过程一致 + 零冗余 对齐 vLLM V1 单步调度输出 → 模型执行 → 采样 → KV 状态转换；全仓物理公式唯一维护点在 L1/L3，前端零物理计算（CI 扫描阻断）；解析核与事件核共享同一 L1 算子计价函数。 Tab 2 §4.8, §7 Tab 3 §2, §6 
+⑥ 界面合理整合而非拆散 废除旧仓 6 Tab + 3 管线工作区，也修正了 v2.1 把“对比矩阵”与“工作台”拆成两页的做法，采用 一屏四联动工作台 （矩阵选方案 ↔ 结构图看拓扑 ↔ 详情卡看 7 维指标与 Roofline ↔ 时间轴看重叠）。 Tab 2 §4.7 Tab 4 完整可交互原型 
+
+
+重构方案 v3.0 目录 0 · 摘要与核心结论 1 · 现状诊断：为何必须重构 2 · 目标场景（北极星）与非目标 3 · 总体架构与六大契约 4 · 核心设计（D1–D8） 4.1 术语与接受率/块参数口径 [v3修订] 4.2 D1 结构层与 SpecMethod [v3修订] 4.3 D2 统一成本核与 MoE/稀疏定律 [v3修订] 4.4 D3 部署层与异构 DT 分离 [v3修订] 4.5 D4 执行层：模板+状态机+轮次转换 [v3修订] 4.6 D5 服务层：特性、参数与 CUDA Graph 4.7 D6 呈现层：一屏四联动工作台 [v3重构] 4.8 D7 vLLM 对齐清单 4.9 RunResult 可复现契约 4.10 D8 角色级 Recipe 与算子降级 [v3修订] 5 · 新仓代码组织 6 · 资产迁移清单与许可证隔离 7 · 防冗余工程规则（CI 门禁） 8 · 里程碑与可测验收口径 9 · 风险与应对策略 10 · 决策记录（D-1 ~ D-8） 附录A · Codex + Gemini 评审闭环表 附录B · 证据索引 
+
+统一推理仿真仓库重构方案 simverse v3.0 
+基于 model-verse 与 pi-viewer 两仓代码还原 · 融合 Codex 初审（15 项）与 Gemini 终审（6 项架构/物理/交互修订） · 用户拍板决策已全部回填 
+首发主线：DeepSeek V4.1 Flash + 自定义草稿 / MTP / DSpark / DFlash / DFlash2 技术栈：Python (mv_model_structure + Flask-Smorest) + Vue3 一屏四联动工作台 v3.0 亮点：链/块统一投机契约 · 轮次 Bonus Catch-up · 角色级异构 Recipe · MoE/稀疏 KV 并集定律 
+0 · 摘要与核心结论 
+
+一句话目标： 新建统一仿真仓 simverse ——给定 主模型 + 自定义草稿模型（或内置投机方法） 、输入/输出长度（ISL/OSL）、 接受率 $\alpha$ 或平均接受长度 $\tau$ ，一次配置即可在同一工作台内同时获得：不同 部署方式（含跨卡型/跨引擎异构 DT 分离、DT 微批/超前流水线、PD 分离）× 服务化特性 下的 加速比矩阵 、 主模型与草稿模型双轨推理时间轴 ，以及 网络结构 DAG 与每个计算单元的 7 维透视（理论时延 / 计算量 / 显存 / 访存 / 激活 / 公式 / Roofline） ；底层执行语义严格对齐 vLLM V1，全仓物理公式单一维护点，前端零物理计算。 
+核心架构决策 设计内容（v3.0 定稿） 彻底根除的旧仓顽疾 
+五层一管线 L0 结构与降级 (L0a ModelIR + L0b RecipeLowering) → L1 统一成本核 → L2 部署层 → L3 执行层 → L4 服务层 → L5 四联动呈现层 ；所有图表均为同一 RunResult 的视图投影。 6 个前端 Tab + 3 个管线独占视图 + 19 条路由的模式爆炸 
+公式单一维护点 Roofline、五类访存字节、MoE 专家并集、稀疏 KV 并集、通信原语、接受率转换全部收敛至后端 L1/L3 并带公式溯源 ID；前端仅做状态联动与渲染。 3 套 Roofline 引擎、前端 spec_gain_model.js 自算 467 行物理公式且与后端对不上 
+链/块统一投机契约 + 轮次状态转换 SpecMethod 解耦 $(S_{\text{draft}}, M_{\text{draft}}, K)$ 兼容自回归链（MTP/DSpark/自定义）与并行块（DFlash/DFlash2）； RoundTransitionSpec 显式建模拒绝槽位 KV 回退、Bonus Token 下一轮首步 Catch-up（$M_{\text{draft},0}=2$）及 DT 双向消息。 并行块草稿被错算为串行步、DT 分离漏算目标向草稿回传与首步双 token 开销 
+角色级 Recipe 与异构 DT DeploymentSpec 为每个角色（ target / draft / prefill / decode ）独立绑定 DeviceSpec + ParallelPlan + RecipeSpec ，原生支持 H200(FP8 FlashMLA) + L40S/910B(BF16/Ascend) 等异构 DT 组合。 昇腾/GPU 口径混写、全局单一 Recipe 无法表达异构 DT 分离 
+一屏四联动工作台 废除“工作台”与“对比页”的割裂，将 【加速比矩阵】、【网络结构 DAG】、【算子 7 维详情与 Roofline】、【多轨时间轴】 整合在同一画布，支持钉住基线（Delta 对比模式）。 看加速比、看结构算子、看时间轴要在多个孤立页面间反复跳转 
+1 · 现状诊断：为什么必须重构 
+1.1 两仓能力与冗余对照矩阵 
+能力维度 model-verse（~19k Py + 7.6k 前端） pi-viewer（Frontier 127k + 自研 5.9k Py + 2.4k 前端） 核心症结 
+逐算子 Roofline model_analyzer.py (1496行) + roofline_model.py piviewer/roofline.py (834行，自 llmviewer 移植) 同源公式双份维护 
+平行/前端物理核 structure_ir.py 平行计算（曾出 48 层累加 bug）；前端 spec_gain_model.js (467行) 独立重算全套投机与 Roofline 前端 RooflinePanel.vue 重复实现 $\tau$ 公式 前后端双口径、数字不互换 
+DT 分离仿真 dt_sim.py 事件推进，但每步算子耗时“由前端 JS 传入” 不支持 DT 分离（仅有单机 / PD 分离 / AFD 分离） 前后端拼接，缺少统一底座 
+Serving 调度 serving_sim/ (2434行，inferflux 移植，含 CC BY-NC 风险) vendored Frontier（127k 行 Vidur 系重型 DES） 两套孤立重引擎 
+模型与硬件定义 configs/*.py + model_params/* ； hardware_params.py + npu_params.py data/config/models/*.json ； devices.py + profiling CSV 双轨制、GPU/NPU 口径割裂 
+结构解析与契约 mv_model_structure/ (450行，已发 wheel 0.2.0) + source_audit.py FeatureSpec 注册表 + Scenario 存档 + OpenAPI 快照冻结 两仓精华，合并为新仓底座 
+2 · 目标场景（北极星）与非目标 
+
+NS-1 · 投机解码部署选型与加速比分析（第一优先级北极星） 
+输入： 主模型（首发 DeepSeek V4.1 Flash ）+ 自定义草稿模型 （通过 HF config JSON 或参数直接构建）或内置方法预设（ MTP / DSpark / DFlash / DFlash2 ）；输入/输出长度（ISL / OSL）；接受率 $\alpha$、平均接受长度 $\tau$ 或经验分布；角色级设备与并行配置；部署方式矩阵 × 服务化特性矩阵。 
+7 种标准部署模式： ① 无投机基线（Target Baseline） ② 同卡混部串行（Co-located Serial） ③ DT 分离串行（独立设备组，计入双向链路传输） ④ DT 分离微批流水线（ dt_pipe_microbatch ，双微批无损重叠） ⑤ DT 分离超前投机流水线（ dt_pipe_speculative ，单请求超前投机+冲刷惩罚） ⑥ 异构 DT 分离（Target 与 Draft 采用不同代 GPU/NPU、不同并行度与不同 Recipe） ⑦ PD 分离 ± DT 投机。 
+输出： 加速比与吞吐/时延矩阵（相对显式选定的基线格），支持一键下钻到同一屏幕的 多轨时间轴 与 逐算子 7 维透视面板 。 
+
+
+NS-2 · 网络结构可视化与算子 7 维透视 
+逐层展示主模型与草稿模型网络结构 DAG（含 MLA/CSA2、MoE 路由与共享专家、CED 半层、MTP/Block 草稿头）。点击任意计算单元或通信节点，右侧立即呈现： ① 理论时延 ② FLOPs ③ 显存占用（权重/KV/激活） ④ 五类访存字节 ⑤ 激活形状 ⑥ 符号公式与溯源 ID ⑦ 交互式 Roofline 散点与拐点图 。 
+
+NS-3 · 多轨推理时间轴与 vLLM Serving 演进 
+同屏展示 Target 轨道、Draft 轨道、DT/TP 通信轨道及 Verify 接受/回退/Bonus Catch-up 事件；支持切换“单轮投机迭代视图”与“多请求 Serving 视图”（连续批处理、Chunked Prefill、Prefix Cache），并一键导出 Chrome Trace / Perfetto JSON。 
+
+v1 明确非目标（防范围蔓延） 
+CF++ 视频生成链、世界模型、RL rollout、多模态输入，以及 EAGLE / Medusa / ngram / jetspecpp 四种投机方法（决策 D-6）不在 v1 范围；pi-viewer 中 127k 行的 vendored Frontier 默认不迁入新仓主干。 
+3 · 总体架构与六大核心契约（五层一管线） 
+
+
+L5 · 一屏四联动呈现层（Single-Canvas Integrated Workbench） 
+顶部场景控制栏 + 7 项 KPI 摘要条 ｜ 左上：部署×特性加速比矩阵（支持 Pin Baseline 差值模式） ｜ 中：主/草稿网络结构 DAG ｜ 右：算子 7 维详情卡 + 交互式 Roofline ｜ 底：Target/Draft/Comm 多轨时间轴 —— 共享同一份 RunResult 状态 
+▲ 消费唯一结果契约 RunResult （或 SweepManifest 引用集），前端零物理公式 
+
+
+L4 · 服务层 (Serving) 
+请求到达过程、vLLM V1 预算调度状态机、Paged KV 块分配/前缀共享/抢占、 FeatureSpec 特性与参数注册表 
+
+L3 · 执行层 (Execution) 
+静态迭代模板（解析求值，供矩阵毫秒级扫描）+ 动态事件状态机（供时间轴与流水线竞争）+ RoundTransitionSpec （回退与 Bonus Catch-up） 
+
+L2 · 部署层 (Deployment) 
+DeploymentSpec ：按角色（target/draft/prefill/decode）独立绑定异构设备组、并行切分（TP/PP/EP/DP）、角色级 Recipe 与互联链路资源 
+▲ 调用统一计价接口 evaluate_op(OpNode, RoleBinding, WorkloadShape) → OpCostRecord 
+
+L1 · 统一成本核（Cost Kernel —— 全仓唯一物理公式维护点） 
+六类精确计数（FLOPs + 五类字节）· MoE 专家并集函数 $U(M_{\text{eff}})$ · 稀疏/共享前缀 KV 系数 $\eta_{\text{sparse}}$ · 分层 KV Roofline (HBM/DRAM/SSD) · 显存账本 · 集合/点对点通信原语 · T0 公式估算与 T1 拟合系数校准 · 公式溯源 FormulaProvenance 
+▲ 输入降级后的角色算子图 OpGraph 
+
+
+L0a · 数学结构层 (Mathematical ModelIR) 
+mv_model_structure 唯一入口 + 架构适配器（DeepSeek V4.1 Flash / Qwen3 / GDN / H3…）+ SpecMethod 注册表（MTP / DSpark / DFlash / DFlash2 / 自定义草稿） 
+
+L0b · 引擎方案降级层 (Recipe & Lowering) 
+lowering(ModelIR, RecipeSpec) → OpGraph ：按引擎包（ vllm-cuda / vllm-ascend ）执行算子融合、MLA 吸收变换、量化 Kernel 映射与 source_audit 源码核对 
+4 · 核心设计（D1–D8 详述） 
+4.1 术语表、链/块正交参数与接受率口径 Codex P0-3 Gemini G-P0-1 修订 
+为同时精确刻画 自回归链式草稿（自定义小模型 / MTP / DSpark） 与 并行块草稿（DFlash / DFlash2） ，v3.0 将草稿提议参数解耦为三个正交字段，严禁用单一 $\gamma$ 混代： 
+参数 / 术语 符号与物理定义 自回归链（MTP / DSpark / 自定义） 并行块（DFlash / DFlash2） 
+propose_steps $S_{\text{draft}}$：每轮投机中草稿模型 串行前向调用的步数 （决定 launch 次数与权重重复读取次数） $S_{\text{draft}} = \gamma$（例如 $\gamma=4$ 则串行跑 4 步） DFlash2：$S_{\text{draft}} = 1$ DFlash：$S_{\text{draft}} = 2$（2 轮块迭代） 
+draft_step_tokens $M_{\text{draft}}$：草稿每次前向处理的 活跃查询 token 数 （注意第 0 步需加 Bonus Catch-up，见 §4.5） 第 0 步 $M_{\text{draft},0}=2$（含上一轮 bonus），后续步 $M_{\text{draft},s}=1$ $M_{\text{draft}} = B_{\text{blk}}$（如 DFlash2 为 $8$，一次并行产出 8 个位置） 
+verify_tokens $K$：目标模型单次验证的候选草稿 token 数； 目标模型验证前向的实际输入 token 数为 $M_{\text{verify}} = K + 1$ （含上一步已确认的末位/bonus token） $K = \gamma$，目标验证输入长度 $M_{\text{verify}} = \gamma + 1$ $K = B_{\text{blk}}$（如 8），目标验证输入长度 $M_{\text{verify}} = B_{\text{blk}} + 1 = 9$ 
+提交长度 $n$ 一轮验证后实际提交写回的 token 总数 = 接受草稿数 $a \in [0, K]$ + 1 个目标采样 Bonus Token ，故 $n = a + 1 \in [1, K+1]$ 统一适用：$n=1$ 代表草稿全拒（仅产出 1 个目标 bonus token）；$n=K+1$ 代表草稿全接受并额外获赠 1 个 bonus token。 
+接受率三选一互斥输入契约（优先级： committed_hist > chain_alpha > committed_mean ） 
+输入模式字段 数学换算与物理语义 适用方法与边界校验 
+chain_alpha: float ($\alpha$) 逐位条件接受率 $\alpha \in [0, 1]$，期望提交长度（已含 bonus）： $E[n] = \sum_{i=0}^{K} \alpha^i = \frac{1 - \alpha^{K+1}}{1 - \alpha}$（当 $\alpha=1$ 时 $E[n]=K+1$；当 $\alpha=0$ 时 $E[n]=1$） 默认用于链式方法；若用于 DFlash/DFlash2，表示块内前缀等效逐位条件接受率，UI 显式提示建议优先使用 $\tau$ 或分布。 
+committed_mean: float ($\tau$) + includes_bonus: bool 直接给定每轮平均长度 $\tau$。若 includes_bonus=true ，则 $E[n] = \tau \in [1, K+1]$；若 includes_bonus=false （仅计接受草稿数），则自动换算 $E[n] = \min(\tau + 1, K + 1)$。 链式与并行块方法均适用；事件模式下采用 $[1, K+1]$ 上的 截断几何分布 反解参数采样，并在结果标注 assumption: truncated_geometric 。 
+committed_hist: list[float] 经验概率分布 $[P(n=1), P(n=2), \dots, P(n=K+1)]$，$\sum P = 1$。解析模式取期望 $E[n] = \sum_{i=1}^{K+1} i \cdot P(n=i)$，事件模式按分布精确抽样。 最高优先级，支持实测日志回放与非独立同分布位置接受率。 
+4.2 D1 · 结构层：唯一层图入口 + SpecMethod 八字段注册表 Codex P0-2 Gemini G-P0-1/2 修订 
+方法键名 Proposer 结构 $(S_{\text{draft}}, M_{\text{draft}}, K)$ 首步 Catch-up Hidden 依赖 草稿 KV 归属 DT 双向通信消息（每轮） 成本特殊钩子 
+custom_draft （自定义自回归草稿） 独立草稿 ModelIR （HF JSON 或自定义层数/维度） $(\gamma, 1, \gamma)$ Step 0 输入 2 tokens（末位接受 + bonus） 无（仅需 token ID） 草稿侧独立维护 D→T: $\gamma$ token IDs (+可选 logits) T→D: 接受数 $n$ + bonus ID 若草稿为 MoE 则启用草稿 $U(M)$；KV 随回退指针回滚 
+mtp （目标内置微头） 目标共享 Embedding/LM Head + 1~k 层轻量 MTP 层（默认 0.09B/层） $(\gamma, 1, \gamma)$ Step 0 消费目标上轮输出的 accepted hidden 强依赖 ：需目标最后一层 hidden states MTP 层独立小 KV 同卡：零跨机传输 DT 分离：T→D 需传 $n \times d_{\text{model}}$ hidden 张量 共享主模型 LM Head 权重（同卡免重复驻留，DT 分离需复制一份 LM Head） 
+dspark （MoE 自回归草稿） 独立 MoE 草稿 ModelIR （默认 4.53B 激活口径 / 1.2B 轻量口径可选） $(\gamma, 1, \gamma)$ Step 0 输入 2 tokens 无 草稿侧独立维护 D→T: $\gamma$ token IDs T→D: $n$ + bonus ID 草稿 MoE 专家并集放大 （Step 0 因 $M=2$ 激活专家数高于 Step $1..\gamma-1$） 
+dflash （Dense 并行块×2轮） 独立 Dense 外挂块模型（2 轮迭代精炼整块） $(2, B_{\text{blk}}, B_{\text{blk}})$ 块内自包含前缀对齐 可选目标浅层特征或纯 token 块 草稿侧块级 KV D→T: $B_{\text{blk}}$ token IDs T→D: $n$ + bonus ID 每次前向 $M=B_{\text{blk}}$（GEMM 权重读仅 2 次，而非 $B_{\text{blk}}$ 次！） 
+dflash2 （Dense 并行块×1轮） 独立 Dense 外挂块模型（默认 2.0B，单步并行出 8 tokens） $(1, 8, 8)$ 单步并入 bonus 锚点（$M=9$） 无 草稿侧块级 KV D→T: 8 token IDs T→D: $n$ + bonus ID 单轮仅 1 次草稿前向（$M=9$） ，极致摊薄草稿权重访存与 launch 开销 
+4.3 D2 · 统一成本核：六类计数 + MoE 专家并集与稀疏 KV 定律 Gemini G-P1-1 新增 
+L1 cost_kernel 是全仓唯一的物理公式实现层。除标准 Dense GEMM（$\text{FLOPs}=2MNK$）与五类字节账本（权重读 / 激活读 / 激活写 / KV 读 / KV 写）外，针对首发模型 DeepSeek V4.1 Flash 及 MoE 草稿，强制内置以下两条非线性物理定律： 
+
+
+定律 1 · 主模型与草稿通用 MoE 专家并集扩散系数 $U(M_{\text{eff}})$ 
+无论是主模型（如 DeepSeek V4.1 Flash 的 MoE 层）在执行 $M_{\text{verify}} = B \times (K+1)$ 的验证前向，还是 MoE 草稿（DSpark）在执行 $M_{\text{draft}}$ 前向， MoE 路由专家的权重读取量绝不等于单 token 常量 ，而是取决于 $M_{\text{eff}}$ 个 token 命中的去重专家并集期望数： 
+E[U(M_eff)] = E_routed × [ 1 - C(E_routed - k_top, M_eff) / C(E_routed, M_eff) ] Weight_Read_MoE(M_eff) = Weight_Shared + E[U(M_eff)] × Weight_Single_Expert 
+注：支持传入实测偏置系数 $\rho_{\text{skew}} \in (0,1]$ 修正非均匀热门专家分布。这直接决定了投机验证步 $K$ 增大时的真实带宽成本拐点。 
+
+定律 2 · 验证步共享前缀 KV 读取与 CSA2 稀疏块并集系数 $\eta_{\text{sparse}}(K+1)$ 
+目标模型一次验证 $K+1$ 个候选 token（上下文长度 $L_{\text{ctx}}$）时： 
+全注意力 / 标准 MLA 吸收层 ：由于 FlashMLA / PagedAttention 将同一序列的 $K+1$ 个查询打包进同一 CTA Tile，历史前缀 $L_{\text{ctx}}$ 的 KV 缓存 只从 HBM 读取 1 次 （外加 $K+1$ 个新候选自身的因果写入与读取），即 $\eta_{\text{dense}} = 1$； 
+CSA2 稀疏注意力层（DeepSeek V4.1 Flash： topk=512, swa=128 ） ：$K+1$ 个候选 token 各自检索 top-k 历史块，其读取的去重稀疏块并集为 $L_{\text{read}}(K+1) = \text{swa} + \eta_{\text{sparse}}(K+1) \cdot \text{topk}$，其中 $\eta_{\text{sparse}}(K+1) = 1 + \lambda_{\text{div}} \cdot K$（默认局部相关性系数 $\lambda_{\text{div}}=0.15$，可配置/校准）。 
+4.4 D3 · 部署层：角色级异构绑定（Heterogeneous RoleBinding）与 DT 流水线双模式 Gemini G-P0-3 修订 DeploymentSpec {
+  topology_mode: "no_spec" | "colocated_serial" | "dt_serial"
+               | "dt_pipe_microbatch" | "dt_pipe_speculative" | "pd_disagg",
+  roles: {
+    target:  RoleBinding { device: DeviceSpec, count: int, parallel: {tp, pp, ep, dp}, recipe: RecipeSpec },
+    draft:   RoleBinding { device: DeviceSpec, count: int, parallel: {tp, pp, ep, dp}, recipe: RecipeSpec } | null,
+    prefill: RoleBinding { ... } | null,
+    decode:  RoleBinding { ... } | null
+  },
+  links: {
+    target_intra: LinkSpec,  // 如 NVLink 900 GB/s
+    draft_intra:  LinkSpec,  // 如 PCIe 64 GB/s 或 HCCS
+    dt_inter:     LinkSpec,  // Draft ↔ Target 跨机/跨卡链路（RDMA / PCIe / NVLink）
+    pd_inter:     LinkSpec
+  },
+  pipeline_policy: {
+    microbatches: 2,         // dt_pipe_microbatch 模式下交错的微批数
+    branch_hit_rate: 0.85    // dt_pipe_speculative 单请求超前投机的分支命中率 β
+  }
+} 
+为什么这能优雅解决异构 DT 分离 ：当主模型部署在 8×H200 (TP8, vllm-cuda, FP8/FP4) 、草稿模型部署在 1×L40S (TP1, vllm-cuda, BF16) 或 1×Ascend 910B (TP1, vllm-ascend) 时，L1 对主模型算子调用 roles.target 的硬件与 Recipe 计价，对草稿算子调用 roles.draft 计价，跨角色传输调用 links.dt_inter 计价—— 无需写任何特殊分支代码 。 
+单轮耗时闭式公式对比（解析核 L3） ： 
+同卡串行 / DT 串行 ：$T_{\text{round}} = T_{\text{draft}}(S_{\text{draft}}) + T_{\text{comm, D}\to\text{T}} + T_{\text{verify}}(K+1) + T_{\text{comm, T}\to\text{D}}$ 
+DT 微批流水线（ dt_pipe_microbatch ，$m \ge 2$） ：稳态单轮有效周期 $T_{\text{round}} = \max\big(T_{\text{draft}} + T_{\text{comm}},\, T_{\text{verify}}\big)$ 
+DT 单请求超前流水线（ dt_pipe_speculative ，分支命中率 $\beta$） ：$T_{\text{round}} = \beta \cdot \max(T_{\text{draft}}, T_{\text{verify}}) + (1 - \beta) \cdot (T_{\text{verify}} + T_{\text{draft}} + T_{\text{comm}})$ 
+4.5 D4 · 执行层：静态迭代模板 + 动态调度状态机 + 轮次状态转换 RoundTransitionSpec Gemini G-P0-2 新增 
+每一轮投机迭代结束进入下一轮时，执行层强制执行以下三步状态转换（同时体现在算子账本与时间轴上）： 
+Target KV 指针回滚（KV Rewind） ：验证前向写入了 $K+1$ 个位置的 KV，采样判定接受 $a \in [0, K]$ 个草稿后（总提交 $n = a+1$），退回未接受的 $(K - a)$ 个草稿 KV 槽位（PagedAttention 块表索引回退耗时 $\approx 1\sim 3\,\mu\text{s}$）。 
+Target $\to$ Draft 结果同步（Verify Feedback） ：在 DT 分离部署下，通过 dt_inter 发送结果包（含接受长度 $n$、bonus token ID；若为 MTP 分离则附带 $n$ 个位置的最终 hidden states）。 
+下一轮草稿首步追赶（Draft Bonus Catch-up） ：由于草稿上一轮未计算 bonus token 的 KV（且当 $a=K$ 全接受时草稿也未计算第 $K$ 个草稿 token 的 KV），下一轮草稿的第 0 步前向必须处理 $M_{\text{draft},0} = 2$ 个 token （末位确认 token + bonus token），第 $1 \dots S_{\text{draft}}-1$ 步恢复为 $M_{\text{draft},s}=1$。 
+4.6 D5 · 服务层：特性与参数分离 + CUDA Graph 三态建模 Codex P0-5 / P1-1 / P1-6 
+特性 / 参数名 类别 物理改写机制与约束 交付阶段 
+cuda_graph 校准特性（三态： hit / miss / unsupported ） 当 batch/verify 形状落入捕获档位（如 $[1, 2, 4, 8, 16, 32]$）时：消除逐算子 CPU launch overhead，但将计算形状向上对齐至最近档位 $M_{\text{pad}} = \lceil M \rceil_{\text{graph}}$， padding 浪费的 FLOPs 与字节记入账本 。 M2（单请求） M4（动态批） 
+chunked_prefill 参数： chunk_size + max_num_batched_tokens 长输入 ISL 按预算切块，与 decode 请求拼入同一引擎步；注意力算子区分为 chunked-causal prefill 与 paged decode 两部分。 M2（单请求分块） M4（混批抢占） 
+prefix_cache 参数：命中率 $h \in [0, 1]$ 将有效 Prefill 计算长度改写为 $L_{\text{prefill, eff}} = (1 - h) \cdot \text{ISL}$，KV 写入字节同步缩减 $(1-h)$，但 Attention KV 读取仍覆盖完整 $\text{ISL}$。 M2（单请求） M4（块共享） 
+kv_tier 参数：HBM / DRAM / SSD 容量与带宽 当活跃 KV 总量超出角色 HBM KV 池上限时，溢出部分按冷热比例走 PCIe/DRAM 或 NVMe/SSD 带宽计价（复用 tiered_kv_time ）。 M2 
+4.7 D6 · 呈现层：一屏四联动工作台（彻底终结页面割裂） Gemini G-P1-2 核心重构 
+
+为什么修改原 v2.1 的三页面拆分？ 
+原 v2.1 将“加速比矩阵”放在独立的【对比页】，将“结构图+算子详情+时间轴”放在【工作台页】。在真实选型中，用户看到矩阵里某一格（例如 异构 DT + DFlash2 ）加速比达到 2.68x ，第一反应就是看 “这一格的时间轴是怎么重叠的？它的瓶颈算子在 Roofline 哪个位置？” 。因此 v3.0 将四者合为一屏，通过统一的响应式状态总线 WorkbenchSelectionState 实时联动（请直接点击顶部 Tab 4 · 一屏四联动工作台原型 体验交互效果）： 
+区域 A（左上）· 部署 × 方法/特性加速比矩阵与基线钉选器 ：展示当前扫描或预设矩阵中每个方案的 TPOT / 加速比 / 显存状态 ；左键点击切换当前检视方案，右键或点图钉设为 对比基线（Baseline） 。 
+区域 B（中）· 主模型 & 草稿模型双树网络结构 DAG ：按 OpGraph 展示 Embedding $\to$ 重复层块（标注层号范围，如 Layer 0..2 Dense 、 Layer 3..60 MLA+MoE 、 CED 半层 ）$\to$ LM Head 及草稿子图；节点按耗时占比与受限类型（Compute-bound / HBM-bound / Comm-bound）动态着色。 
+区域 C（右上）· 计算单元 7 维透视卡 + 交互式 Roofline ：展示当前选中算子（或整层汇总）的 ① 理论时延（及相对基线 $\Delta$） ② FLOPs ③ 显存（权重/KV/激活） ④ 五类访存字节明细条 ⑤ 输入/输出激活张量形状 ⑥ 精确符号公式与溯源 ID ⑦ SVG 交互式双对数 Roofline 图 （实时标出算子算术强度 $AI$ 与硬件拐点）。 
+区域 D（底部通栏）· 多轨推理时间轴（Target / Draft / DT Link / Verify & Catch-up） ：展示一轮投机迭代（或请求级）的精确时序条；点击时间轴上的任意阶段（如 Draft Step 0 (Catch-up M=2) 或 Target Verify (M=K+1) ），区域 B 的结构图与区域 C 的 Roofline 自动过滤并高亮该阶段的算子成本！ 
+4.8 D7 · vLLM 对齐清单（固定参考版本 vllm_ref ） 
+对齐维度 vLLM V1 真实机制 simverse 建模方式与显式简化声明 
+单步调度与混合批 V1 调度器无固定 prefill/decode 阶段隔离，完全按 token 预算 max_num_batched_tokens 组装本步 SchedulerOutput 。 L3 迭代模板接收任意 BatchShape(num_prefill_tokens, num_decode_seqs, spec_verify_tokens) ；M2 解析核聚焦单请求稳态，M4 状态机完整复现预算组批。 
+投机解码 Proposer / Verifier Target 一次验证 $K+1$ token → 拒绝采样产出 $1 \le n \le K+1$ token → Paged KV 回退未接受槽位 → 下一轮 Proposer 补齐 bonus token KV。 L3 RoundTransitionSpec 1:1 建模 $M_{\text{verify}}=K+1$、KV 逻辑回退与下一轮首步 $M_{\text{draft},0}=2$ Catch-up。 
+MLA 矩阵吸收与 FlashMLA Decode 与小 M Verify 阶段将 $W_{UK}$ 吸收进 Q 投影、$W_{UV}$ 吸收进 O 投影，KV 缓存仅存压缩潜向量（DeepSeek V4.1 Flash 为 890 B/token）。 vllm-cuda 与 vllm-ascend Recipe 分别在 L0b Lowering 中将 Prefill（非吸收）与 Decode/Verify（吸收式）生成不同形状的 OpNode 。 
+4.9 RunResult 可复现契约（v3.0 升级角色级 Recipe 摘要） RunResult {
+  schema_version: "3.0.0",
+  simulator_version: "0.1.0",
+  formula_revision: "2026.11.v3",
+  scenario_digest: "sha256:...",
+  role_digests: {
+    target: { model_ir: "sha256:...", device: "H200_SXM_141G", parallel: "TP8_EP8", recipe: "vllm-cuda@v0.8.x" },
+    draft:  { model_ir: "sha256:...", device: "L40S_48G",     parallel: "TP1",     recipe: "vllm-cuda@v0.8.x" }
+  },
+  acceptance_spec: { mode: "chain_alpha" | "committed_mean" | "committed_hist", E_n: 3.19, K: 4, S_draft: 4, M_draft: 1 },
+  status: "ok" | "oom" | "missing_profile" | "unsupported_method" | "unsupported_combo",
+  metrics: { tpot_ms: 4.12, ttft_ms: 118.5, speedup_vs_baseline: 2.14, tokens_per_sec: 242.7, mem_per_gpu_gb: { target: 68.4, draft: 6.2 } },
+  op_ledger: [ OpCostRecord { op_id, role, stage, layer_span, flops, bytes_5way, mem_3way, act_shape, formula_id, formula_expr, ai, t_ms, bound } ],
+  timeline_events: [ TraceEvent { name, role, phase, start_us, dur_us, linked_op_ids } ]
+} 
+4.10 D8 · 角色级执行方案（RecipeSpec）与 Lowering 机制 Gemini G-P0-3 / G-P1-3 修订 
+L0a（数学结构 ModelIR ）与 L0b（引擎方案 RecipeSpec ）严格分层 ：数学结构只由模型权重与 HF config.json 决定；算子融合（如 qkv_merged 、 gate_up_merged 、 rmsnorm_quant_fused ）、Attention 后端（ FlashMLA_Absorbed vs FlashAttention3 vs Ascend_PromptFlashAttn ）以及通信算子形式由角色绑定的 RecipeSpec 决定。 
+跨 Recipe 数学不变量门禁 ：同一 ModelIR 在 vllm-cuda 与 vllm-ascend 两个 Recipe 下，其 总参数量、权重常驻字节、未融合 GEMM 主干总 FLOPs 必须精确相等（由 CI 跨包共享测试强制锁定）；允许差异仅存在于融合省去的中间激活 HBM 读写字节、launch 次数与硬件效率系数。 
+5 · 新仓代码组织（ simverse 目录树） simverse/
+  pyproject.toml                 # 单包管理；强依赖 mv-model-structure>=0.2.0
+  simverse/
+    contracts/                   # Pydantic v2 契约：ModelIR, RecipeSpec, DeploymentSpec, ScenarioSpec, RunResult
+    structure/                   # L0a & L0b：
+      adapters/                  #   deepseek_v41_flash, qwen3_next, gdn, h3, magi, matrix, custom_hf
+      spec_methods.py            #   MTP / DSpark / DFlash / DFlash2 / CustomDraft 八字段注册表
+      recipes/                   #   vllm_cuda.py (默认), vllm_ascend.py (M3), lowering.py (ModelIR -> OpGraph)
+      source_audit.py            #   对齐固定引擎 commit 的源码核对工具
+    cost/                        # L1（全仓唯一公式实现）：
+      kernel.py                  #   GEMM / Attn / MoE_Union U(M) / Sparse_KV η_sparse / 分层 KV Roofline
+      memory_ledger.py           #   权重 / KV / 峰值激活显存账本（按角色与并行度切分）
+      comm_primitives.py         #   AllReduce / AllGather / ReduceScatter / AllToAll / DT P2P 传输
+      calibration.py             #   T0 理论公式 + T1 实测拟合系数接口
+      provenance.py              #   公式字符串生成与 FormulaProvenance ID 注册表
+    deploy/                      # L2：RoleBinding 异构设备组解析、并行切分映射、串并联拓扑归约
+    exec/                        # L3：IterationTemplate、RoundTransitionSpec(KV回退+Catch-up)、解析求值、事件求值
+    serving/                     # L4：请求到达、vLLM V1 预算组批状态机、Paged KV 块管理、FeatureSpec 注册表
+    api/                         # Flask + flask-smorest（收敛至 8 个核心 REST 端点 + OpenAPI 快照）
+    cli/                         # simverse run / sweep / audit / export-trace
+    assets/                      # devices/*.json, models/*.json, presets/*.json
+  frontend/                      # Vue 3 + Vite + G6 (结构图) + ECharts (时间轴/Roofline) 一屏四联动工作台
+  tests/
+    golden/                      # 独立手算期望 expectations/ + 旧仓 658 公式 / 52 DT 场景 / V4.1 21 锚点对账
+    crosscheck/                  # 解析核 × 事件核 7 类不变量交叉验证 + 跨 Recipe 数学不变量测试
+    ci_guards/                   # 扫描前端 JS/Vue 禁止物理公式的 AST/正则门禁脚本 
+6 · 资产迁移清单与许可证隔离 
+来源仓 现存资产 v3.0 处置动作 目标归属与许可证要求 
+model-verse mv_model_structure + DeepSeek V4.1 Flash 钩子（890B KV、CSA2、CED 半层、FP8/FP4 混精）+ 21 项离线锚点 直接升格为核心 L0a structure/ + tests/golden/ （自有代码，首发模型验收基线） 
+model-verse model_analyzer.py + roofline_model.py 分层 KV 去重合并入 L1 L1 cost/kernel.py （核对 LLM-Viewer MIT 许可证声明） 
+model-verse spec_gain_model.js (467行前端物理) + dt_sim.py 废除前端物理 数学并入 L3 exec/ ，52 个 DT 对账场景转入 tests/golden/ 
+model-verse serving_sim/ （含三点校准法） 隔离重写 因原仓引自 inferflux ( CC BY-NC )， 严禁直接拷贝代码 ；仅按数学原理在 L1 重写校准拟合器 
+pi-viewer FeatureSpec 注册表、 Scenario 、 FormulaProvenance 、 topology.py 、OpenAPI 快照机制 完整保留模式 分别迁入 L4 serving/ 、 L1 provenance.py 、 L2 deploy/ 与 api/ 
+pi-viewer frontier/ (127k 行 vendored) 默认不随迁 仅保留 synthesize.py CSV 导出桥与 7 台设备 profiling CSV 资产 
+7 · 防冗余工程规则（写进 CI 自动门禁） 
+前端零物理计算门禁 ：CI 脚本扫描 frontend/src/** ，凡出现 FLOPs/带宽除法、指数接受率求和、Roofline Math.max(compute, mem) 等物理计算表达式立即阻断合入；前端滑块实时预览统一调用后端轻量解析端点（单点响应 $<15\,\text{ms}$，200 格矩阵扫描 $<150\,\text{ms}$）。 
+唯一层图与唯一计价门禁 ：全仓除 L0 lowering 外禁止构造算子列表，除 L1 cost/kernel.py 外禁止定义算子耗时公式。 
+三层独立验证门禁 ：① 独立手算 Oracle（精确整数相等） ② 旧仓黄金锚点对账（658 公式 + V4.1 21 项 + DT 52 场景） ③ 解析核 × 事件核 7 类不变量交叉验证（无排队场景相对误差 $\le 10^{-9}$）。 
+禁止新增独立 Tab 或独立仿真器 ：任何新模型只能写 L0a 适配器，任何新投机方法只能注册 SpecMethod ，任何新引擎后端只能注册 RecipeSpec 。 
+8 · 里程碑与可测验收口径（M0–M5） 
+
+M0 · 契约与资产冻结 6 大 Pydantic 契约 + SpecMethod 八字段表签字 + 旧仓锚点 pytest 化 
+M1 · L0/L1 + 算子透视 DeepSeek V4.1 Flash + lowering + 7 维算子卡与交互式 Roofline 
+M2 · L2/L3 解析 + 矩阵 NS-1 端到端跑通：异构 DT × 5 种投机方法加速比矩阵（单请求） 
+M3 · 事件核 + 时间轴 + 昇腾 多轨 Gantt 时间轴 + Bonus Catch-up + Chrome Trace + vllm-ascend 包 
+M4 · L4 服务化状态机 连续批处理 + Chunked Prefill + Prefix Cache + Paged KV 抢占 
+M5 · vLLM 实测校准 Profiler Trace 自动对齐词典 + T1 效率系数拟合（延后非阻塞） 
+9 · 风险与应对策略 
+风险项 技术应对策略（v3.0） 
+并行块草稿（DFlash/DFlash2）与链式草稿在代码中混出 if-else 泥潭 通过 $(S_{\text{draft}}, M_{\text{draft}}, K)$ 三元组 + RoundTransitionSpec 统一抽象：L3 循环只认 $S_{\text{draft}}$ 步、每步批量 $M_{\text{draft},s}$，零方法名硬编码分支。 
+异构 DT 分离配置过于复杂导致表单难用 顶栏提供“同卡 / 同构 DT / 异构 DT（H200+L40S / H200+910B）”一键预设模板，高级抽屉才展开角色级 RoleBinding 微调。 
+一屏四联动工作台在屏幕较小时拥挤 采用响应式 CSS Grid + 面板折叠/最大化按钮，且矩阵、结构图、算子卡、时间轴共享同一轻量 Store。 
+10 · 决策记录（D-1 ~ D-8 已锁定） 
+编号 议题 最终决议 
+D-1 新仓托管 GitHub 独立新仓（暂名 simverse ），彻底隔离 CC BY-NC 代码。 
+D-2 后端 Web 框架 延续 Flask + flask-smorest ，复用两仓现成 OpenAPI 快照测试链路。 
+D-3 首发北极星模型对 DeepSeek V4.1 Flash（主模型）+ 自定义草稿小模型 （兼顾内置 MTP/DSpark/DFlash/DFlash2）。 
+D-4 实测校准节奏 首发以 T0 理论公式为准（保留 T1 校准数据结构与接口），M5 实测校准不阻塞 M1–M4 主线交付。 
+D-5 里程碑节奏 无外部硬性演示死线，扎实完成 M0 契约与 M1 DeepSeek V4.1 Flash 21 项锚点对账后再进 M2。 
+D-6 v1 投机方法集 锁定 自定义草稿 / MTP / DSpark / DFlash / DFlash2 五类；EAGLE / Medusa / ngram / jetspecpp 移出 v1。 
+D-7 引擎 Recipe 范围 v1 交付 vllm-cuda （M1 默认）与 vllm-ascend （M3 交付），支持按角色异构混搭； sglang 留待后续版本。 
+D-8 前端工作台形态 采用一屏四联动单工作台（v3.0 新增决议） ，将加速比矩阵、网络结构图、算子 7 维详情+Roofline、多轨时间轴整合于同一视图。 
+附录 A · Codex 初审（15 项）+ Gemini 终审（6 项）完整闭环对照 Gemini 终审新增 6 项（G-P0-1 ~ G-P1-3） 全部在 v3.0 闭环 
+G-P0-1（块并行 vs 链式投机参数冲突） ：解耦 propose_steps ($S_{\text{draft}}$)、 draft_step_tokens ($M_{\text{draft}}$)、 verify_tokens ($K$)，防止 DFlash/DFlash2 被当成 8 步串行解码（§4.1/§4.2）。 
+G-P0-2（验证回退与下一轮 Bonus Catch-up 漏项） ：新增 RoundTransitionSpec ，建模 Paged KV 拒绝槽位回退、 target→draft 结果回传与下一轮首步 $M_{\text{draft},0}=2$ 追赶开销（§4.5）。 
+G-P0-3（异构 DT 分离 Recipe 绑定与流水线悖论） ：将 DeviceSpec + ParallelPlan + RecipeSpec 下沉至 RoleBinding ，并将 DT 流水线拆分为 dt_pipe_microbatch 与 dt_pipe_speculative （§4.4/§4.10）。 
+G-P1-1（DeepSeek V4.1 Flash 验证步 MoE 专家并集与稀疏 KV 放大） ：在 L1 成本核中为主模型和草稿统一引入超几何专家并集 $U(M_{\text{eff}})$ 与 CSA2 稀疏块并集系数 $\eta_{\text{sparse}}(K+1)$（§4.3）。 
+G-P1-2（工作台与对比页分离违背整合诉求） ：重构为一屏四联动工作台，支持矩阵钉选基线与全视图 Delta 联动（§4.7 及 Tab 4 原型）。 
+G-P1-3（双 HTML 拆分与本地死链） ：合并为单文件四 Tab 交互式架构蓝图，统一 L0a/L0b 命名（全局）。 Codex 初审 15 项（P0-1 ~ P2-2） 全部保留并继承 
+P0-1 ~ P0-6 ：vLLM V1 单步语义收窄、SpecMethod 注册表化、接受率三字段互斥校验、静态模板与动态状态机分层、CUDA Graph 三态建模、逻辑/物理字节与每卡/整组口径表。 
+P1-1 ~ P2-2 ：Chunked Prefill 预算分离、M2/M4 矩阵边界、CC BY-NC 许可证隔离、可测验收误差容差、RunResult 摘要溯源、SweepManifest 分格存储、Frontier 默认不随迁。 
+附录 B · 证据索引 
+model-verse 核心证据： LLM-Viewer-main/model_analyzer.py 、 roofline_model.py 、 dt_sim.py 、 mv_model_structure/ 、 frontend/src/spec_gain_model.js 、 scenarios/deepseek_v41_flash_spec.py 。 
+pi-viewer 核心证据： piviewer/roofline.py 、 features.py 、 calibration.py 、 synthesize.py 、 topology.py 。 
+
+
+仿真原理 v2.0 目录 0 · 一句话第一性原理 1 · 四元组：结构×方案×负载×硬件 2 · 三段流水：Count → Cost → Execute 3 · 万物皆改写器：18 项统一变换表 4 · 两旧仓代码还原诊断表 5 · DeepSeek V4.1 Flash 完整手算算例 6 · 原理到五层架构的严格映射 
+
+仿真原理：推理性能仿真的第一性还原与抽象 v2.0 
+原《仿真原理_当前机制抽象.html》升级版 · 修正了验证步 MoE/稀疏 KV 非线性效应、块并行投机负载与角色级异构 Recipe 
+核心公理：Count（确定性算术/期望） → Cost（物理近似/可校准） → Execute（时序组合器） v2.0 升级：四元组 (S, R, W, H) · 补充主模型 MoE 并集与 Bonus Catch-up 手算推导 
+0 · 一句话第一性原理 
+
+大模型推理性能仿真只回答一个问题：给定数学结构 $S$、引擎执行方案 $R$（Recipe）、工作负载 $W$、硬件拓扑 $H$，每个计算/通信单元消耗多少算力、访存、显存与时间，以及它们在时间轴上如何组合。 
+它的全部底座只有一条三段式单向流水线： 计数 Count（算术/统计期望，精确可复算） $\to$ 成本 Cost（Roofline/链路物理模型，可被 T1 实测校准替换） $\to$ 执行 Execute（串行求和 / 关键路径重叠 / 离散事件推进） 。所有看似繁杂的部署模式、投机算法与服务化特性，全都是这条流水线特定位置上的 声明式改写器（Rewriter） 。 
+1 · 四元组抽象：数学结构 $S \times$ 执行方案 $R \times$ 负载 $W \times$ 硬件 $H$ 
+维度 物理含义与决定因素 为什么必须正交分离？ 
+数学结构 $S$ ( ModelIR ) 由 HF config.json 与权重张量唯一确定：层序、层型（MLA / CSA2 / GDN / MoE / CED 半层）、隐藏维、头数、专家数与缓存字节语义（如 V4.1 Flash 的 890 B/token）。 框架无关的客观事实。无论用 vLLM 还是 SGLang，参数量、权重总字节与未融合 GEMM 主干 FLOPs 永远不变。 
+执行方案 $R$ ( RecipeSpec ) 由 引擎 × 固定版本 × 角色硬件 决定：算子融合集（QKV 合并、SwiGLU 融合、RMSNorm+量化融合）、Attention 后端（MLA 矩阵吸收 vs 非吸收）、通信算子形态。 决定 lowering(S, R) → OpGraph 。融合省去了算子间中间激活的 HBM 读写并减少 kernel launch 次数——这是不同推理引擎性能差异的物理根源。 
+工作负载 $W$ ( WorkloadShape ) 每个引擎步流经算子图的有效 token 形状：Prefill ($M=\text{ISL}$)、普通 Decode ($M=B$)、草稿提议 ($S_{\text{draft}}$ 步，首步 $M=2$、后续 $M=1$ 或块大小 $B_{\text{blk}}$)、目标验证 ($M=B(K+1)$)。 把静态 OpGraph 实例化为具体矩阵维度 $(M, N, K)$，并触发 MoE 专家并集 $U(M)$ 与稀疏 KV 并集 $\eta_{\text{sparse}}$。 
+硬件拓扑 $H$ ( RoleBinding ) 每个角色绑定的设备峰值 TFLOPS（按精度）、HBM/DRAM/SSD 带宽与容量、Launch 开销、角色内/角色间互联带宽与延迟。 将与硬件无关的 Count 账本映射为物理时间（微秒/毫秒）与显存水位。异构 DT 本质就是 Target 与 Draft 绑定了不同的 $(R, H)$。 
+2 · 三段流水：Count $\to$ Cost $\to$ Execute 
+
+L0 · Lowering $S \times R \to \text{OpGraph}$ 融合算子、确立吸收式 MLA 形状 
+→ 
+① Count 计数 (L1) $\text{OpGraph} \times W \to \text{整数账本}$ FLOPs、五类访存字节、三类显存、激活形状 
+→ 
+② Cost 成本 (L1) $\text{账本} \times H \to \text{OpCostRecord}$ Roofline $t=\max(t_{\text{cmp}}, t_{\text{mem}})+t_{\text{launch}}$ 
+→ 
+③ Execute 组合 (L3/L4) $\text{OpCost} \times \text{部署/调度} \to \text{时序}$ 串行 / 流水线关键路径 / DES 事件流 
+3 · 万物皆改写器：18 项功能统一变换表（v2.0 完整版） 
+功能 / 特性名称 作用的流水段 精确物理改写规则 
+算子融合 (Fusion) L0b Lowering $\to$ Count 将多个相邻算子合并为一个 FusedOpNode ，消除组内中间激活张量的 HBM Store/Load 字节，Kernel Launch 次数归 1。 
+MLA 矩阵吸收 L0b Lowering $\to$ Count Decode 与 Verify 阶段将 $W_{UK}, W_{UV}$ 吸收到 Q/O 侧，KV 缓存只读写 512+64 维压缩潜向量（V4.1 Flash 混精后 890 B/token）。 
+MoE 路由并集 $U(M)$ Count（期望化） 主模型 Verify ($M=B(K+1)$) 与 MoE 草稿的专家权重读取量乘以超几何去重并集期望 $E[U(M_{\text{eff}})]$，而非固定 $k_{\text{top}}$。 
+CSA2 稀疏注意力 Count KV 读取长度由全长 $L_{\text{ctx}}$ 改写为 $\min(L_{\text{ctx}},\, \text{swa} + \eta_{\text{sparse}}(M_q)\cdot\text{topk})$；Prefill 额外计入候选池索引构建开销。 
+CED 半层 Prefill 优化 L0a/Count DeepSeek V4.1 Flash 特有钩子：Prefill 阶段特定半层跳过冗余投影，按层号掩码精确扣减 FLOPs 与字节。 
+TP / EP / PP 并行 Count + Execute 按角色切分算子 $(M, N, K)$ 与常驻显存，并在层内/层间插入 AllReduce / AllToAll / P2P 通信节点。 
+链式投机 (MTP/DSpark/Custom) $W$ 改写 + Execute 每轮执行 $S_{\text{draft}}=\gamma$ 步草稿（第 0 步 $M=2$ 含 Bonus Catch-up，后续 $M=1$）+ 1 次目标 $M=\gamma+1$ 验证；产出除以 $E[n]$。 
+块并行投机 (DFlash/DFlash2) $W$ 改写 + Execute 草稿步数缩减为 $S_{\text{draft}}=1\text{ 或 }2$，单步批量放大为块大小 $M_{\text{draft}}=B_{\text{blk}}$；目标验证仍为 $M=B_{\text{blk}}+1$。 
+DT 分离（串行 / 流水） L2/L3 Execute Draft 与 Target 绑定独立设备与 Recipe；插入双向 dt_inter 消息传输事件，并根据串行/微批流水/超前流水组合时序。 
+CUDA Graph W 对齐 + Cost 输入 token 数向上 padding 至捕获档位 $M_{\text{pad}}$（增加 Count），同时将逐算子 launch 开销替换为单次图回放常数（降低 Cost）。 
+Prefix Cache / 分层 KV W 改写 / Cost Prefix Cache 削减 Prefill 计算长度 $(1-h)$；分层 KV 将超出 HBM 池的 KV 字节按 DRAM/SSD 带宽分段计价。 
+4 · 两旧仓代码还原诊断表 
+详见 Tab 2 §1.1 与 §6：旧仓之所以难以维护，是因为把上表中的“改写器”写成了互不通信的独立页面与平行计算函数。新仓通过 L0–L5 单向依赖彻底根除这一问题。 
+5 · DeepSeek V4.1 Flash + 草稿模型完整手算算例（修正版） 
+
+为什么重写原《仿真原理》§5 的手算例子？ 
+原 §5 用了一个虚构的 40 层 Dense 4096 模型，得出“verify 权重读不变”的结论。但我们的首发模型是 DeepSeek V4.1 Flash（MLA + CSA2 + MoE 混精 + 890 B/token KV） ！下面给出直接用于 M1/M2 Golden 测试的真实机制手算链： 
+步骤 / 阶段 物理过程与公式代入（单序列 $B=1, L_{\text{ctx}}=8192, \gamma=4, \alpha=0.75$） 手算关键结论 
+1. 期望提交长度 $E[n]$ $K = 4$，链式接受率 $\alpha = 0.75$： $E[n] = \frac{1 - 0.75^5}{1 - 0.75} = \frac{1 - 0.2373}{0.25} = \mathbf{3.05\,\text{tokens/round}}$ 每轮平均前进 3.05 个 token（含 1 个 bonus token）。 
+2. 草稿提议阶段 (含首步 Catch-up) 若采用自回归草稿（$\gamma=4$）： • Step 0：输入上一轮末位确认 token + bonus token，故 $M_{\text{draft},0} = 2$ ； • Step 1..3：每步输入 1 个新草稿 token， $M_{\text{draft},1..3} = 1$ 。 若采用 DFlash2（$B_{\text{blk}}=8$） ：仅执行 $S_{\text{draft}}=1$ 步 ，$M_{\text{draft},0}=9$，权重仅读 1 次！ 解释了为什么 DFlash2 在带宽受限卡上远快于 8 步自回归草稿。 
+3. 目标验证阶段 (DeepSeek V4.1 Flash) 目标单次验证输入 $M_{\text{verify}} = K + 1 = 5\,\text{tokens}$ ： • 共享/Dense 权重读取 ：与 $M=1$ 相同（被 5 个 token 完全摊薄）； • MoE 路由专家权重读取 ：5 个 token 激活的去重专家并集 $E[U(5)] \approx 3.8 \times E[U(1)]$（而非 1.0 倍！），但折算到每产出 token 仍比单步 decode 省约 $35\%$ 专家带宽； • CSA2 稀疏 KV 读取 ：每个每层 token 原本读 $(512+128)\times 890\,\text{B} \approx 569.6\,\text{KB}$；5 个连续验证 token 共享前缀窗口，读取量为 $\eta_{\text{sparse}}(5) \approx 1.6$ 倍单 token KV 读。 精准刻画了 MoE 主模型在投机验证步下的真实带宽节省率（既不盲目乐观当成 1.0 倍，也不悲观当成 5.0 倍）。 
+4. 轮次转换与回退 目标写出 5 个位置的 KV（$5 \times 890\,\text{B}/层$），采样接受 $n \approx 3.05$ 个后，Paged KV 块表逻辑指针回退 $5 - n$ 个槽位，并将 $(n, \text{bonus\_id})$ 传回草稿进入下一轮。 完整闭环 vLLM V1 SpecDecode 生命周期。 
+6 · 原理到新仓五层架构的严格映射 
+四元组 $(S, R, W, H)$ 与三段流水 $(\text{Count} \to \text{Cost} \to \text{Execute})$ 一一对应新仓的五层代码结构： L0a = S 、 L0b = R & Lowering 、 L1 = Count + Cost 、 L2 = H & RoleBinding 、 L3 = W & Execute(迭代级) 、 L4 = Execute(服务级调度) 、 L5 = RunResult 视觉投影 。 
+
+
+
+simverse 一屏四联动工作台交互原型（L5 单画布实装演示） 点击左上【加速比矩阵单元格】、中部【网络结构算子节点】或底部【时间轴阶段条】，观察四视图实时联动与 Roofline 坐标跳变 
+Target: DeepSeek V4.1 Flash (H200 TP8 · vllm-cuda) Draft: DFlash2-2.0B (L40S TP1 · 异构 DT) 
+
+
+主模型 (Target) DeepSeek V4.1 Flash (MLA+CSA2+MoE) Qwen3-Next-80B-A3B (GDN+FullAttn) 
+草稿与投机方法 (SpecMethod) DFlash2 (2.0B 并行块 B=8, iters=1) DFlash (Dense 并行块 B=8, iters=2) DSpark (4.53B MoE 链式 γ=4) MTP (内置 1层 0.09B 链式 γ=4) Custom-Draft-1.8B (自回归链 γ=4) 
+当前检视部署方式 (Deployment) ① 无投机基线 (Target Only) ② 同卡混部串行 (Co-located) ③ 同构 DT 分离串行 (RDMA) ④ 异构 DT 分离 (H200 TP8 + L40S TP1) ⑤ 异构 DT 微批流水线 (Microbatch=2) ⑥ 异构 DT 超前流水线 (β=0.82) 
+ISL / OSL 4096 / 1024 8192 / 1024 32768 / 2048 
+接受率 α (或等效 τ) α = 0.65 (保守) α = 0.78 (典型实测) α = 0.88 (高匹配代码/数学) 
+服务化特性包 (Features) CUDA Graph ON + FlashMLA Absorbed Eager (No CUDA Graph) + Paged KV CUDA Graph + Prefix Cache (h=50%) vllm-ascend (昇腾 910B2 异构草稿) 
+
+
+等效 TPOT (每 token 时延) 
+2.18 ms 
+基线 4.86 ms (-55.1%) 
+
+相对无投机基线加速比 
+2.23x 
+458.7 tokens/s 
+
+每轮期望产出 E[n] (含Bonus) 
+4.36 tok 
+S_draft=1, M_draft=9, K=8 
+
+单轮总耗时 T_round 
+9.51 ms 
+Draft 1.82 + Comm 0.24 + Verify 7.45 
+
+主模型 MoE 并集系数 U(K+1) 
+4.12x 
+M_verify=9 tokens 去重路由专家 
+
+每卡显存占用 (Target / Draft) 
+64.2 / 5.8 GB 
+状态: OK (KV 890 B/tok) 
+
+结果溯源与校准层级 
+T0 公式 + CUDAGraph 
+当前过滤: 全部阶段 (All) 
+
+
+① 部署方式 × 投机方法 加速比矩阵（点击任意格联动全屏） 左上主控 
+
+数值为相对 ① 无投机基线 (4.86 ms/tok) 的端到端 TPOT 加速比；绿色代表显著正收益，琥珀色代表通信或串行开销抵消收益： 
+部署拓扑 \ 方法 MTP (γ=4) DSpark (MoE γ=4) DFlash (B=8,it=2) DFlash2 (B=8,it=1) Custom (1.8B γ=4) 
+
+
+② 网络结构与算子图 OpGraph（点击算子查看右侧 7 维透视） 显示全部阶段 
+
+
+
+③ 计算单元 7 维透视与 Roofline HBM 带宽受限 
+
+
+
+Roofline 坐标图（双对数坐标：算术强度 AI vs 有效算力） AI = 8.4 FLOP/B 
+
+④ 单轮投机推理多轨时间轴（Target 轨 / Draft 轨 / DT 通信轨 —— 点击阶段条过滤上方算子图） 单轮周期 T_round = 9.51 ms · 提交 E[n] = 4.36 tokens · 点击任意色块联动 

@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1",
+  "name": "V41Flash-DT分离-固定验证场景",
+  "model_id": "deepseek_v41_flash",
+  "draft_id": "dspark",
+  "k": 4,
+  "tp": 8,
+  "target_device": "h100_sxm",
+  "draft_device": "l40",
+  "link": "pcie5",
+  "batch": 1,
+  "ctx_tokens": 32768,
+  "deployment": {"mode": "dt_serial"},
+  "acceptance": {"kind": "chain_alpha", "chain_alpha": 0.75},
+  "seed": 0,
+  "notes": "首个可追溯验证场景（M0 基线）：固定 模型=DeepSeek V4.1 Flash 官方 config 快照(SHA256 8be45ce0…) / 硬件=8×H100 SXM TP8 目标 + 1×L40 草稿 + PCIe5 x16 链路 / 精度=官方混精(稠密FP8+专家FP4+FP8 KV+FP8 激活) / 负载=B=1, ctx=32768, K=4, α=0.75；对比 普通 decode vs 同卡投机 vs DT 分离串行/理想流水。"
+}

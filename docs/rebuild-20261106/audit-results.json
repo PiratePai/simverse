@@ -1,0 +1,81 @@
+{
+  "moe_union": {
+    "experts": 384,
+    "top_k": 6,
+    "tokens": 5,
+    "draws_upper_bound": 30,
+    "current_iid_draws": 28.89424363097868,
+    "independent_uniform_topk": 29.0770343542099,
+    "report_claim": 38.9
+  },
+  "old_document_coverage": {
+    "experts": 512,
+    "top_k": 10,
+    "tokens": 100,
+    "current_formula_fraction": 0.858440454732242,
+    "document_claim": 0.18
+  },
+  "same_mean_different_full_acceptance": {
+    "K": 2,
+    "distribution_A": {
+      "2": 1.0
+    },
+    "distribution_B": {
+      "1": 0.5,
+      "3": 0.5
+    },
+    "mean_A": 2,
+    "mean_B": 2,
+    "p_full_A": 0,
+    "p_full_B": 0.5
+  },
+  "mean_endpoint": {
+    "K": 2,
+    "mean": 3,
+    "resolved_alpha": 0.9999989999999999,
+    "required_alpha": 1.0
+  },
+  "baseline_timeline": {
+    "requested_mode": "baseline",
+    "events": [
+      {
+        "label": "草稿步 0（Catch-up 加权）",
+        "stage": "draft_step_0",
+        "start_ms": 0.0,
+        "end_ms": 2.0864533366584816
+      },
+      {
+        "label": "草稿步 1",
+        "stage": "draft_step_1",
+        "start_ms": 2.0864533366584816,
+        "end_ms": 4.17178347211991
+      },
+      {
+        "label": "验证步 Verify",
+        "stage": "verify",
+        "start_ms": 4.17178347211991,
+        "end_ms": 4.172647066013958
+      },
+      {
+        "label": "提交 E[n]=2.31 token（含 bonus）",
+        "stage": "",
+        "start_ms": 4.172647066013958,
+        "end_ms": 4.172647066013958
+      }
+    ],
+    "contains_draft": true
+  },
+  "residual_count": {
+    "rows": 4,
+    "current_flops": 0,
+    "logical_add_operations": 1024
+  },
+  "snapshot_sha256": {
+    "D:\\Github\\new-viewer\\docs\\verification_report.md": "fb7a8529d47816cb3556ce9a8e19f3bd1e61c2149f5e3660bf92423000b314c1",
+    "D:\\Github\\new-viewer\\simverse\\engine.py": "a5592ccd81b080bc35091ef4fa2fd522c0414184fa200ea4ba0cf23baaa87f89",
+    "D:\\Github\\new-viewer\\simverse\\ledger.py": "95a16642177b40678e16bf8d428af73a10a64a3bf85aa5ef4e9a006db2bbb5d7",
+    "D:\\Github\\new-viewer\\assets\\config\\deepseek_v41_config.json": "8be45ce0476004a3f529fd896115a4a2e800a129ad2d3ec05b16050f52e21879",
+    "D:\\Github\\new-viewer\\docs\\rebuild-20261106\\references\\model-verse-principles-pinned.md": "21e53deb5778a3b384850a6666c1d89afa08ae5798918926929690953831e77f",
+    "C:\\Users\\41693\\Downloads\\simverse_v3_0.html": "78b7d095cb3ced2d2aa6a5e2cd6948879eb8d49c3d850a76024f8fd8722da5d7"
+  }
+}

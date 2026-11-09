@@ -1,0 +1,7 @@
+{
+  "engine": "dsh",
+  "startedAt": "2026-11-06T12:58:18.731Z",
+  "endedAt": "2026-11-06T12:58:21.576Z",
+  "success": false,
+  "error": "DSH 返回了无效的会话编号或工作目录"
+}

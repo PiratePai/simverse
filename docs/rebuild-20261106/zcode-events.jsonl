@@ -1,0 +1,4 @@
+{"at":"2026-11-06T12:58:18.738Z","type":"adapter.mode","payload":{"engine":"zcode","transport":"app-server","access":"read","nativeMode":"guarded"}}
+{"at":"2026-11-06T12:58:18.751Z","type":"process.started","payload":{"pid":18120}}
+{"at":"2026-11-06T12:58:20.700Z","type":"session.mode.confirmed","payload":{"sessionId":"sess_7fa5ae32-8b2b-4a45-9012-c9876a60a2e1","mode":"guarded"}}
+{"at":"2026-11-06T13:08:10.775Z","type":"agent.turn.completed","payload":{"sessionId":"sess_7fa5ae32-8b2b-4a45-9012-c9876a60a2e1","toolCallCount":32,"usage":{"modelRequestCount":22,"inputTokens":3129021,"outputTokens":30958,"totalTokens":3159979,"cacheReadTokens":2958528,"cacheWriteTokens":0,"reasoningTokens":0,"webFetchRequests":0,"webSearchRequests":0}}}

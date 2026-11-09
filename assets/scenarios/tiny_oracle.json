@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1",
+  "name": "TinyOracle-手算样例",
+  "model_id": "tiny_dense_oracle",
+  "draft_id": "custom_chain",
+  "k": 2,
+  "tp": 1,
+  "target_device": "h100_sxm",
+  "draft_device": "l40",
+  "link": "pcie5",
+  "batch": 1,
+  "ctx_tokens": 100,
+  "deployment": {"mode": "colocated"},
+  "acceptance": {"kind": "chain_alpha", "chain_alpha": 0.5},
+  "seed": 0,
+  "notes": "手算 oracle 场景：2 层 GQA dense 小模型，K=2, α=0.5 → E[n]=1.75；用于 golden/expectations 独立手算对账（注意草稿 1.8B 远大于该玩具模型，仅验证机制非合理性）。"
+}

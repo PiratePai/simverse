@@ -1,0 +1,35 @@
+{
+  "kind": "document-consistency-only",
+  "P_ids": 8,
+  "M_ids": 23,
+  "V_ids": 12,
+  "metrics_with_region": 23,
+  "question_ids": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q5",
+    "Q6",
+    "Q7",
+    "Q8",
+    "Q9",
+    "Q10",
+    "Q11",
+    "Q12"
+  ],
+  "broken_local_links": [],
+  "dsh_finding_count": 10,
+  "zcode_finding_count": 8,
+  "counterexample_count": 7,
+  "checked_document_hashes": {
+    "plan.md": "9e97f11084435ac455aca6aea9fcfba1cdbd0cd6bd4092877c02c57a501a1590",
+    "principles.md": "44e82723969a437577f2f8f7732a1957f7d49e7f9ef85de17db26eeeafad1494",
+    "ui-data-contract.md": "d78934fd38874b9b91610c5773bad457aa5d0b1d59607d843f96f8b07995b391",
+    "questions.md": "51412cdae8922ba0db8a0358153ddc386ec931fc4f28c6584b1f026a960b34a1",
+    "README.md": "41b6118f887ecb81de90d6994ff7adcd584a9eae6865c3daaca51a6eec3a8da9",
+    "review-resolution.md": "905f49ea6c4485e2b194e82487ae6d537a816785fb80e583fabe4cf9dec51aaf",
+    "validation.md": "92a4861764239fcd844e06d202ccec8084ae996f6891eb5a7203e0b01031ccaa",
+    "review-ui-round2/resolution.md": "d61d4f64cda3cef0e88f8ec3ae4f59c1e98e7904118a2a9517aaded68bac3657"
+  }
+}

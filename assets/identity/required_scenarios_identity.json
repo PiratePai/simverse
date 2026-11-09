@@ -1,0 +1,75 @@
+{
+ "qwen36_35b_a3b_main": {
+  "repo_id": "Qwen/Qwen3.6-35B-A3B",
+  "revision_main_sha": "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
+  "config_files_seen": [
+   ".gitattributes",
+   "LICENSE",
+   "README.md",
+   "chat_template.jinja",
+   "config.json",
+   "configuration.json",
+   "generation_config.json",
+   "merges.txt",
+   "model-00001-of-00026.safetensors",
+   "model-00002-of-00026.safetensors",
+   "model-00003-of-00026.safetensors",
+   "model-00004-of-00026.safetensors",
+   "model-00005-of-00026.safetensors",
+   "model-00006-of-00026.safetensors",
+   "model-00007-of-00026.safetensors",
+   "model-00008-of-00026.safetensors",
+   "model-00009-of-00026.safetensors",
+   "model-00010-of-00026.safetensors",
+   "model-00011-of-00026.safetensors",
+   "model-00012-of-00026.safetensors",
+   "model-00013-of-00026.safetensors",
+   "model-00014-of-00026.safetensors",
+   "model-00015-of-00026.safetensors",
+   "model-00016-of-00026.safetensors",
+   "model-00017-of-00026.safetensors",
+   "model-00018-of-00026.safetensors",
+   "model-00019-of-00026.safetensors",
+   "model-00020-of-00026.safetensors",
+   "model-00021-of-00026.safetensors",
+   "model-00022-of-00026.safetensors",
+   "model-00023-of-00026.safetensors",
+   "model-00024-of-00026.safetensors",
+   "model-00025-of-00026.safetensors",
+   "model-00026-of-00026.safetensors",
+   "model.safetensors.index.json",
+   "preprocessor_config.json",
+   "tokenizer.json",
+   "tokenizer_config.json",
+   "video_preprocessor_config.json",
+   "vocab.json"
+  ],
+  "config.json": {
+   "sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+   "bytes": 3686,
+   "pinned_equals_main": true
+  },
+  "generation_config.json": {
+   "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+   "bytes": 202,
+   "pinned_equals_main": true
+  }
+ },
+ "qwen36_35b_a3b_dflash": {
+  "repo_id": "z-lab/Qwen3.6-35B-A3B-DFlash",
+  "revision_main_sha": "f181eece646affea2c38b2765f1aaa01a9734ccd",
+  "config_files_seen": [
+   ".gitattributes",
+   "README.md",
+   "assets/dflash_system.png",
+   "assets/speedup.png",
+   "config.json",
+   "model.safetensors"
+  ],
+  "config.json": {
+   "sha256": "20784b063040f7871efec4bf63342e5cb941907925943540176dfbb8aaf186dc",
+   "bytes": 1222,
+   "pinned_equals_main": true
+  }
+ }
+}

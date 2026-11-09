@@ -1,0 +1,26 @@
+{
+ "repo": "z-lab/dflash",
+ "head_sha": "07ebd93db9f472af339b644bb70221ad8428328a",
+ "files": {
+  "dflash/__init__.py": {
+   "sha256": "75a274bfb4d5339bb559f88608538b555563f2a70e909c4ceda237fc29bda46d",
+   "bytes": 864
+  },
+  "dflash/benchmark.py": {
+   "sha256": "d19d3c1688768e13783150ce23178fcf2ed4c94d9ad7960e96f50c99d8a9d48f",
+   "bytes": 15023
+  },
+  "dflash/cli.py": {
+   "sha256": "5f628ed7f460247dcca3655b583452aa7eb3df798e2fbc06db93175e2894fd14",
+   "bytes": 4690
+  },
+  "dflash/model.py": {
+   "sha256": "f55b7fe0a4c0b3073e0f9cdce547cce29f4b8e2168c4d2818760007c43b7651e",
+   "bytes": 25722
+  },
+  "dflash/model_mlx.py": {
+   "sha256": "2f8598eaca4cb814e63ea69e791c1bdf55ba82280bfd299f9141906356b7cb87",
+   "bytes": 35272
+  }
+ }
+}

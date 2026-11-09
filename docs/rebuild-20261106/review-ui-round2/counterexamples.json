@@ -1,0 +1,112 @@
+{
+  "scope": "arithmetic witnesses only; not production/model/GPU validation",
+  "cases": [
+    {
+      "id": "C01",
+      "claim": "shape equality does not prove mask semantics",
+      "causal": [
+        1.0,
+        5.0
+      ],
+      "unmasked": [
+        5.0,
+        5.0
+      ]
+    },
+    {
+      "id": "C02",
+      "claim": "commit timestamps do not determine client-visible latency",
+      "server_commit": [
+        1,
+        2,
+        3
+      ],
+      "immediate": [
+        1,
+        2,
+        3
+      ],
+      "buffered": [
+        3,
+        3,
+        3
+      ],
+      "immediate_itl": [
+        1,
+        1
+      ],
+      "buffered_itl": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "C03",
+      "claim": "global capacity conservation does not prove per-rank feasibility",
+      "balanced": [
+        80,
+        80
+      ],
+      "skewed": [
+        100,
+        60
+      ],
+      "per_rank_capacity": 80
+    },
+    {
+      "id": "C04",
+      "claim": "window policy changes token throughput",
+      "window": [
+        0,
+        10
+      ],
+      "requests": {
+        "a": [
+          -2,
+          1,
+          2
+        ],
+        "b": [
+          3,
+          8,
+          12
+        ]
+      },
+      "event_token_rate": 0.4,
+      "completion_token_rate": 0.3
+    },
+    {
+      "id": "C05",
+      "claim": "dynamic K needs joint acceptance law",
+      "mean_time": 8,
+      "en_a": 2.06,
+      "en_b": 1.98,
+      "tpot_a": 3.883495145631068,
+      "tpot_b": 4.040404040404041
+    },
+    {
+      "id": "C06",
+      "claim": "dimension and lower-bound checks cannot catch every transcription error",
+      "correct_time": 40.0,
+      "wrong_time": 400.0,
+      "same_dimensions": true,
+      "wrong_satisfies_lower_bound": true
+    },
+    {
+      "id": "C07",
+      "claim": "parallel elapsed differs from sum of resource service times",
+      "events": [
+        [
+          0,
+          10
+        ],
+        [
+          0,
+          10
+        ]
+      ],
+      "elapsed": 10,
+      "service_sum": 20
+    }
+  ]
+}

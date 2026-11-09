@@ -1,0 +1,4 @@
+{"at":"2026-11-06T12:58:18.921Z","type":"adapter.mode","payload":{"engine":"dsh","access":"read","nativeMode":"read-only"}}
+{"at":"2026-11-06T12:58:18.932Z","type":"process.started","payload":{"pid":39724}}
+{"at":"2026-11-06T12:58:50.460Z","type":"adapter.mode","payload":{"engine":"dsh","access":"read","nativeMode":"read-only"}}
+{"at":"2026-11-06T12:58:50.470Z","type":"process.started","payload":{"pid":16488}}

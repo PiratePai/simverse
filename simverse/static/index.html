@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>simverse 工作台 · 投机解码/DT 分离可追溯验证</title>
+<style>
+  :root{--bg:#0f141a;--panel:#171e27;--card:#1c2530;--line:#2a3644;--fg:#dbe4ee;
+        --dim:#8ba0b6;--acc:#4cc2ff;--ok:#39d98a;--warn:#ffb454;--bad:#ff6b6b}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:13px/1.5 "Segoe UI",system-ui,sans-serif;padding:0 0 40px}
+  header{display:flex;align-items:center;gap:16px;padding:10px 18px;background:var(--panel);
+         border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+  header h1{font-size:15px;font-weight:600}
+  header .tag{font-size:11px;color:var(--dim)}
+  header .sp{flex:1}
+  button{background:var(--acc);border:0;color:#04222f;font-weight:600;padding:7px 16px;
+         border-radius:6px;cursor:pointer;font-size:13px}
+  button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+  button:disabled{opacity:.45;cursor:wait}
+  select,input{background:var(--card);color:var(--fg);border:1px solid var(--line);
+               border-radius:5px;padding:5px 8px;font-size:12.5px;max-width:100%}
+  .layout{display:grid;grid-template-columns:340px 1fr;gap:14px;padding:14px 18px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .panel h2{font-size:13px;color:var(--acc);margin-bottom:10px;font-weight:600}
+  .form-row{display:grid;grid-template-columns:110px 1fr;gap:6px 8px;align-items:center;margin-bottom:6px}
+  .form-row label{color:var(--dim);font-size:12px}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  .tabs button{background:var(--card);color:var(--dim);padding:6px 14px;font-weight:500}
+  .tabs button.on{background:var(--acc);color:#04222f}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{color:var(--dim);text-align:left;font-weight:500;border-bottom:1px solid var(--line);
+     padding:5px 8px;position:sticky;top:0;background:var(--panel);white-space:nowrap}
+  td{border-bottom:1px solid #212c39;padding:4px 8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  tr:hover td{background:#202b38}
+  .num{text-align:right}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)} .dim{color:var(--dim)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;margin-bottom:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}
+  .card .k{font-size:11px;color:var(--dim)} .card .v{font-size:17px;font-weight:600;margin-top:2px}
+  .card .s{font-size:10.5px;color:var(--dim);margin-top:2px}
+  .ledger-wrap{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .status-bar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px;
+              background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:12px}
+  .prov{font-size:11.5px;color:var(--dim)}
+  .assump li{margin:3px 0;font-size:12px;color:var(--dim)}
+  .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .chart-box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px}
+  .chart-box h3{font-size:12px;color:var(--acc);margin-bottom:6px;font-weight:600}
+  .legend{font-size:11px;color:var(--dim);margin-top:4px}
+  #msg{font-size:12px;color:var(--warn);min-height:16px}
+  .gantt .lane-label{font-size:11px;fill:var(--dim)}
+  .dialog{position:fixed;inset:0;background:rgba(4,10,16,.72);display:none;
+          align-items:center;justify-content:center;z-index:50}
+  .dialog .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+               padding:18px;max-width:860px;width:92%;max-height:88vh;overflow:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>simverse 工作台</h1>
+  <span class="tag">投机解码 / DT 分离 · 可追溯验证 · 前端零物理计算（一切数字来自 RunResult）</span>
+  <span class="sp"></span>
+  <select id="builtin"></select>
+  <input type="file" id="filein" accept=".json" style="display:none">
+  <button class="ghost" onclick="document.getElementById('filein').click()">载入场景文件</button>
+  <button id="runBtn" onclick="doRun()">▶ 运行</button>
+  <button class="ghost" onclick="doSweep()">▦ 边界扫描</button>
+  <button class="ghost" onclick="exportRun()">导出 RunResult</button>
+  <button class="ghost" onclick="exportOps()">导出算子 CSV</button>
+</header>
+<div class="layout">
+  <div class="panel" id="formPanel">
+    <h2>场景（ScenarioSpec v0.1）</h2>
+    <div id="form"></div>
+    <div id="msg"></div>
+    <h2 style="margin-top:16px">数字来源（精度阶梯）</h2>
+    <div class="prov" id="provBox">尚未运行。</div>
+  </div>
+  <div class="panel">
+    <div class="tabs" id="tabs">
+      <button data-t="cmp" class="on">部署对比</button>
+      <button data-t="ops">逐算子账本</button>
+      <button data-t="tl">时间线</button>
+      <button data-t="src">假设与溯源</button>
+      <button data-t="sweep">边界扫描</button>
+    </div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+let REG=null, RUN=null, SWEEP=null, FORM={};
+const $=(s)=>document.querySelector(s);
+const fmt=(x,d=3)=>x==null||isNaN(x)?"—":(+x).toFixed(d);
+const gi=(x)=>x==null?"—":(+x).toLocaleString("en-US");
+const gb=(x)=>x==null?"—":(+x/1e9).toFixed(2)+" GB";
+
+async function boot(){
+  REG=await (await fetch("/api/registry")).json();
+  const sc=await (await fetch("/api/scenarios")).json();
+  const sel=$("#builtin");
+  for(const [k,v] of Object.entries(sc.scenarios)){
+    const o=document.createElement("option");o.value=k;o.textContent=v.name;sel.appendChild(o);
+  }
+  sel.onchange=()=>loadScenario(sc.scenarios[sel.value].scenario);
+  buildForm();
+  loadScenario(sc.scenarios[sel.value].scenario);
+}
+function buildForm(){
+  const models=Object.entries(REG.registry.models);
+  const drafts=Object.entries(REG.registry.drafts);
+  const devs=Object.keys(REG.devices), links=Object.keys(REG.links);
+  const rows=[
+    ["模型 model_id","model_id",`<select>${models.map(([k,m])=>`<option value="${k}">${m.label}</option>`).join("")}</select>`],
+    ["草稿 draft_id","draft_id",`<select id="draftSel">${drafts.map(([k,d])=>`<option value="${k}">${d.label}</option>`).join("")}
+       ${Object.keys(REG.registry.unsupported_methods).map(k=>`<option value="${k}" disabled>${k}（unsupported）</option>`).join("")}</select>`],
+    ["草稿候选数 K","k",`<input type="number" min="1" max="32" value="4">`],
+    ["TP 并行","tp",`<input type="number" min="1" max="64" value="8">`],
+    ["并发 batch","batch",`<input type="number" min="1" max="512" value="1">`],
+    ["上下文 ctx","ctx_tokens",`<input type="number" min="1" value="32768">`],
+    ["接受率 α","__alpha",`<input type="number" min="0" max="1" step="0.01" value="0.75">`],
+    ["部署主视图","__mode",`<select><option value="baseline">baseline 普通 decode</option>
+       <option value="colocated">colocated 同卡投机</option>
+       <option value="dt_serial">dt_serial DT 分离串行</option>
+       <option value="dt_pipeline_ideal">dt_pipeline_ideal 理想流水</option></select>`],
+    ["目标设备","target_device",`<select>${devs.map(d=>`<option value="${d}">${d}</option>`).join("")}</select>`],
+    ["草稿设备","draft_device",`<select>${devs.map(d=>`<option value="${d}">${d}</option>`).join("")}</select>`],
+    ["DT 链路","link",`<select>${links.map(d=>`<option value="${d}">${d}</option>`).join("")}</select>`],
+  ];
+  $("#form").innerHTML=rows.map(([l,k,c])=>`<div class="form-row"><label>${l}</label>${c}</div>`).join("");
+  $("#form").querySelectorAll("select,input").forEach(el=>{
+    el.addEventListener("change",()=>{el.style.borderColor=""});
+  });
+}
+function loadScenario(sc){
+  // 表单控件按 buildForm 的固定顺序：model,draft,k,tp,batch,ctx,alpha,mode,
+  // target_device,draft_device,link —— 与 scenarioFromForm 的解包顺序一致
+  const vals=[sc.model_id,sc.draft_id,sc.k,sc.tp,sc.batch,sc.ctx_tokens,
+              (sc.acceptance&&sc.acceptance.chain_alpha)??0.75,
+              (sc.deployment&&sc.deployment.mode)||"colocated",
+              sc.target_device,sc.draft_device,sc.link];
+  [...$("#form").querySelectorAll("select,input")].forEach((el,i)=>{
+    if(vals[i]!==undefined) el.value=vals[i];
+  });
+  $("#msg").textContent=sc.notes?("场景说明："+sc.notes):"";
+}
+function scenarioFromForm(){
+  const rows=[...$("#form").querySelectorAll("select,input")];
+  const [model_id,draft_id,k,tp,batch,ctx_tokens,alpha,mode,target_device,draft_device,link]=rows.map(r=>r.value);
+  return {schema_version:"0.1",name:"工作台即时场景",model_id,draft_id,
+    k:+k,tp:+tp,batch:+batch,ctx_tokens:+ctx_tokens,
+    deployment:{mode},target_device,draft_device,link,
+    acceptance:{kind:"chain_alpha",chain_alpha:+alpha},seed:0,notes:""};
+}
+async function doRun(){
+  $("#runBtn").disabled=true;$("#msg").textContent="计算中…";
+  try{
+    const r=await fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(scenarioFromForm())});
+    RUN=await r.json();
+    if(RUN.error){$("#msg").textContent="错误："+RUN.error;return;}
+    $("#msg").textContent="";
+    $("#provBox").innerHTML=Object.entries(RUN.provenance||{}).map(([k,v])=>`<div><b>${k}</b>: ${v}</div>`).join("");
+    renderCmp();
+  }catch(e){$("#msg").textContent="网络错误："+e;}
+  finally{$("#runBtn").disabled=false;}
+}
+async function doSweep(){
+  if(!RUN){await doRun();}
+  $("#msg").textContent="扫描中（~50 次重算）…";
+  try{
+    const r=await fetch("/api/sweep",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(scenarioFromForm())});
+    SWEEP=await r.json();
+    $("#msg").textContent="";
+    showTab("sweep");
+  }catch(e){$("#msg").textContent="扫描失败："+e;}
+}
+function showTab(t){
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+  if(t==="cmp")renderCmp(); if(t==="ops")renderOps(); if(t==="tl")renderTl();
+  if(t==="src")renderSrc(); if(t==="sweep")renderSweep();
+}
+document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+
+function renderCmp(){
+  if(!RUN){$("#view").innerHTML='<span class="dim">先运行场景。</span>';return;}
+  const m=RUN.metrics,mem=m.memory;
+  const cards=[
+    ["状态 "+RUN.status, RUN.status_detail||"ok", ""],
+    ["E[n] 期望提交长度", fmt(m.E_committed_len), "含 bonus"],
+    ["P_full = α^K", fmt(m.P_full,4), "全接受轮概率"],
+    ["E[M_draft,0]", fmt(m.E_draft_step0_tokens,4), "Catch-up 1+α^K"],
+    ["t_base 基线", fmt(m.t_base_ms)+" ms", "T0 roofline"],
+    ["t_verify 验证步", fmt(m.t_verify_ms)+" ms", "M=B·(K+1)="+m.verify_tokens_M],
+    ["t_draft 同卡/DT", fmt(m.t_draft_colocated_ms)+" / "+fmt(m.t_draft_dt_ms)+" ms", ""],
+    ["显存/卡 权重+KV", (mem.weight_capacity_per_card/1e9).toFixed(1)+" + "+(mem.kv_retained_per_card/1e9).toFixed(2)+" GB", mem.oom_target?"OOM!":"ok"],
+  ];
+  const rows=(RUN.comparisons||[]).map(c=>`<tr>
+    <td>${c.deployment}</td><td class="num">${fmt(c.tpot_ms,4)}</td>
+    <td class="num ${c.speedup>=1?"ok":"bad"}">${fmt(c.speedup)}</td>
+    <td class="num">${fmt(c.tokens_per_round)}</td>
+    <td class="num">${fmt(c.round_ms,3)}</td>
+    <td class="dim">${(REG.formulas[c.formula_id]||{}).expr||c.formula_id}</td></tr>`).join("");
+  const be=m.breakeven_alpha||{};
+  $("#view").innerHTML=`
+   <div class="cards">${cards.map(c=>`<div class="card"><div class="k">${c[0]}</div>
+     <div class="v">${c[1]}</div><div class="s">${c[2]}</div></div>`).join("")}</div>
+   <table><tr><th>部署</th><th>TPOT ms/token</th><th>加速比 vs 基线</th><th>E[n]</th>
+     <th>轮时延 ms</th><th>公式（溯源）</th></tr>${rows}</table>
+   <p class="prov" style="margin-top:8px">盈亏平衡 α*（speedup=1）：
+     colocated=${fmt(be.colocated,4)} · dt_serial=${fmt(be.dt_serial,4)} ·
+     dt_pipeline_ideal=${fmt(be.dt_pipeline_ideal,4)}（"nan"=扫描域内无反转）。
+     摘要 digest：scenario=${RUN.digests.scenario} model=${RUN.digests.model}。
+     全部时延为 T0 公式估算。</p>`;
+}
+let OPS_FILTER={stage:""};
+function renderOps(){
+  if(!RUN){$("#view").innerHTML='<span class="dim">先运行场景。</span>';return;}
+  const stages=[...new Set(RUN.ops.map(o=>o.stage))];
+  if(!OPS_FILTER.stage)OPS_FILTER.stage=stages[0];
+  const rows=RUN.ops.filter(o=>o.stage===OPS_FILTER.stage).map(o=>`<tr>
+    <td>${o.layer}</td><td>${o.op}</td><td class="num">${gi(o.flops)}</td>
+    <td class="num">${gi(o.weight_read)}</td><td class="num">${gi(o.act_read+o.act_write)}</td>
+    <td class="num">${gi(o.kv_read)}</td><td class="num">${gi(o.kv_write)}</td>
+    <td class="num">${fmt(o.t_ms,4)}</td><td class="${o.bound==="compute"?"warn":"dim"}">${o.bound||""}</td>
+    <td class="dim" title="${(REG.formulas[o.formula_id]||{}).source||""}">${o.formula_id}</td>
+    <td class="dim" style="white-space:normal;max-width:340px">${o.shape_note}</td></tr>`).join("");
+  $("#view").innerHTML=`
+   <div style="margin-bottom:8px">阶段：
+     <select onchange="OPS_FILTER.stage=this.value;renderOps()">
+       ${stages.map(s=>`<option ${s===OPS_FILTER.stage?"selected":""}>${s}</option>`).join("")}
+     </select>
+     <span class="prov">字节/FLOPs 为每卡口径（TP 分片后）；悬停公式 id 查看出处。
+     字节列：权重读 | 激活读写 | KV 读 | KV 写。</span></div>
+   <div class="ledger-wrap"><table>
+     <tr><th>层</th><th>算子</th><th>FLOPs</th><th>权重读 B</th><th>激活读写 B</th>
+     <th>KV 读 B</th><th>KV 写 B</th><th>t ms (T0)</th><th>受限</th><th>公式</th><th>形状</th></tr>
+     ${rows}</table></div>`;
+}
+function renderTl(){
+  if(!RUN){$("#view").innerHTML='<span class="dim">先运行场景。</span>';return;}
+  const evs=RUN.timeline; if(!evs.length){$("#view").innerHTML="无时间线";return;}
+  const t1=Math.max(...evs.map(e=>e.end_ms))||1;
+  const lanes=[...new Set(evs.map(e=>e.lane))];
+  const W=860,lh=44,pad=46,H=pad+lanes.length*lh+16;
+  const colors={draft:"#4cc2ff",target:"#39d98a",link:"#ffb454",commit:"#c792ea"};
+  let svg=`<svg viewBox="0 0 ${W} ${H}" class="gantt" width="100%">`;
+  lanes.forEach((ln,i)=>{
+    const y=pad+i*lh;
+    svg+=`<text x="4" y="${y+16}" class="lane-label">${ln}</text>
+      <line x1="${pad}" y1="${y+22}" x2="${W-8}" y2="${y+22}" stroke="#2a3644"/>`;
+  });
+  evs.forEach(e=>{
+    const li=lanes.indexOf(e.lane),y=pad+li*lh;
+    const x0=pad+e.start_ms/t1*(W-pad-16),x1=pad+e.end_ms/t1*(W-pad-16);
+    if(x1-x0>0.5)
+      svg+=`<rect x="${x0}" y="${y+8}" width="${Math.max(x1-x0,1.5)}" height="16" rx="3"
+        fill="${colors[e.lane]||"#8ba0b6"}" opacity="0.9"><title>${e.label}
+ ${e.start_ms.toFixed(3)} → ${e.end_ms.toFixed(3)} ms</title></rect>`;
+    svg+=`<text x="${x0+2}" y="${y+6}" font-size="9.5" fill="#8ba0b6">${e.label.slice(0,26)}</text>`;
+  });
+  svg+=`<text x="${pad}" y="${H-2}" font-size="10" fill="#8ba0b6">0 ms</text>
+        <text x="${W-60}" y="${H-2}" font-size="10" fill="#8ba0b6">${t1.toFixed(3)} ms</text></svg>`;
+  $("#view").innerHTML=`<div class="prov" style="margin-bottom:6px">代表一轮投机（主视图部署
+    ${RUN.scenario.deployment.mode}）的解析串行/理想流水时间线。dt_pipeline_ideal 为
+    跨微批无损交错的稳态下界（乐观标注）；事件状态机（排队/竞争）属 M3。</div>${svg}`;
+}
+function renderSrc(){
+  if(!RUN){$("#view").innerHTML='<span class="dim">先运行场景。</span>';return;}
+  $("#view").innerHTML=`<h2 style="color:var(--acc);font-size:13px;margin-bottom:8px">假设（assumptions）</h2>
+   <ul class="assump">${RUN.assumptions.map(a=>`<li>${a}</li>`).join("")}</ul>
+   <h2 style="color:var(--acc);font-size:13px;margin:12px 0 8px">逐类数字来源</h2>
+   <ul class="assump">${Object.entries(RUN.provenance).map(([k,v])=>`<li><b>${k}</b> — ${v}</li>`).join("")}</ul>
+   <h2 style="color:var(--acc);font-size:13px;margin:12px 0 8px">公式注册表（节选）</h2>
+   <table><tr><th>id</th><th>表达式</th><th>出处</th></tr>
+   ${Object.entries(REG.formulas).map(([k,f])=>`<tr><td>${k}</td>
+     <td style="white-space:normal">${f.expr}</td><td class="dim" style="white-space:normal">${f.source}</td></tr>`).join("")}</table>`;
+}
+function renderSweep(){
+  if(!SWEEP){$("#view").innerHTML='<span class="dim">先执行边界扫描。</span>';return;}
+  const defs=[["alpha","Speedup vs 接受率 α",false],["k","Speedup vs 草稿候选数 K",false],
+    ["ctx","Speedup vs 上下文长度",true],["batch","Speedup vs 并发 B",true],
+    ["link_bw","Speedup vs DT 链路带宽",true],["draft_bw","Speedup vs 草稿设备带宽",true]];
+  const cols=["#4cc2ff","#39d98a","#ffb454","#c792ea"];
+  $("#view").innerHTML=`<div class="prov" style="margin-bottom:8px">收益边界：
+    α* 盈亏平衡=${JSON.stringify(SWEEP.boundaries.alpha_breakeven)} ·
+    K 最优=${JSON.stringify(SWEEP.boundaries.k_optimal)} ·
+    DT 反超同卡的链路带宽=${SWEEP.boundaries.dt_serial_vs_colocated_link??
+      SWEEP.boundaries.dt_vs_colocated_link} GB/s（扫描域内）。
+    每格=独立 run()，与单场景同源同入口。</div>
+   <div class="chart-grid">${defs.map(([key,title,logx],ci)=>{
+     const scan=SWEEP[key]; const series={};
+     scan.points.forEach(p=>{for(const[d,v]of Object.entries(p.deployments)){
+       (series[d]=series[d]||[]).push([+p.value,v.speedup]);}});
+     return `<div class="chart-box"><h3>${title}</h3>${svgLines(series,logx)}
+       <div class="legend">${Object.keys(series).map((k,i)=>`<span style="color:${cols[i%4]}">■</span>${k}`).join(" · ")}</div></div>`;
+   }).join("")}</div>`;
+}
+function svgLines(series,logx){
+  const W=400,H=200,ml=42,mb=26;
+  const pts=Object.values(series).flat();
+  if(!pts.length)return"<svg></svg>";
+  const xs=pts.map(p=>logx?Math.log10(Math.max(p[0],1e-9)):p[0]);
+  const x0=Math.min(...xs),x1=Math.max(...xs),y0=0;
+  let y1=Math.max(...pts.map(p=>p[1]),1.05); y1*=1.06;
+  const px=x=>ml+(x-x0)/((x1-x0)||1)*(W-ml-10), py=y=>H-mb-(y-y0)/((y1-y0)||1)*(H-mb-14);
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+  [0,0.25,0.5,0.75,1].forEach(f=>{const y=y0+f*(y1-y0);
+    s+=`<line x1="${ml}" y1="${py(y)}" x2="${W-10}" y2="${py(y)}" stroke="#26313e"/>
+        <text x="4" y="${py(y)+3}" font-size="9" fill="#8ba0b6">${y.toFixed(1)}</text>`;});
+  s+=`<line x1="${ml}" y1="${py(1)}" x2="${W-10}" y2="${py(1)}" stroke="#5a6b7d" stroke-dasharray="4 3"/>`;
+  const cols=["#4cc2ff","#39d98a","#ffb454","#c792ea"];
+  Object.values(series).forEach((sp,i)=>{
+    const d=sp.map(p=>`${px(logx?Math.log10(Math.max(p[0],1e-9)):p[0])},${py(p[1])}`).join(" ");
+    s+=`<polyline points="${d}" fill="none" stroke="${cols[i%4]}" stroke-width="2"/>`;});
+  s+=`</svg>`;return s;
+}
+function download(name,text,type="application/json"){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([text],{type:type+";charset=utf-8"}));a.download=name;a.click();
+}
+function exportRun(){if(RUN)download("runresult.json",JSON.stringify(RUN,null,1));}
+function exportOps(){
+  if(!RUN)return;
+  const cols=["stage","layer","op","exec_count","flops","weight_read","act_read","act_write",
+    "kv_read","kv_write","scope","formula_id","t_ms","bound","shape_note"];
+  const esc=v=>String(v??"").replace(/,/g,";").replace(/\n/g," ");
+  download("ops.csv",[cols.join(",")].concat(RUN.ops.map(o=>cols.map(c=>esc(o[c])).join(","))).join("\n"),"text/csv");
+}
+document.getElementById("filein").onchange=async(e)=>{
+  const f=e.target.files[0];if(!f)return;
+  try{const sc=JSON.parse(await f.text());loadScenario(sc);$("#msg").textContent="已载入 "+f.name+"（点击运行复算）";}
+  catch(err){$("#msg").textContent="场景文件解析失败："+err;}
+};
+boot();
+</script>
+</body>
+</html>

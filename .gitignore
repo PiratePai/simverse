@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+outputs/
+docs/rebuild-20261106/references/model-verse-source/

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Simverse · 架构实验工作台</title>
+<link rel="stylesheet" href="style.css">
+<script src="fixture.js" defer></script><script src="workbench.js" defer></script>
+<body>
+<header><a class="brand" href="../plan.md"><svg viewBox="0 0 28 28" aria-hidden="true"><path d="M3 6h8v6H3zm14 10h8v6h-8zM11 9h7v10h-1M3 19h8M17 6h8"/></svg>Simverse</a><span class="breadcrumb">架构实验 / 投机解码</span><span class="demo">交互样例 · 非实测</span><button id="export" class="quiet">导出当前结果</button></header>
+<div class="workspace">
+<aside class="config" aria-label="实验配置">
+ <h1>实验配置</h1><p class="muted">每个结果都能追到它的假设。</p>
+ <label for="model">查看场景</label><select id="model"><option value="toy">微型 GQA · 教学预算</option><option value="v41">DeepSeek V4.1 · 证据审查</option><option value="next">Qwen3-Next · 层序样例</option><option value="v3">DeepSeek-V3 · 层序样例</option></select>
+ <div id="toyConfig"><label for="k">候选长度 K</label><div class="seg" id="k" role="group" aria-label="候选长度"><button data-k="2">2</button><button data-k="4" aria-pressed="true">4</button><button data-k="6">6</button></div>
+ <label for="alpha">逐位条件接受率 α</label><select id="alpha"><option value="0.5">0.50</option><option value="0.75" selected>0.75</option><option value="0.9">0.90</option></select>
+ <dl class="params"><div><dt>目标 / 草稿层数</dt><dd>2 / 1</dd></div><div><dt>上下文</dt><dd>1,024 token</dd></div><div><dt>Batch / TP</dt><dd>1 / 1</dd></div><div><dt>存储与计算</dt><dd>FP16</dd></div></dl>
+ <button class="primary" id="apply">载入预计算结果</button><p id="stale" role="status">当前结果与所选参数一致</p></div>
+ <details class="assumptions" open><summary>本例的边界</summary><p>教学设备与成本假设。可验证交互和算式，不能据此选择真实硬件。</p><a href="../principles.md">阅读计算原理</a></details>
+ <div class="side-links"><a href="../plan.md">重构计划</a><a href="../review-resolution.md">审查与裁决</a><a href="../questions.md">待决策问题</a></div>
+</aside>
+<main id="main">
+ <section class="page-title"><div><h2 id="title">把收益拆到每一次前向</h2><p id="subtitle">微型 GQA 与完整小草稿，比较三种串行执行预算。</p></div><span class="runid" id="runid">示例 #04-075</span></section>
+ <div class="notice" id="notice"><span class="notice-dot"></span><div><strong>这是可复算的教学场景</strong><span>所有时间由虚拟设备预算离线生成；生产模型的证据状态另列。</span></div><button class="text-button" id="assumptionsBtn">查看假设</button></div>
+ <section class="panel comparison" id="comparison"><div class="section-head"><h3>方案比较</h3><span>选一行检查执行，基线仅用于对比</span></div><div class="table-scroll"><table><thead><tr><th>部署方式</th><th>每轮预算</th><th>平均时间 / token</th><th>相对基线</th><th>结果身份</th><th>基线</th></tr></thead><tbody id="compareRows"></tbody></table></div><p class="table-note" id="expected"></p></section>
+ <section class="review-panel panel" id="reviewPanel" hidden></section>
+ <div class="analysis-grid">
+  <section class="panel structure"><div class="section-head"><h3 id="graphTitle">目标模型 · 第 0 层</h3><select id="layer" aria-label="选择层"><option value="0">Layer 0</option><option value="1">Layer 1</option><option value="-1">Embedding / Head</option></select></div><div class="graph-caption" id="graphCaption">选择计算单元，同步查看字节、公式与执行位置。</div><div id="graph" class="op-graph"></div><div id="layerMap" hidden></div><div class="graph-legend"><span class="key blue"></span>可复算的教学操作 <span class="key teal"></span>已选中 <span class="key amber"></span>待核实</div></section>
+  <section class="panel inspector" aria-label="算子详情"><div class="section-head"><h3 id="opTitle">Gate / Up</h3><span class="tag" id="bound">访存受限</span></div><div id="opDetails"></div></section>
+ </div>
+ <section class="panel timeline"><div class="section-head"><h3 id="timelineTitle">执行预算 · 单请求的一轮</h3><span id="timelineType">解析期望示意 / 非事件实录</span></div><div id="timeline"></div><p id="timelineNote" class="table-note"></p></section>
+ <footer><span>数据入口：离线 ResultBundle 样例</span><span>公式、证据、可行性分别呈现</span><a href="README.md">样例说明与复现</a></footer>
+</main>
+</div>
+<dialog id="evidence"><div class="dialog-head"><h2>本例如何得到数字</h2><button id="closeEvidence" aria-label="关闭假设说明">关闭</button></div><p>这是UI契约样例。前端选择已生成的场景，不重新计算物理模型。</p><ul id="assumptionsList"></ul><a href="build_fixture.py">查看离线生成器</a><p>改变 K 或 α 后，先显示“结果待更新”，载入后四个视图共同切换。</p></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+</body></html>

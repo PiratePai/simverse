@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-09",
+  "scope": "document consistency only; not implementation verification",
+  "answered_directional_questions": [
+    "Q1",
+    "Q2",
+    "Q3",
+    "Q4",
+    "Q5",
+    "Q6",
+    "Q7",
+    "Q8",
+    "Q9",
+    "Q10",
+    "Q11",
+    "Q12"
+  ],
+  "catalog_counts": {
+    "P": 8,
+    "M": 23,
+    "V": 12
+  },
+  "broken_local_links": [],
+  "pending_details": [
+    "private remote provider/account/URL",
+    "exact model and draft revisions/checkpoints",
+    "scan parameters and limits",
+    "measured responsiveness targets",
+    "future hardware/profile/cost data"
+  ],
+  "hashes": {
+    "questions.md": "c51a35465ccdb0c0a8bdbd67bf6deb3b477f0c1fc35c18e27448366a402ba11b",
+    "plan.md": "3bdabfd38c12dfa1ee18bcdeb2e7a1f3e40251d4ac092bff9f59dc77668b7d9c",
+    "ui-data-contract.md": "fe9f82a23c91bf6d38d077db3936683885c5fecd82465e06d9d79dfa0a1af1cd",
+    "README.md": "11e5b7d5c7a8f339b9d83503626b9784712ec05ffd0ebc97dc5cb816acd5fafa",
+    "validation.md": "ee3c458ff4b90377ca3573b42c73568493f3d34a226c7267698da8c0341bc4ae"
+  }
+}

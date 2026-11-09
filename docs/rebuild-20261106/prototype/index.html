@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simverse · 完整四联动工作台</title>
+<style>
+  :root {
+    --ink: #0f172a;
+    --ink2: #334155;
+    --ink3: #64748b;
+    --line: #e2e8f0;
+    --line-strong: #cbd5e1;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --blue: #1d4ed8;
+    --blue-mid: #2563eb;
+    --blue-soft: #eff6ff;
+    --blue-border: #bfdbfe;
+    --teal: #0f766e;
+    --teal-soft: #f0fdfa;
+    --teal-border: #99f6e4;
+    --red: #b91c1c;
+    --red-soft: #fef2f2;
+    --red-border: #fecaca;
+    --amber: #b45309;
+    --amber-soft: #fffbeb;
+    --amber-border: #fde68a;
+    --purple: #6d28d9;
+    --purple-soft: #f5f3ff;
+    --purple-border: #ddd6fe;
+    --code-bg: #0f172a;
+    --code-ink: #e2e8f0;
+    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Courier New", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.68;
+    font-size: 14.5px;
+  }
+  a { color: var(--blue-mid); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Top Global Header & View Switcher */
+  .top-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(15, 23, 42, 0.96);
+    backdrop-filter: blur(8px);
+    color: #fff;
+    border-bottom: 1px solid #1e293b;
+    padding: 10px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .brand-logo {
+    background: linear-gradient(135deg, #3b82f6, #14b8a6);
+    color: #fff;
+    font-weight: 800;
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+  }
+  .brand-title {
+    font-weight: 700;
+    font-size: 15.5px;
+    letter-spacing: 0.3px;
+  }
+  .brand-sub {
+    font-size: 12px;
+    color: #94a3b8;
+  }
+  .main-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .main-tab-btn {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #334155;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: var(--sans);
+  }
+  .main-tab-btn:hover {
+    background: #334155;
+    color: #fff;
+  }
+  .main-tab-btn.active {
+    background: #2563eb;
+    color: #fff;
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  }
+  .main-tab-btn .pill {
+    display: inline-block;
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: 99px;
+    margin-left: 5px;
+    background: rgba(255,255,255,0.16);
+    color: #fff;
+  }
+
+  /* View Containers */
+  .view-panel { display: none; }
+  .view-panel.active { display: block; }
+
+  /* Two-column layout with TOC */
+  .doc-layout {
+    display: flex;
+    max-width: 1480px;
+    margin: 0 auto;
+  }
+  nav.side-toc {
+    width: 268px;
+    flex: 0 0 268px;
+    position: sticky;
+    top: 57px;
+    height: calc(100vh - 57px);
+    overflow-y: auto;
+    padding: 20px 14px 40px 18px;
+    border-right: 1px solid var(--line);
+    background: #ffffff;
+    font-size: 12.8px;
+  }
+  nav.side-toc .toc-head {
+    font-weight: 800;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--ink3);
+    margin: 0 0 10px 8px;
+  }
+  nav.side-toc a {
+    display: block;
+    color: var(--ink2);
+    padding: 5px 8px 5px 10px;
+    border-left: 2px solid transparent;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 2px;
+    line-height: 1.4;
+  }
+  nav.side-toc a.lv2 {
+    padding-left: 22px;
+    font-size: 12px;
+    color: var(--ink3);
+  }
+  nav.side-toc a:hover {
+    background: var(--blue-soft);
+    color: var(--blue);
+    text-decoration: none;
+  }
+  nav.side-toc a.active {
+    color: var(--blue);
+    border-left-color: var(--blue);
+    background: var(--blue-soft);
+    font-weight: 700;
+  }
+
+  .doc-main {
+    flex: 1;
+    min-width: 0;
+    padding: 30px 44px 80px;
+    max-width: 1140px;
+  }
+  .full-main {
+    max-width: 1460px;
+    margin: 0 auto;
+    padding: 24px 28px 80px;
+  }
+
+  /* Typography & Hero */
+  .hero-banner {
+    background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+    border: 1px solid var(--blue-border);
+    border-left: 5px solid var(--blue);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 26px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+  }
+  .hero-banner h1 {
+    font-size: 24px;
+    margin: 0 0 8px;
+    color: var(--ink);
+  }
+  .hero-banner .sub {
+    color: var(--ink2);
+    font-size: 13.5px;
+    margin-bottom: 12px;
+  }
+  .badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    font-size: 11.8px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink2);
+    font-weight: 600;
+  }
+  .badge.ok { background: var(--teal-soft); color: var(--teal); border-color: var(--teal-border); }
+  .badge.blue { background: var(--blue-soft); color: var(--blue); border-color: var(--blue-border); }
+  .badge.warn { background: var(--amber-soft); color: var(--amber); border-color: var(--amber-border); }
+  .badge.new { background: var(--purple-soft); color: var(--purple); border-color: var(--purple-border); }
+
+  section { margin: 34px 0; }
+  section > h2 {
+    font-size: 19.5px;
+    border-left: 4px solid var(--blue);
+    padding-left: 12px;
+    margin: 0 0 14px;
+    scroll-margin-top: 72px;
+    color: var(--ink);
+  }
+  section > h3 {
+    font-size: 16px;
+    margin: 22px 0 10px;
+    color: var(--ink);
+    scroll-margin-top: 72px;
+  }
+  section > h4 {
+    font-size: 14px;
+    margin: 16px 0 8px;
+    color: var(--ink2);
+  }
+  p { margin: 8px 0; }
+  ul, ol { margin: 6px 0 10px; padding-left: 22px; }
+  li { margin: 4px 0; }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 15px 18px;
+    margin: 12px 0;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  }
+  .card.blue { border-left: 4px solid var(--blue); background: #fcfdff; }
+  .card.teal { border-left: 4px solid var(--teal); background: #fbfffe; }
+  .card.warn { border-left: 4px solid var(--amber); background: #fffdf9; }
+  .card.red { border-left: 4px solid var(--red); background: #fffafa; }
+  .card.purple { border-left: 4px solid var(--purple); background: #fdfcff; }
+  .card .cap {
+    font-weight: 800;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Grid helpers */
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+  /* Tables */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12.8px;
+    margin: 12px 0;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th {
+    background: #f1f5f9;
+    text-align: left;
+    font-weight: 700;
+    color: #1e293b;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 8px 10px;
+    vertical-align: top;
+  }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  td.yes { color: var(--teal); font-weight: 700; }
+  td.no { color: var(--red); font-weight: 700; }
+  td.mid { color: var(--amber); font-weight: 700; }
+  td.new { color: var(--purple); font-weight: 700; }
+
+  /* Code & Pre */
+  code {
+    font-family: var(--mono);
+    font-size: 12.2px;
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: #0f172a;
+    border: 1px solid #e2e8f0;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    border-radius: 10px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 12px 0;
+  }
+  pre code { background: none; color: inherit; padding: 0; border: none; }
+
+  /* Tags */
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 5px;
+    padding: 1px 7px;
+    margin-right: 5px;
+    vertical-align: 1px;
+  }
+  .tag.p0 { background: var(--red-soft); color: var(--red); border: 1px solid var(--red-border); }
+  .tag.p1 { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber-border); }
+  .tag.p2 { background: #f1f5f9; color: var(--ink2); border: 1px solid var(--line-strong); }
+  .tag.fixed { background: var(--teal-soft); color: var(--teal); border: 1px solid var(--teal-border); }
+  .tag.v3 { background: var(--purple-soft); color: var(--purple); border: 1px solid var(--purple-border); }
+
+  /* Architecture Stack Diagram */
+  .arch { display: flex; flex-direction: column; gap: 0; margin: 14px 0; }
+  .arch .layer { border-radius: 10px; padding: 11px 16px; border: 1.5px solid; }
+  .arch .layer .lname { font-weight: 800; font-size: 13.5px; }
+  .arch .layer .ldesc { font-size: 12.5px; color: var(--ink2); margin-top: 3px; }
+  .arch .l5 { background: var(--blue-soft); border-color: var(--blue-border); }
+  .arch .l4 { background: var(--purple-soft); border-color: var(--purple-border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .arch .l4 > div { background: #fff; border: 1px solid var(--purple-border); border-radius: 8px; padding: 8px 12px; }
+  .arch .l1 { background: var(--teal-soft); border-color: var(--teal-border); }
+  .arch .l0 { background: #fff7ed; border-color: #fed7aa; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .arch .l0 > div { background: #fff; border: 1px solid #fed7aa; border-radius: 8px; padding: 8px 12px; }
+  .arch .arrow { text-align: center; color: var(--ink3); font-size: 13px; padding: 3px 0; font-weight: 600; }
+
+  /* Pipeline Flow */
+  .pipe { display: flex; align-items: stretch; gap: 8px; margin: 14px 0; flex-wrap: wrap; }
+  .pipe .box { flex: 1 1 160px; border-radius: 10px; padding: 10px 12px; border: 1.5px solid; background: #fff; }
+  .pipe .box b { display: block; font-size: 13px; margin-bottom: 3px; }
+  .pipe .box small { font-size: 11.8px; color: var(--ink2); display: block; }
+  .pipe .arr { align-self: center; color: var(--ink3); font-weight: 800; font-size: 16px; }
+
+  /* Milestones */
+  .ms { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 14px 0; }
+  .ms .m { border-radius: 9px; padding: 10px; font-size: 12px; border: 1.5px solid var(--line-strong); background: #fff; }
+  .ms .m b { display: block; font-size: 13px; margin-bottom: 4px; color: var(--blue); }
+
+  details {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px 14px;
+    margin: 8px 0;
+  }
+  details summary { cursor: pointer; font-weight: 600; font-size: 13.2px; }
+  details[open] { padding-bottom: 12px; }
+  .footnote { color: var(--ink3); font-size: 12px; }
+
+  /* ================= Interactive Workbench Prototype (Tab 4) ================= */
+  .wb-shell {
+    border: 1.5px solid #1e293b;
+    border-radius: 12px;
+    background: #ffffff;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+  .wb-topbar {
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 10px 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    border-bottom: 1px solid #334155;
+  }
+  .wb-ctrl {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .wb-ctrl label {
+    font-size: 10.5px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 700;
+  }
+  .wb-ctrl select, .wb-ctrl input {
+    background: #1e293b;
+    color: #f8fafc;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: var(--sans);
+  }
+  .wb-kpi-strip {
+    background: #f1f5f9;
+    border-bottom: 1px solid var(--line);
+    padding: 8px 14px;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+  }
+  .kpi-box {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 10px;
+  }
+  .kpi-box .k-label { font-size: 11px; color: var(--ink3); font-weight: 600; }
+  .kpi-box .k-val { font-size: 15px; font-weight: 800; color: var(--ink); font-family: var(--mono); }
+  .kpi-box .k-sub { font-size: 10.5px; color: var(--teal); font-weight: 600; }
+
+  .wb-grid {
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr 1.15fr;
+    gap: 10px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+  .wb-pane {
+    background: #fff;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .wb-pane-head {
+    background: #f8fafc;
+    border-bottom: 1px solid var(--line);
+    padding: 7px 12px;
+    font-weight: 700;
+    font-size: 12.5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .wb-pane-body {
+    padding: 10px;
+    overflow-y: auto;
+    max-height: 390px;
+  }
+
+  /* Matrix Cell Interactive */
+  .mx-table { width: 100%; border-collapse: collapse; font-size: 11.5px; margin: 0; }
+  .mx-table th, .mx-table td { padding: 5px 6px; text-align: center; border: 1px solid var(--line); }
+  .mx-cell {
+    cursor: pointer;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-weight: 700;
+    transition: all 0.12s;
+  }
+  .mx-cell:hover { outline: 2px solid var(--blue-mid); }
+  .mx-cell.selected { outline: 2.5px solid var(--blue); background: var(--blue-soft) !important; color: var(--blue); }
+  .mx-cell.unavail { background: #f1f5f9; color: #94a3b8; font-weight: 400; cursor: not-allowed; }
+
+  /* Structure DAG Nodes */
+  .dag-list { display: flex; flex-direction: column; gap: 5px; }
+  .dag-node {
+    border: 1.5px solid var(--line-strong);
+    border-radius: 7px;
+    padding: 6px 10px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fff;
+    transition: all 0.12s;
+    font-size: 12px;
+  }
+  .dag-node:hover { border-color: var(--blue-mid); background: #f8fafc; }
+  .dag-node.active { border-color: var(--blue); background: var(--blue-soft); box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+  .dag-node.highlight-phase { border-left: 4px solid var(--teal); }
+  .dag-badge {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #f1f5f9;
+    color: var(--ink2);
+  }
+  .dag-badge.mem { background: #fef3c7; color: #92400e; }
+  .dag-badge.cmp { background: #dcfce7; color: #166534; }
+  .dag-badge.com { background: #ede9fe; color: #5b21b6; }
+
+  /* Timeline Gantt */
+  .wb-timeline-pane {
+    margin: 0 10px 10px;
+    background: #fff;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .tl-track {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+  }
+  .tl-label {
+    width: 120px;
+    flex: 0 0 120px;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--ink2);
+  }
+  .tl-bars {
+    flex: 1;
+    display: flex;
+    height: 26px;
+    background: #f1f5f9;
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+  .tl-seg {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 10.5px;
+    font-family: var(--mono);
+    font-weight: 600;
+    cursor: pointer;
+    border-right: 1px solid rgba(255,255,255,0.35);
+    overflow: hidden;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+  }
+  .tl-seg:hover { opacity: 0.88; }
+  .tl-seg.active { outline: 2px solid #0f172a; z-index: 2; }
+
+  @media (max-width: 1100px) {
+    nav.side-toc { display: none; }
+    .doc-main { padding: 20px 16px 60px; }
+    .grid-2, .grid-3, .wb-grid, .arch .l4, .arch .l0 { grid-template-columns: 1fr; }
+    .wb-kpi-strip { grid-template-columns: repeat(2, 1fr); }
+    .ms { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+<style>
+.review-strip{background:#fff8e6;border:1px solid #e5c98a;padding:12px 16px;border-radius:8px;margin:12px 0;color:#674414;font-size:13px}.review-strip p{margin:6px 0}.sample-label{font-size:12px!important;color:#765019;background:#fff8e8;padding:8px;border-radius:5px}.phase-demo{padding:10px;margin:5px;border:1px solid #b7c9df;border-radius:5px;background:white;cursor:pointer}.top-header a{color:#dbeafe;text-underline-offset:4px;font-size:13px}.top-header button{padding:8px 12px;border:1px solid #94a3b8;border-radius:5px;cursor:pointer}.wb-pane-body{overflow-x:auto}.mx-table{min-width:450px}.mx-cell,.dag-node{cursor:pointer}.wb-topbar{align-items:end}.kpi-box .k-val{font-size:20px}.kpi-box .k-sub{min-height:30px}.wb-grid{grid-template-columns:minmax(420px,1.15fr) minmax(270px,.8fr) minmax(330px,1fr)}.wb-pane{min-width:0}button:focus-visible,select:focus-visible,[role=button]:focus-visible,a:focus-visible{outline:3px solid #1d4ed8;outline-offset:3px}#review-status{font-size:12px}.wb-ctrl select{max-width:100%}
+@media(max-width:1200px){.wb-grid{grid-template-columns:1fr 1fr}.wb-grid>.wb-pane:first-child{grid-column:1/-1}.wb-kpi-strip{grid-template-columns:repeat(4,1fr)}}
+@media(max-width:720px){.wb-grid{display:block}.wb-pane{margin-bottom:14px}.wb-topbar{display:grid;grid-template-columns:1fr 1fr}.wb-ctrl{min-width:0!important}.wb-ctrl select{width:100%;min-width:0;font-size:12px}.wb-kpi-strip{grid-template-columns:repeat(2,1fr)}.full-main{padding:12px!important}.top-header{padding:12px}.wb-pane-head{flex-wrap:wrap}.tl-bars{min-width:550px}#timeline-tracks-container{overflow-x:auto}.review-strip{font-size:12px}}
+</style></head><body><header class="top-header"><div class="brand"><span class="brand-logo">simverse</span><span class="brand-title">架构实验工作台</span><span class="brand-sub">复用 v3 UI · 评审修订</span></div><nav class="main-tabs"><a href="../plan.md">重构计划</a><a href="../principles.md">原理</a><a href="../review-resolution.md">审查裁决</a><a href="teaching.html">可复算微型样例</a><a href="reference-v3.html">原版资料</a><button onclick="exportUiScenario()">导出场景</button></nav></header><div id="tab-workbench" class="view-panel active">
+  <div class="full-main" style="padding-top:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+      <div>
+        <strong style="font-size:16px;">架构实验 · 一屏四联动工作台</strong>
+        <span style="font-size:12.5px;color:var(--ink2);margin-left:8px;">点击左上【加速比矩阵单元格】、中部【网络结构算子节点】或底部【时间轴阶段条】，观察四视图实时联动与 Roofline 坐标跳变</span>
+      </div>
+      <div class="badges">
+        <span class="badge blue" id="wb-active-recipe-badge">Target: DeepSeek V4.1 Flash (H200 TP8 · vllm-cuda)</span>
+        <span class="badge ok" id="wb-draft-recipe-badge">Draft: DFlash2-2.0B (L40S TP1 · 异构 DT)</span>
+      </div>
+    </div>
+
+    <section class="review-strip" aria-label="数据与证据状态"><strong>界面复用版 · 所有数值均为交互展示数据</strong><p>保留原 v3 的信息密度和联动方式。模型层序、方法、量化、消息协议与容量尚未全部绑定执行核，不能据此推断真实加速比。<a href="../review-resolution.md">查看已核对的问题</a></p><div id="review-status" role="status"></div></section><div class="wb-shell">
+      <!-- Top Scenario Bar -->
+      <div class="wb-topbar">
+        <div class="wb-ctrl">
+          <label for="sel-target">主模型 (Target)</label>
+          <select id="sel-target">
+            <option value="dsv41">DeepSeek V4.1 Flash (MLA+CSA2+MoE)</option>
+            <option value="qwen3">Qwen3-Next-80B-A3B (GDN+FullAttn)</option>
+          </select>
+        </div>
+        <div class="wb-ctrl">
+          <label for="sel-method">草稿与投机方法 (SpecMethod)</label>
+          <select id="sel-method">
+            <option value="dflash2" selected>DFlash2 (2.0B 并行块 B=8, iters=1)</option>
+            <option value="dflash">DFlash (Dense 并行块 B=8, iters=2)</option>
+            <option value="dspark">链式 MoE 代理 (原版 DSpark 占位)</option>
+            <option value="mtp">MTP (内置 1层 0.09B 链式 γ=4)</option>
+            <option value="custom">Custom-Draft-1.8B (自回归链 γ=4)</option>
+          </select>
+        </div>
+        <div class="wb-ctrl">
+          <label for="sel-deploy">当前检视部署方式 (Deployment)</label>
+          <select id="sel-deploy">
+            <option value="no_spec">① 无投机基线 (Target Only)</option>
+            <option value="colocated">② 同卡混部串行 (Co-located)</option>
+            <option value="dt_serial">③ 同构 DT 分离串行 (RDMA)</option>
+            <option value="dt_hetero" selected>④ 异构 DT 分离 (H200 TP8 + L40S TP1)</option>
+            <option value="dt_pipe_mb">⑤ 异构 DT 微批流水线 (Microbatch=2)</option>
+            <option value="dt_pipe_spec">⑥ 异构 DT 超前流水线 (β=0.82)</option>
+          </select>
+        </div>
+        <div class="wb-ctrl">
+          <label for="inp-isl">ISL / OSL</label>
+          <select id="inp-isl">
+            <option value="4096">4096 / 1024</option>
+            <option value="8192" selected>8192 / 1024</option>
+            <option value="32768">32768 / 2048</option>
+          </select>
+        </div>
+        <div class="wb-ctrl">
+          <label for="inp-alpha">接受率 α (或等效 τ)</label>
+          <select id="inp-alpha">
+            <option value="0.65">α = 0.65 (保守)</option>
+            <option value="0.78" selected>α = 0.78 (演示输入)</option>
+            <option value="0.88">α = 0.88 (高匹配代码/数学)</option>
+          </select>
+        </div>
+        <div class="wb-ctrl">
+          <label for="sel-feat">服务化特性包 (Features)</label>
+          <select id="sel-feat">
+            <option value="cg_on" selected>CUDA Graph ON + FlashMLA Absorbed</option>
+            <option value="eager">Eager (No CUDA Graph) + Paged KV</option>
+            <option value="prefix50">CUDA Graph + Prefix Cache (h=50%)</option>
+            <option value="ascend">vllm-ascend (昇腾 910B2 异构草稿)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 7 KPI Strip -->
+      <div class="wb-kpi-strip">
+        <div class="kpi-box">
+          <div class="k-label">等效 TPOT (每 token 时延)</div>
+          <div class="k-val" id="kpi-tpot">2.18 ms</div>
+          <div class="k-sub" id="kpi-tpot-delta">基线 4.86 ms (-55.1%)</div>
+        </div>
+        <div class="kpi-box">
+          <div class="k-label">相对无投机基线加速比</div>
+          <div class="k-val" id="kpi-speedup" style="color:var(--blue)">2.23x</div>
+          <div class="k-sub" id="kpi-throughput">458.7 tokens/s</div>
+        </div>
+        <div class="kpi-box">
+          <div class="k-label">每轮期望产出 E[n] (含Bonus)</div>
+          <div class="k-val" id="kpi-en">4.36 tok</div>
+          <div class="k-sub" id="kpi-k-info">S_draft=1, M_draft=9, K=8</div>
+        </div>
+        <div class="kpi-box">
+          <div class="k-label">单轮总耗时 T_round</div>
+          <div class="k-val" id="kpi-tround">9.51 ms</div>
+          <div class="k-sub" id="kpi-tround-break">Draft 1.82 + Comm 0.24 + Verify 7.45</div>
+        </div>
+        <div class="kpi-box">
+          <div class="k-label">MoE 权重读放大（展示值）</div>
+          <div class="k-val" id="kpi-moe-u">4.12x</div>
+          <div class="k-sub">M_verify=9 tokens 去重路由专家</div>
+        </div>
+        <div class="kpi-box">
+          <div class="k-label">每卡显存占用 (Target / Draft)</div>
+          <div class="k-val" id="kpi-mem">64.2 / 5.8 GB</div>
+          <div class="k-sub">可行性: 未核实 · 下列容量为占位</div>
+        </div>
+        <div class="kpi-box">
+          <div class="k-label">结果溯源与校准层级</div>
+          <div class="k-val" style="font-size:13px;">展示数据 · 未接执行核</div>
+          <div class="k-sub" id="kpi-phase-filter">当前过滤: 全部阶段 (All)</div>
+        </div>
+      </div>
+
+      <!-- 3-Column Main Panes -->
+      <div class="wb-grid">
+        <!-- Pane 1: Speedup Matrix -->
+        <div class="wb-pane">
+          <div class="wb-pane-head">
+            <span>① 部署方式 × 投机方法 加速比矩阵（点击任意格联动全屏）</span>
+            <span class="tag v3">左上主控</span>
+          </div>
+          <div class="wb-pane-body">
+            <p style="font-size:11.5px;color:var(--ink3);margin:0 0 8px;">矩阵保留原版展示数值与交互。颜色仅演示热力图；没有经过模型、硬件或部署验证，不用于方案推荐。</p>
+            <table class="mx-table" id="speedup-matrix-table">
+              <thead>
+                <tr>
+                  <th style="text-align:left;">部署拓扑 \ 方法</th>
+                  <th>MTP<br><small>(γ=4)</small></th>
+                  <th>链式代理<br><small>(非原生DSpark)</small></th>
+                  <th>DFlash<br><small>(B=8,it=2)</small></th>
+                  <th>DFlash2<br><small>(B=8,it=1)</small></th>
+                  <th>Custom<br><small>(1.8B γ=4)</small></th>
+                </tr>
+              </thead>
+              <tbody id="matrix-tbody">
+                <!-- Populated dynamically by JS -->
+              </tbody>
+            </table>
+            <div style="margin-top:10px;padding:8px 10px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;font-size:11.8px;" id="matrix-insight-box">
+              <!-- Dynamic insight -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Pane 2: Network Structure DAG -->
+        <div class="wb-pane">
+          <div class="wb-pane-head">
+            <span>② Target / Draft 算子分组示意（点击算子查看右侧 7 维透视）</span>
+            <button type="button" id="btn-reset-phase" style="font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid var(--line-strong);background:#fff;cursor:pointer;">显示全部阶段</button>
+          </div>
+          <div class="wb-pane-body">
+            <div class="dag-list" id="dag-node-list">
+              <!-- Populated dynamically by JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Pane 3: Operator 7-Dimension Inspector + Roofline -->
+        <div class="wb-pane">
+          <div class="wb-pane-head">
+            <span id="op-card-title">③ 计算单元 7 维透视与 Roofline</span>
+            <span class="tag fixed" id="op-bound-tag">HBM 带宽受限</span>
+          </div>
+          <div class="wb-pane-body">
+            <div id="op-detail-content">
+              <!-- Populated dynamically by JS -->
+            </div>
+            <!-- Interactive SVG Roofline -->
+            <div style="margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fcfdff;">
+              <div style="font-size:11.5px;font-weight:700;color:var(--ink2);margin-bottom:4px;display:flex;justify-content:space-between;">
+                <span id="roofline-title">Roofline 坐标图（双对数坐标：算术强度 AI vs 有效算力）</span>
+                <span style="font-family:var(--mono);font-size:11px;color:var(--blue);" id="roofline-coord">AI = 8.4 FLOP/B</span>
+              </div>
+              <svg id="roofline-svg" viewBox="0 0 380 155" style="width:100%;height:auto;display:block;"></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Full-Width Multi-Track Timeline -->
+      <div class="wb-timeline-pane">
+        <div class="wb-pane-head">
+          <span>④ 阶段关联时间轴（示意）（Target 轨 / Draft 轨 / DT 通信轨 —— 点击阶段条过滤上方算子图）</span>
+          <span style="font-size:11.5px;color:var(--ink3);" id="tl-summary-label">单轮周期 T_round = 9.51 ms · 提交 E[n] = 4.36 tokens · 点击任意色块联动</span>
+        </div>
+        <div style="padding:10px 14px;" id="timeline-tracks-container">
+          <!-- Populated dynamically by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="v3-workbench.js"></script></body></html>
