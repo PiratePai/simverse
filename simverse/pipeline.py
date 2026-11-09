@@ -229,7 +229,25 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             pass
         stage_costs.update({k: v for k, v in step_map.items() if v or dep.mode == "dt_serial"})
         cost["link"] = {"t_d2t_ms": t_d2t, "t_t2d_ms": t_t2d, "bytes": msg_bytes}
-        round_obj = build_serial_round(plan, stage_costs, e_n)
+        if dep.mode == "dt_pipeline_sim":
+            # M3 资源事件核：真实调度（互斥资源+半双工链路），周期≠请求延迟
+            from .execute.resource_core import dt_pipeline_schedule
+            sim = dt_pipeline_schedule(
+                stage_costs.get("draft_block", 0.0) + stage_costs.get("draft_step_0", 0.0),
+                t_d2t, stage_costs.get("verify_block", stage_costs.get("verify", 0.0)),
+                t_t2d, rounds=dep.pipeline_rounds,
+                microbatches=dep.pipeline_microbatches)
+            if sim.violations:
+                cap.add("pipeline_schedule_valid", "unsupported",
+                        "; ".join(v[2] for v in sim.violations[:2]),
+                        affected_metrics=["M18 周期/利用率"])
+            else:
+                cap.add("pipeline_schedule_valid", "supported",
+                        "事件流通过 validate_trace（依赖/互斥/消息序）")
+            round_obj = build_serial_round(plan, stage_costs, e_n)
+            cost["pipeline_sim"] = sim.to_json()
+        else:
+            round_obj = build_serial_round(plan, stage_costs, e_n)
         # 串行时间线补 link 事件（计划步骤已含 d2t/t2d）
 
     # ---- 容量 ----
@@ -239,6 +257,38 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     # ---- 指标 ----
     metrics = _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                              base_rows, memory, cap, model, draft)
+    # M18 周期/利用率/流水（dt_pipeline_sim；周期≠单请求 TPOT，分列）
+    sim = (scenario.deployment.mode == "dt_pipeline_sim")
+    if sim or True:
+        pass
+    if cost.get("pipeline_sim"):
+        ps = cost["pipeline_sim"]
+        n_round_equiv = scenario.deployment.pipeline_rounds *             scenario.deployment.pipeline_microbatches
+        metrics["M18_cohort_period_ms"] = {
+            k: metric_from(v, "ms", "internal", statistic=Statistic.SAMPLE,
+                           scope=Scope(role="system", phase="steady-decode"),
+                           evidence=(Evidence.COUNTED,),
+                           assumptions=["两微批交错实测调度；非 max 通则"])
+            for k, v in ps["cohort_periods_ms"].items()}
+        metrics["M18_per_round_throughput_ms"] = metric_from(
+            ps["makespan_ms"] / n_round_equiv, "ms/round-equiv", "internal",
+            statistic=Statistic.SAMPLE, scope=Scope(role="system"),
+            evidence=(Evidence.COUNTED,),
+            assumptions=["有限 cohort 含 warmup/drain"])
+        metrics["M18_utilization"] = {
+            k: metric_from(v, "ratio", "internal", statistic=Statistic.EXACT,
+                           scope=Scope(role="system", rank=k),
+                           evidence=(Evidence.COUNTED,))
+            for k, v in ps["utilization"].items()}
+        metrics["M01_tpot_analytical"] = Metric(
+            value=metrics["M01_tpot_analytical"].value, unit="ms",
+            scope=Scope(role="target", phase="steady-decode"),
+            statistic=Statistic.EXPECTATION, result_kind=ResultKind.ANALYTICAL_ESTIMATE,
+            support=Support.APPROXIMATED, evidence_refs=[], formula_ref=FR.F_ROOFLINE,
+            assumption_refs=[],
+            reason="dt_pipeline_sim：解析串行 TPOT 与流水周期分列（M18）；"
+                   "单请求延迟需请求轨迹（M3 请求级事件）")
+
     manifest = RunManifest(run_id="", status="completed",
                            input_digest=scenario.scenario_digest(),
                            model_ir_digest=digest(model.to_json()),

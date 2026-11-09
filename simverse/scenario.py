@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from .contracts import RngScheme, digest
 
-DEPLOY_MODES = ("baseline", "colocated", "dt_serial")
+DEPLOY_MODES = ("baseline", "colocated", "dt_serial", "dt_pipeline_sim")
 
 
 @dataclass
@@ -34,6 +34,8 @@ class DeploymentSpec:
     draft_tp: int = 1
     link: str = "pcie5"
     draft_on_target_group: bool = True     # colocated：草稿占目标组 1 rank TP1
+    pipeline_microbatches: int = 2         # dt_pipeline_sim：微批数
+    pipeline_rounds: int = 6               # 有限 cohort（warmup/drain 可见）
 
 
 @dataclass

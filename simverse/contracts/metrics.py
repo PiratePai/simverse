@@ -57,10 +57,14 @@ class Metric:
                 raise ValueError("Metric 无值时必须给 reason（未知/不支持/未配置 ≠ 0）")
         else:
             finite(self.value, "Metric.value")
-            if self.statistic in (Statistic.EXACT,) and isinstance(self.value, float):
+            # exact 的整数约束防"期望字节截断冒充精确"；确定性无量纲比值
+            # （unit=ratio，由整数量相除得到）是合法 exact 浮点。
+            if (self.statistic is Statistic.EXACT and isinstance(self.value, float)
+                    and self.unit != "ratio"):
                 if self.value != int(self.value):
                     raise ValueError(
-                        f"statistic=exact 但值为非整浮点 {self.value}；期望量请用 expectation")
+                        f"statistic=exact 但值为非整浮点 {self.value}；"
+                        f"期望量请用 expectation（或确定性比值用 unit=ratio）")
         # 大整数按 int 保存（identity.canonical_json 原样序列化）
 
     def to_json(self) -> dict:

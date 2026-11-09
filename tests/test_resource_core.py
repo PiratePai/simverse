@@ -5,6 +5,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -43,7 +45,7 @@ def test_pipeline_overlaps_draft_and_verify():
     assert pipe.resource_busy_ms["target-gpu"] > 0
     serial = single_request_lookahead(D, L, V, L, rounds=rounds * 2)  # 同总轮数
     assert serial.violations == []
-    assert serial.makespan_ms == 8 * (D + L + V + L)          # 串行=轮和
+    assert serial.makespan_ms == pytest.approx(8 * (D + L + V + L))  # 串行=轮和
     per_round_pipe = pipe.makespan_ms / (rounds * 2)
     per_round_serial = D + L + V + L
     assert per_round_pipe < per_round_serial                   # 流水收益为真
