@@ -57,6 +57,7 @@ class ScenarioV2:
     draft_quant: Dict[str, int] = field(
         default_factory=lambda: {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
                                  "state": 32})
+    cost_profile: Optional[str] = None   # profile 集 id（如 h200-qwen3-30b-a3b-tiny-op-v1）
     seed: int = 0
     notes: str = ""
 

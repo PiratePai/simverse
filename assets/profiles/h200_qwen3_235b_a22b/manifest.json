@@ -1,0 +1,207 @@
+{
+ "profile_set_id": "h200-qwen3-235b-a22b-op-v1",
+ "created_at": "2026-11-10",
+ "extractor": "tools/distill_h200_235b.py",
+ "rounding": "median 四舍五入 6 位小数（ms）",
+ "model_identity": {
+  "repo_id": "Qwen/Qwen3-235B-A22B",
+  "revision": "8efa61729e24bd65b1d152b5ab5409052aa80e65",
+  "config_sha256": "0ecd5d6fe6f2db6739e4e36ab06b88ebe7bd013ef31b9583f43796059a2b23a4",
+  "note": "官方 main 快照（2026-11-10 HF resolve/main 获取）；新仓 catalog 已登记 qwen3_235b_a22b（真模型，非复制品）"
+ },
+ "source": {
+  "repo": "pi-viewer (本地路径 D:/Github/pi-viewer，只读)",
+  "git_head": "c5909a7699a1d2bb422d931bdca6cba399451f00",
+  "files_sha256": {
+   "data/profiling/compute/h200/Qwen3-235B-A22B/linear_op.csv": "876214663dd7f505d948f6186ace18c1e269d9e197f891d57ead119226e0d22f",
+   "data/profiling/compute/h200/Qwen3-235B-A22B/linear_op_kernel_only.csv": "1dcb13a823c30efa309657fc67b45210a420e08642a1a05c4a0cac9c944145a7",
+   "data/profiling/compute/h200/Qwen3-235B-A22B/attention.csv": "bddcf532fdefa5e8e42c3f1b9969ab76553f2afefb0ec585a3d16149c6c50495",
+   "data/profiling/compute/h200/Qwen3-235B-A22B/attention_kernel_only.csv": "b19e0c99f8a935f046efb9224fd206dba620cba83cd0f1f7f5abc6c15db7fe94",
+   "data/profiling/compute/h200/Qwen3-235B-A22B/moe.csv": "9ebe5edf1a9c0b0713d7d57c07249fff7269d55074b831b7ac5ec403c9b63860",
+   "data/profiling/compute/h200/Qwen3-235B-A22B/moe_kernel_only.csv": "2252292e2d92f1163263e90c11988eb6ee94d0dbe419989ac23fcdaf897fa052",
+   "data/profiling/compute/h200/Qwen3-235B-A22B/kernel_gap.csv": "ad6c40e710d6f6521f8ff5e3443166fb188dcfe218badc38deda71fe91653515",
+   "data/config/models/Qwen3-235B-A22B.json": "762991661178c42bd885230ef4cadd4513512db63ba88fb407d715f25f96ff10"
+  },
+  "measurement_contract": "同 30B-tiny 闭环（CUDA_EVENT device wall-clock；kernel_only 记 kernel_count）",
+  "measurement_caveats": [
+   "同 30B-tiny 闭环 5 条 caveats（括号内 host 空闲/warm-L2/3+20 与 3+5 重复/host-ahead gap/even 均匀上下文），见其 manifest",
+   "TP2/8 为 per-worker 形状测量（q 头 32/8、kv 复制 4 头@TP8）——与新仓 gqa 行 tp 切分口径一致（heads_c/kv_heads_c）"
+  ]
+ },
+ "environment": {
+  "gpu_name": "NVIDIA H200",
+  "driver_version": "570.124.06",
+  "torch_version": "2.8.0+cu128",
+  "cuda_version": "12.8"
+ },
+ "kernel_gap": [
+  {
+   "execution_mode": "eager",
+   "tensor_parallel": 8,
+   "kernel_gap_us": 1.2384,
+   "num_gaps": 17080,
+   "chain": "decoder_layer:Qwen3-235B-A22B:tp8"
+  },
+  {
+   "execution_mode": "cuda_graph",
+   "tensor_parallel": 8,
+   "kernel_gap_us": 0.4299,
+   "num_gaps": 1374424,
+   "chain": "vllm_decode_graphs:Qwen3-235B-A22B"
+  },
+  {
+   "execution_mode": "eager",
+   "tensor_parallel": 2,
+   "kernel_gap_us": 1.5269,
+   "num_gaps": 17080,
+   "chain": "decoder_layer:Qwen3-235B-A22B:tp2"
+  },
+  {
+   "execution_mode": "cuda_graph",
+   "tensor_parallel": 2,
+   "kernel_gap_us": 0.3996,
+   "num_gaps": 779080,
+   "chain": "vllm_decode_graphs:Qwen3-235B-A22B:dp2:excluding_gaps_before_nccl"
+  }
+ ],
+ "composition": {
+  "selected": "域内实测 median 之和 + 域外解析（差额法） + eager 间隙补贴",
+  "gap_policy": "按计时区间边界数计（同 30B-tiny 2026-11-10 修正；区间内间隙已含于 CUDA_EVENT median）；eager gap 取本 set 同 TP 行（TP2 1.5269µs / TP8 1.2384µs）"
+ },
+ "admission": {
+  "admit": {
+   "linear_op.csv:TP2/8:sharded": "387 token 网格 ×3 sharded 算子（attn_pre_proj/attn_rope/attn_post_proj）×2 TP 档；BF16 CUDA_EVENT per-worker 形状",
+   "linear_op.csv:TP1:replicated": "emb/input_layernorm/post_attention_layernorm 仅 TP1 campaign 采（387 点）；per-rank 全宽 TP 不变 → 并入 TP2/8 域（tp_invariant_groups 登记；emb 为全词表口径，与新仓未切分行同尺度）",
+   "attention.csv:decode-even:TP2/8": "每 TP 5184 (B 1..64 × kv 0..4095) 点；FLASHINFER/BF16/block16",
+   "kernel_gap.csv:TP2/8": "per-TP eager/cuda_graph 间隙 + 环境元数据"
+  },
+  "reject": {},
+  "defer": {
+   "moe.csv:TP8/EP1": "真 128E vllm_fused 数据在册，但新仓 count 的 MoE 行为整模型口径、memory 按 experts//tp——per-rank 分片账本（V04）未统一前实测替换会混尺；待 V04 落地后升级为准入（首选增量路径）",
+   "moe.csv:TP1/EP4": "DP4 部署（每卡 32 专家），与 TP1 单卡场景口径不符",
+   "linear:TP1:sharded / attention:TP1": "sharded 组 TP1 行为空（campaign 只在 TP2/8 采）且无 TP1 kernel_gap 行；TP1 场景用 30B-tiny set",
+   "attention:prefill/true_mixed": "v1 域仅 decode（同 30B-tiny）",
+   "cpu_overheads/llama2/其它": "未用（同 30B-tiny 裁决）"
+  }
+ },
+ "tp_invariant_groups": [
+  "emb",
+  "input_layernorm",
+  "post_attention_layernorm"
+ ],
+ "domain": {
+  "device": "h200_sxm",
+  "precision": "BF16",
+  "tensor_parallel": [
+   2,
+   8
+  ],
+  "attention_backend": "FLASHINFER",
+  "kv_block": 16,
+  "linear_tokens": [
+   1,
+   16384
+  ],
+  "attn_decode": {
+   "batch": [
+    1,
+    64
+   ],
+   "kv": [
+    0,
+    4095
+   ]
+  },
+  "shape_identity": {
+   "model_type": "qwen3_moe",
+   "hidden_size": 4096,
+   "n_q_head": 64,
+   "n_kv_head": 4,
+   "head_dim": 128,
+   "vocab_size": 151936,
+   "num_experts": 128,
+   "num_experts_per_tok": 8,
+   "use_qk_norm": true,
+   "use_sliding_window": false,
+   "rope_theta": 1000000.0,
+   "full_rotary": true,
+   "attention": "full"
+  },
+  "applicable_stages": "decode(Q=1)/verify 的线性算子（TP2/8）；decode 注意力块（TP2/8）；MoE 不在域内"
+ },
+ "holdout": {
+  "rule": "md5(key 含 tp) % 100 < 15",
+  "error_report": {
+   "linear_ops": {
+    "attn_pre_proj": {
+     "n": 120,
+     "median_rel_err": 0.0061,
+     "p90_rel_err": 0.0281,
+     "max_rel_err": 0.0975
+    },
+    "attn_rope": {
+     "n": 113,
+     "median_rel_err": 0.0057,
+     "p90_rel_err": 0.0177,
+     "max_rel_err": 0.0741
+    },
+    "attn_post_proj": {
+     "n": 120,
+     "median_rel_err": 0.0157,
+     "p90_rel_err": 0.0662,
+     "max_rel_err": 0.196
+    },
+    "emb": {
+     "n": 60,
+     "median_rel_err": 0.0076,
+     "p90_rel_err": 0.0368,
+     "max_rel_err": 0.0557
+    },
+    "input_layernorm": {
+     "n": 57,
+     "median_rel_err": 0.0067,
+     "p90_rel_err": 0.0154,
+     "max_rel_err": 0.0269
+    },
+    "post_attention_layernorm": {
+     "n": 44,
+     "median_rel_err": 0.0081,
+     "p90_rel_err": 0.0175,
+     "max_rel_err": 0.0408
+    }
+   },
+   "attn_decode": {
+    "attn_input_reshape": {
+     "n": 1437,
+     "median_rel_err": 0.0111,
+     "p90_rel_err": 0.0303,
+     "max_rel_err": 1.0372
+    },
+    "attn_kv_cache_save": {
+     "n": 1439,
+     "median_rel_err": 0.0097,
+     "p90_rel_err": 0.0237,
+     "max_rel_err": 0.3234
+    },
+    "attn_decode": {
+     "n": 1524,
+     "median_rel_err": 0.0119,
+     "p90_rel_err": 0.032,
+     "max_rel_err": 0.1021
+    },
+    "attn_output_reshape": {
+     "n": 1482,
+     "median_rel_err": 0.0112,
+     "p90_rel_err": 0.0624,
+     "max_rel_err": 0.8548
+    }
+   },
+   "method": "键 md5 哈希 15% 留出（键含 tp）；log-token 线性 / (log-batch, kv) 双线性插值于训练网格；相对误差"
+  }
+ },
+ "distill_files": {
+  "linear_ops.json": "a5a59cbd56800330a28da94826b491d80341ae54032f870da6e28e9b70acc042",
+  "linear_kernel_counts.json": "9002e12d63167ba59cdda12d81a34d3edc4e9a58cd07708eaad3a0c9a4cdae44",
+  "attn_decode.json": "d93894f40105a317df4841312f2a8e784c224becf48c44b3d79efbaeb3c12603"
+ }
+}

@@ -73,6 +73,20 @@ _PINNED_ASSETS = [
      "model-verse 指定提交（git show 固定）",
      "旧口径数值对账（含已知错误 38.9 等）",
      ["原文含已归档错误（E14），只作历史对照"], False),
+    ("ev-h200-tiny-distill", "measured",
+     "H200 实测 profile 蒸馏集（Qwen3-30B-A3B-tiny 复制品采集：linear 6 算子 ×387 "
+     "token 网格 + decode 注意力 5184 点，CUDA_EVENT median；环境 H200/driver 570.124.06/"
+     "torch 2.8.0+cu128）",
+     "profiles/h200_qwen3_30b_a3b_tiny/manifest.json",
+     "pi-viewer @c5909a7699a1d2bb422d931bdca6cba399451f00 "
+     "data/profiling/compute/h200/Qwen3-30B-A3B-tiny/（逐文件 SHA256 在 manifest；"
+     "采集由 pi-viewer frontier/profiling 在 H200 完成，本仓只蒸馏导入）",
+     "算子级成本校准（TP1/BF16/FLASHINFER；linear tokens 1..16384；"
+     "decode B 1..64 × kv 0..4095）",
+     ["16 专家缩小复制品：MoE/router/lm_head 不在域内（回退解析）；"
+      "不是 Qwen3.6-35BA3B+DFlash 场景的真实性证据；无端到端实测对照；"
+      "本会话未做新的硬件测量"],
+     True),
 ]
 
 

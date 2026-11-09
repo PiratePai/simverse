@@ -1,9 +1,10 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-09。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（本地，无远端——Q3 私有远端信息待补）。
-运行：`py -3.12 -m pytest tests -q`（当前 68 passed）；
+更新：2026-11-10（校准闭环复审修复 + 235B 第二闭环 + V4.1 hc 建模轮）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（本地，无远端——Q3 私有远端信息待补）；包版本 0.2.0（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（当前 129 passed，无警告输出）；
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /，v0.1 简表 /legacy）。
+合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G7 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
 ## 0. 必读上下文
 
@@ -32,6 +33,12 @@
 - 证据：tests 68 passed（含 v0.1 13 项原样保留）。
 
 ### M1 语义与计数 — 完成（Qwen3.8 本地身份待补）
+
+**2026-11-10 增量**：V4.1 mHC 混合流建模（hc 三键 mapped；count hc_* 边界行
+6/层+首层 expand、FP32 权重每卡复制入 memory；Engram 8 键保留缺口——
+common/engram.py 未入评审包，不猜；tests/test_v41_hc.py 7 项含守恒）；
+Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f…）
++ catalog qwen3_235b_a22b（qwen3_moe 家族，94L 128E）。
 - model_ir 0.3.0 共享子包（schema/families/catalog）：结构、SourceIdentity、
   字段覆盖（mapped/metadata-only/ignored-with-reason/unsupported-semantic）、
   structure_complete+gaps。
@@ -115,22 +122,80 @@
 - [ ] 单请求超前（lookahead>0 的分支/取消/浪费资源账）与请求级事件轨迹
   （M17 TTFT 等）未做；取消/浪费字段在事件 schema 已留。
 
-### M4 服务与校准 — 契约就绪，能力未开放（如实标注）
+### M4 服务与校准 — 两条算子级实测校准闭环（服务特性仍未开放）
 - 服务特性 UNSUPPORTED 注册：chunked_prefill/pd_disaggregation/prefix_cache
   （methods/plans.py UNSUPPORTED 表，Q5 顺序；不空实现）。
-- profile 契约+合成 fixture 接线完成（M2）；真实采集/拟合/holdout 无数据（Q2 unmeasured）。
+- **H200 算子级校准闭环 loop1（2026-11-09 建，2026-11-10 复审修复）**：pi-viewer
+  @c5909a7 的 Qwen3-30B-A3B-tiny CUDA_EVENT 数据蒸馏入册
+  （assets/profiles/h200_qwen3_30b_a3b_tiny/；tools/distill_h200_profiles.py
+  可重放）。生产管线消费：ScenarioV2.cost_profile → CalibratedPricer（域门禁：
+  设备/精度/TP/形状+算子构成三项核对；MoE 复制品 16E 域外回退；verify 注意力
+  Q>1 域外回退）；指标 M01_tpot_profile_calibrated（result_kind=
+  measured-composite，非整步实测）；UI 部署栏可选 profile。
+  **2026-11-10 复审修复**：①gap 补贴改按**计时区间边界**计（原按全部 kernel 数
+  计费重复计入已含在 CUDA_EVENT 括号内的 op 内间隙，B8 高估 0.324ms/步≈1.6%；
+  修复后 B8 selected 19.879ms，9 点比值 1.95–11.59×——表述为相对组合估计的差异，
+  非部署延迟结论）；②形状门禁补 QKNorm/全旋转/无滑窗构成核对；③时间口径覆盖
+  （coverage_time_frac，依赖估计）随 stage 披露；④测量契约 caveats 入 manifest
+  （launch-bound 括号内 host 空闲/warm-L2/重复数/gap 口径/even 假设）。
+  报告：[docs/calibration/h200-loop1.md](calibration/h200-loop1.md)；
+  重放不变性（G7）与组合算术独立复算入 tests/test_calibration_h200.py。
+- **H200 loop2：Qwen3-235B-A22B TP∈{2,8}（2026-11-10 建）**：真模型官方身份
+  （HF main @8efa6172）+ TP 集合域（首条 TP>1 实测覆盖；sharded 算子 per-worker
+  形状=新仓 tp 切分行口径；TP1 采的 replicated 组以 tp_invariant 并入）；
+  MoE 数据在册但 defer（per-rank 分片账本 G-C11 前置，不混尺）。场景
+  assets/scenarios/h200_calib_loop2_235b.json（B8/TP8：selected 68.48ms，
+  measured 29.13+fallback 38.30+gap 1.05×847 区间；行覆盖 1129/1318）。
+  报告：[docs/calibration/h200-loop2-235b.md](calibration/h200-loop2-235b.md)；
+  tests/test_calibration_h200_235b.py（8 项）。
+- **旧仓数据全量审计（2026-11-10）**：[docs/calibration/oldrepo-data-audit-20261110.md]
+  (calibration/oldrepo-data-audit-20261110.md)——A800 真 30B moe.csv 因缺环境
+  元数据拒绝 measured 准入（§3.2/G4）；E2E 记录与 KERNEL_ONLY per-op 时间列
+  确认不存在（G-D5/G-D6 维持）。
+- UI 精度选择器（G-C10 解除，2026-11-10）：场景栏 BF16/W8A8/W8A8+FP4 档；
+  UI 场景 JSON → /api/v2/run 与进程内/CLI 同 run 同值（测试钉死）；域门禁仍按
+  profile 采集精度独立核对（不把"profile 要 BF16"转成输入精度）。
+- 数值口径修正（2026-11-09 轮）：devices L40 注释修正；h200_sxm 官方规格 dense
+  口径；链路 source 方向声明；cost/profile.py 校准分支修复（禁回填 estimate_ms）。
 - Chunked Prefill / PD 分离 / Prefix Cache：未实现，能力目录未注册为支持；
   扫描/比较路径遇及时显式 unsupported（方法 UNSUPPORTED 表）。
 - 服务到达/组批/KV 分页：workload.arrival="fixed-batch"（M4 扩展点已留）。
 
-### M5 迁移与扩展 — model-verse 适配器已建；其余待条件
+### M5 迁移与扩展 — model-verse 适配器已建；pi-viewer 数据通道已通（蒸馏）
 - model-verse 薄适配器：LLM-Viewer-main/simverse_adapter/（新增文件，未改旧仓
   既有文件）：哈希锁（adapter_lock.json，6 文件 SHA256）+ 固定 commit 8796607 +
   model_ir 0.3.0；自检报告（adapter_report）通过；漂移即拒绝。
-- pi-viewer：不在本会话可写目录（阻塞：需用户加入工作区或自行套用
-  simverse_adapter 同款模式）。
+- pi-viewer：工作区阻塞已解除——本轮以只读蒸馏方式消费其 H200 数据
+  （tools/distill_h200_profiles.py，来源提交+哈希入册，无运行时路径依赖）；
+  独立适配器（同 model-verse 模式）仍待做，属 V09b 三方对账范围。
 - 远端：Q3 平台/账号/地址待补；未创建/推送任何远端。
 - v0.1 模块退役：待 M5 三方对账后。
+
+### 2026-11-09 数值可信度轮
+- [AGENTS.md](../AGENTS.md)（合入入口）+ [docs/MERGE_CRITERIA.md](MERGE_CRITERIA.md)
+  （准则规范）+ G1–G7 自动门禁（tests/test_merge_gate.py）。
+- devices 口径修正 + h200_sxm；profile 校准分支修复；pipeline 接线实测 profile；
+  H200 第一条算子级闭环（见 M4 节）。
+- 缺口清单分立：[docs/gaps/data-gaps.md](gaps/data-gaps.md)（数据采集 G-D1–G-D9）、
+  [docs/gaps/capability-gaps.md](gaps/capability-gaps.md)（工程能力 G-C1–G-C9）。
+- 证据：docs/evidence/h200_calib_compare.json（9 点前后对比）。
+- 测试 86→110（merge gate 10 + calibration loop 12 + 既有全保）。
+
+### 2026-11-10 校准复审 + 235B 闭环 + hc 建模轮（详单）
+- **loop1 复审（8 项核查全部落档）**：gap 重复计费修复（区间边界口径）；
+  形状门禁构成核对（QKNorm/全旋转/无滑窗）；留出无泄漏复核（387/5184 键唯一）；
+  measured-composite 标注复核；"低估 2–11.7×"改口径为"相对组合估计 1.95–11.59×"；
+  覆盖率双披露（行+时间占比，后者注明依赖估计）；测量契约 caveats 入册。
+  pi-viewer 采集源码逐文件核对（device_timer/linear_op_impl/attention_wrapper/
+  kernel_gap main/allowlists）。
+- **loop2 235B**：官方身份获取入册；TP 集合域 {2,8}；tp_invariant 组；MoE defer
+  裁决；组合/门禁/重放 8 测试；场景与报告入册。
+- **V4.1 hc**：语义+计数+容量+守恒（详见 M1 增量）；Engram 8 键如实保留。
+- **G-C10**：UI 精度选择器接线+测试。
+- **数据审计**：oldrepo-data-audit-20261110.md（A800 拒绝/E2E 与 KERNEL_ONLY
+  不存在/235B moe 首选路径）。
+- 工具：tools/h200_calib_compare.py（对比 JSON 可重放生成器）。
+- 测试 110→129（hc 7 + 235b 8 + 精度接线 2 + 门禁/组合更新；既有全保）。
 
 ## 2. 页面/指标/验证映射（当前覆盖）
 
@@ -146,23 +211,26 @@
 | V08 系统指标归约 | 通过（人工轨迹）| execute/reduce + test_metrics_v08 |
 | V09 比较与旧仓对账 | 部分 | 比较资格/多目标/资源披露（V09a）；旧仓三方对账（V09b）未做（M5）|
 | V10 扫描与运行隔离 | 部分 | 不可变快照/独立身份/无交点 null；取消/恢复未做（单任务门控待做）|
-| V11 校准与外部真实性 | 未测（无数据）| 契约接线用合成 fixture；保持 unmeasured |
+| V11 校准与外部真实性 | 部分（算子级，两闭环）| H200 30B-tiny TP1 + 235B TP2/8：蒸馏/域门禁/回退/留出误差/重放不变性（test_calibration_h200{,_235b}）；E2E 对照无数据未宣称 |
 | V12 UI 与导出一致性 | 通过 | test_ui_v12 + 浏览器实测记录（本文件 §1 UI）|
 
-## 3. 已知缺口与外部依赖（不虚构补齐）
+## 3. 已知缺口与外部依赖（不虚构补齐；完整清单见 docs/gaps/）
 
 1. Qwen3.8 本地模型身份：待用户提供本地路径/revision（PENDING_ASSET 注册）。
-2. V4.1 Engram/hc（11 键）：参与 forward（vLLM pin 证实）但未建模 →
-   structure_complete=False，完整容量/性能结论降级（capability 检查可见）。
+2. V4.1 Engram（8 键）：hc 三键已建模（2026-11-10）；Engram forward 源
+   （common/engram.py）未入评审包 → 仍 structure_complete=False。G-C1。
 3. DFlash 服务端集成（SGLang DFLASH/vLLM PR#40898）未逐行核对 → 部署矩阵
-   不显示“已部署验证”。
-4. 设备可分配预算/真实 profile/价格：无来源 → feasible=unknown、unmeasured、
-   成本 null+reason。
+   不显示”已部署验证”。G-C3。
+4. 设备可分配预算/价格：无来源 → feasible=unknown、成本 null+reason。G-D7/G-D9。
+   真实 profile：H200 两闭环（30B-tiny TP1 / 235B TP2-8）；MoE/verify/prefill/
+   E2E/kernel-only 见 G-D2/G-D4/G-D5/G-D6。
 5. 小尺寸 CPU forward 数值执行：本机无 torch 环境 → V02 数值语义分栏为
    source-checked（如实，不冒充执行）。
-6. pi-viewer 适配（M5）：不在可写目录。
+6. pi-viewer 适配器（V09b）：未建；数据通道经蒸馏已通（无需写旧仓）。
 7. 远端平台/账号（Q3）：待补。
 8. 移动端像素观感：截图存证但本会话通道无法目检。
+9. 子进程输出编码：当前全量测试无编码警告（2026-11-10 复核）；CLI 输出检查按
+   plan §6 保持为稳定验收项。
 
 ## 4. 恢复入口
 
@@ -175,5 +243,7 @@
 - 证据产物（已入册 docs/evidence/）：workbench_desktop_run.png、
   workbench_mobile_run.png、run_v2_qwen36_dflash.json、ops_v2.csv、
   trace_v2.csv、report_v2.html。
-- 下一工作项：单请求超前事件（分支/取消/浪费账）→ M17 请求级指标；
-  V04 TP/EP 分片守恒全断言；V09b 三方对账（model-verse 适配器已就位）。
+- 下一工作项：G-C11 per-rank MoE 分片账本（→ G-D2 首选路径 235B moe 准入）；
+  G-C1 Engram 源 pin（等上游评审包）；G-D4/G-C2 prefill/verify 形状域；
+  G-D6/G-C5 KERNEL_ONLY 双口径；G-D1/G-C3 DFlash 实测与集成核对；
+  G-C4 单请求超前事件 → M17；V09b 三方对账。

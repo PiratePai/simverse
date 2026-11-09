@@ -87,15 +87,26 @@ ENTRIES: List[SourceMapEntry] = [
     SourceMapEntry(
         entry_id="sm-v41-engram-hc",
         model_or_method="deepseek_v41_flash Engram/hc",
-        semantic="Engram 查表注入与 hc(mhc) 混合流参与 forward",
+        semantic="hc(mHC) 混合流已建模（每层 2 次边界：post+系数 GEMM+sinkhorn+"
+                 "collapse+RMSNorm 融合核；首层 hc_expand 广播；FP32 权重每卡复制）；"
+                 "Engram 查表注入（层 1/14 residual 流）参与 forward",
         source_pin=VLLM_PIN,
-        source_location="vllm/models/deepseek_v41/nvidia/model.py:29-32,103-108",
-        branch_predicate="engram_layer_ids 覆盖层启用 Engram；hc_mult/hc_eps 控制 mhc 流",
-        input_domain="V4.1 主干（结构性参与，非可选开关）",
+        source_location="vllm/models/deepseek_v41/nvidia/model.py:388-499（hc 参数 "
+                        "mix_hc=(2+m)·m、fp32）、501-678（forward 边界分支：首层 "
+                        "hc_expand/engram 层 post+pre 分立/常规 shifted 融合）、"
+                        "103-119（imports；kernel 实现在 vllm.model_executor.kernels."
+                        "mhc，未入评审包）",
+        branch_predicate="engram_layer_ids 覆盖层启用 Engram；hc_mult/hc_eps/"
+                         "hc_sinkhorn_iters 控制 mhc 边界（全层执行，非可选开关）",
+        input_domain="V4.1 主干",
         both_sides_covered=False,
-        uncovered_domain=["Engram/hc 的算子图与容量未建模（ModelIR.gaps）",
-                          "受影响：完整模型容量/性能结论降级"],
-        note="structure_complete=False 阻断，不冒充完整"),
+        uncovered_domain=["Engram.forward 内部算子未 pin（vllm/models/deepseek_v41/"
+                          "common/engram.py 不在评审包）→ 注入算子不计猜测常数",
+                          "Engram 表 dtype 未知 → 容量字节未知（默认 cpu_offload）",
+                          "mhc tilelang kernel 每迭代 OP 数为解析近似（行标 "
+                          "approximated）"],
+        note="hc 三键 mapped（2026-11-10）；Engram 8 键 unsupported → "
+             "structure_complete=False 仍阻断完整结论，不冒充"),
     SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",

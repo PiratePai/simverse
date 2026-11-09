@@ -1,0 +1,39 @@
+{
+  "schema_version": "0.2",
+  "name": "h200-calib-loop2-235b-tp8",
+  "model_id": "qwen3_235b_a22b",
+  "draft_id": null,
+  "method_id": "baseline",
+  "deployment": {
+    "mode": "baseline",
+    "target_device": "h200_sxm",
+    "target_tp": 8,
+    "draft_device": "l40",
+    "draft_tp": 1,
+    "link": "nvlink_c2c"
+  },
+  "workload": {
+    "batch": 8,
+    "ctx_tokens": 2048
+  },
+  "acceptance": {
+    "kind": "geometric",
+    "alpha": 0.75
+  },
+  "quant": {
+    "dense_w": 16,
+    "expert_w": 16,
+    "act": 16,
+    "kv": 16,
+    "state": 32
+  },
+  "draft_quant": {
+    "dense_w": 16,
+    "expert_w": 16,
+    "act": 16,
+    "kv": 16,
+    "state": 32
+  },
+  "cost_profile": "h200-qwen3-235b-a22b-op-v1",
+  "seed": 0
+}

@@ -113,6 +113,37 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                         + model.hidden * (m.kv_lora_rank + m.qk_rope_dim)
                         + m.kv_lora_rank * heads_c * (m.qk_nope_dim + m.v_head_dim)
                         + heads_c * m.v_head_dim * model.hidden) * b_dense
+        if layer.mla is not None and fam == "v41_csa2" and layer.csa2:
+            # V4.1 注意力投影（2026-11-10 补齐；几何与 count/work.v41_layer_rows
+            # 同口径——TP 表达式一致（heads/ng 切分，其余每卡），逐投影引擎分片
+            # 证据未逐项 pin，登记为与计数行自洽的口径）
+            kvs = model.extras["kv_spec"]
+            heads = kvs["heads"] // tp
+            d, di = kvs["head_dim"], kvs["index_head_dim"]
+            ih, qrank, orank = kvs["index_heads"], kvs["q_lora_rank"], kvs["o_lora_rank"]
+            ng = kvs["o_groups"] // tp
+            a = layer.csa2
+            mlt = 2 if a.ratio == 2 else 1
+            dense_b += model.hidden * qrank                       # q_a_proj
+            dense_b += model.hidden * d                           # kv_proj
+            dense_b += qrank * heads * d                          # q_b_proj
+            dense_b += (kvs["heads"] * d // kvs["o_groups"]) * orank   # o_a（组输入全宽）
+            dense_b += ng * orank * model.hidden                  # o_b（组切分）
+            if a.produces_kv:
+                dense_b += model.hidden * d * mlt                 # compress_proj
+                dense_b += d * di                                 # index_k_proj
+            if a.produces_index:
+                dense_b += model.hidden * ih + qrank * ih * di    # index 投影
+        hc_spec = (model.extras or {}).get("hc") if fam == "v41_csa2" else None
+        if hc_spec and layer.kind == "mla_csa2":
+            # mHC 权重（FP32，每卡复制不随 TP 缩放：全宽流 + torch.empty 全宽参数，
+            # model.py pin @f358f057）：2×(fn mix×hc_dim + base mix + scale 3)
+            mix = (2 + hc_spec["mult"]) * hc_spec["mult"]
+            hc_dim = hc_spec["mult"] * model.hidden
+            hc_b = 2 * (mix * hc_dim * 4 + mix * 4 + 3 * 4)
+            allocs.append(Allocation(
+                f"{role}-w-mhc-L{li}", "weights", role, int(hc_b),
+                live_note="常驻 fp32 每卡复制（hc_attn_fn/hc_ffn_fn）"))
         if layer.dense_inter:
             dense_b += 3 * model.hidden * (layer.dense_inter // tp) * b_dense
         if dense_b:

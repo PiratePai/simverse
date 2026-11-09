@@ -235,6 +235,8 @@ def _report_html_v2(bundle: dict) -> str:
 def cmd_run_v2(args):
     from .pipeline import run_v2
     scenario = _v2_scenario(args.scenario)
+    if getattr(args, "cost_profile", None):
+        scenario.cost_profile = args.cost_profile
     bundle = run_v2(scenario).to_json()
     bundle["replay"] = {"scenario_file": str(args.scenario) if args.scenario
                         else "builtin:cli-default"}
@@ -261,8 +263,9 @@ def _summary_v2(bundle: dict):
     print(f"status={man['status']} run_id={man['run_id'][:19]}... "
           f"code={man['code_revision'][:10]}")
     m = bundle.get("metrics") or {}
-    for key in ("M01_tpot_analytical", "M01_tpot_baseline",
-                "M02_speedup_vs_baseline", "M03_E_N", "M04_round_ms"):
+    for key in ("M01_tpot_analytical", "M01_tpot_profile_calibrated",
+                "M01_tpot_baseline", "M02_speedup_vs_baseline", "M03_E_N",
+                "M04_round_ms"):
         x = m.get(key)
         if not x:
             continue
@@ -354,6 +357,8 @@ def main(argv=None):
     p_r2.add_argument("--csv", default=None)
     p_r2.add_argument("--trace", default=None)
     p_r2.add_argument("--html", default=None)
+    p_r2.add_argument("--cost-profile", default=None,
+                      help="实测校准 profile 集 id（如 h200-qwen3-30b-a3b-tiny-op-v1）")
     p_r2.set_defaults(fn=cmd_run_v2)
     p_s2 = sub.add_parser("sweep-v2", help="v0.2 参数扫描（不可变快照）")
     p_s2.add_argument("scenario", nargs="?", default=None)

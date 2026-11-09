@@ -1,0 +1,155 @@
+[
+ {
+  "B": 1,
+  "ctx": 512,
+  "analytic_ms": 1.2816632911911068,
+  "selected_ms": 14.852641,
+  "measured_ms": 13.376448,
+  "fallback_ms": 0.891947,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 577,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.9006,
+  "ratio_selected_over_analytic": 11.59
+ },
+ {
+  "B": 1,
+  "ctx": 2048,
+  "analytic_ms": 1.313367111066195,
+  "selected_ms": 14.772769,
+  "measured_ms": 13.296576,
+  "fallback_ms": 0.891947,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 577,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.9001,
+  "ratio_selected_over_analytic": 11.25
+ },
+ {
+  "B": 1,
+  "ctx": 4095,
+  "analytic_ms": 1.3556182303919153,
+  "selected_ms": 14.947873,
+  "measured_ms": 13.47168,
+  "fallback_ms": 0.891947,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 577,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.9012,
+  "ratio_selected_over_analytic": 11.03
+ },
+ {
+  "B": 8,
+  "ctx": 2048,
+  "analytic_ms": 5.750710152383728,
+  "selected_ms": 19.879367,
+  "measured_ms": 14.272144,
+  "fallback_ms": 5.022976,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 673,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.7179,
+  "ratio_selected_over_analytic": 3.46
+ },
+ {
+  "B": 8,
+  "ctx": 4095,
+  "analytic_ms": 6.088719106989488,
+  "selected_ms": 20.277191,
+  "measured_ms": 14.669968,
+  "fallback_ms": 5.022976,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 673,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.7235,
+  "ratio_selected_over_analytic": 3.33
+ },
+ {
+  "B": 32,
+  "ctx": 512,
+  "analytic_ms": 11.512824968876227,
+  "selected_ms": 25.650266,
+  "measured_ms": 14.316624,
+  "fallback_ms": 10.749395,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 673,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.5581,
+  "ratio_selected_over_analytic": 2.23
+ },
+ {
+  "B": 32,
+  "ctx": 2048,
+  "analytic_ms": 12.527347204879057,
+  "selected_ms": 26.491994,
+  "measured_ms": 15.158352,
+  "fallback_ms": 10.749395,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 673,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.5722,
+  "ratio_selected_over_analytic": 2.11
+ },
+ {
+  "B": 32,
+  "ctx": 4095,
+  "analytic_ms": 13.879383023302099,
+  "selected_ms": 27.114074,
+  "measured_ms": 15.780432,
+  "fallback_ms": 10.749395,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 673,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.582,
+  "ratio_selected_over_analytic": 1.95
+ },
+ {
+  "B": 8,
+  "ctx": 512,
+  "analytic_ms": 5.497079593383019,
+  "selected_ms": 19.919303,
+  "measured_ms": 14.31208,
+  "fallback_ms": 5.022976,
+  "gap_ms": 0.584247,
+  "gap_regions": 433,
+  "kernels": 673,
+  "coverage_rows": [
+   577,
+   674
+  ],
+  "coverage_time_frac": 0.7185,
+  "ratio_selected_over_analytic": 3.62
+ }
+]

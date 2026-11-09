@@ -13,5 +13,5 @@
   * 模型：tiny_dense_oracle（手算 oracle）与 DeepSeek V4.1 Flash（首发模型，决策 D-3）。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.1"  # 0.2.1: 校准复审修复+235B 闭环+V4.1 hc（协议 schema 0.2 不变）
 SCHEMA_VERSION = "0.1"

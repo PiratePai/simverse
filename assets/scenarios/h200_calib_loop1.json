@@ -1,0 +1,26 @@
+{
+  "schema_version": "0.2",
+  "name": "h200-calib-loop1-qwen3-30b-a3b-decode",
+  "model_id": "qwen3_30b_a3b",
+  "draft_id": null,
+  "method_id": "baseline",
+  "deployment": {
+    "mode": "baseline",
+    "target_device": "h200_sxm",
+    "target_tp": 1,
+    "draft_device": "l40",
+    "draft_tp": 1,
+    "link": "pcie5"
+  },
+  "workload": {
+    "batch": 8,
+    "ctx_tokens": 2048,
+    "arrival": "fixed-batch"
+  },
+  "acceptance": {"kind": "geometric", "alpha": 0.75},
+  "quant": {"dense_w": 16, "expert_w": 16, "act": 16, "kv": 16, "state": 32},
+  "draft_quant": {"dense_w": 16, "expert_w": 16, "act": 16, "kv": 16, "state": 32},
+  "cost_profile": "h200-qwen3-30b-a3b-tiny-op-v1",
+  "seed": 0,
+  "notes": "第一条实测校准闭环固定重放场景：B8/ctx2048 在 (B≤64, kv≤4095) 网格内、T=8 在 linear 网格内；BF16/TP1 与 profile 域一致。切换 cost_profile 为 null 即得同输入纯解析对照（G7 重放：原始计数必须逐字段不变）。"
+}

@@ -8,6 +8,12 @@
     matrixRuns: {}, scenarioOf: null
   };
   var $ = function (id) { return document.getElementById(id); };
+  // 精度档（后端 scenario.validate 契约：dense_w/expert_w/act/kv ∈ {4,8,16}，state=32）
+  var QUANT_PRESETS = {
+    bf16: { dense_w: 16, expert_w: 16, act: 16, kv: 16, state: 32 },
+    w8a8: { dense_w: 8, expert_w: 8, act: 8, kv: 8, state: 32 },
+    w8a8_fp4e: { dense_w: 8, expert_w: 4, act: 8, kv: 8, state: 32 }
+  };
 
   function fmt(v, unit, digits) {
     if (v === null || v === undefined) return '–';
@@ -71,6 +77,15 @@
         });
       });
       dv.value = 'h100_sxm'; dd.value = 'l40';
+      var pf = $('sel-profile');
+      if (pf && cat.profile_sets) {
+        pf.innerHTML = '<option value="">（无 · 纯解析 T0）</option>';
+        cat.profile_sets.forEach(function (id) {
+          var o = document.createElement('option');
+          o.value = id; o.textContent = id;
+          pf.appendChild(o);
+        });
+      }
       renderCatalogDrawer();
       renderMatrixHead();
     }).catch(function (e) { setStatus('能力目录加载失败：' + e, true); });
@@ -103,8 +118,12 @@
         ctx_tokens: parseInt($('inp-ctx').value, 10)
       },
       acceptance: acceptance,
-      quant: { dense_w: 8, expert_w: 4, act: 8, kv: 8, state: 32 },
+      // 精度档 → 后端量化契约（scenario.validate 允许 4/8/16；state 固定 32bit）。
+      // 注意：这是**场景输入精度**；profile 域门禁按其自身采集精度（如 BF16）
+      // 独立核对，不匹配即回退并披露原因——不把“profile 需要 BF16”转成输入。
+      quant: QUANT_PRESETS[$('sel-prec') ? $('sel-prec').value : 'w8a8_fp4e'],
       draft_quant: { dense_w: 8, expert_w: 8, act: 8, kv: 8, state: 32 },
+      cost_profile: ($('sel-profile') && $('sel-profile').value) || null,
       seed: 0
     };
     if (over) {
@@ -165,6 +184,12 @@
     $('kpi-tpot-sub').textContent = tpotReason
       ? '原因：' + tpotReason.slice(0, 46)
       : 'E[T_round]/E[N] · committed · 解析';
+    var tpotC = val(b, 'M01_tpot_profile_calibrated');
+    if (tpotC !== null) {
+      $('kpi-tpot').textContent = fmt(tpotC, 'ms', 4);
+      $('kpi-tpot-sub').textContent = '实测校准（算子级组合；解析值 '
+        + fmt(tpot, 'ms', 4) + ' 保留在指标区）';
+    }
     var base = val(b, 'M01_tpot_baseline');
     var sp = metric(b, 'M02_speedup_vs_baseline');
     $('kpi-speedup').textContent = sp && sp.value !== null
@@ -295,11 +320,19 @@
       '<div class="kv"><b>5 形状：</b><code>' + (r.shape || '') + '</code></div>' +
       '<div class="kv"><b>6 精度/统计身份：</b><span class="tag ' +
       (r.statistic === 'expectation' ? 'warn' : 'ok') + '">' +
-      (r.statistic || 'exact') + '</span> 权重 8b/4b · 激活 8b · KV 8b</div>' +
+      (r.statistic || 'exact') + '</span> ' + quantLabel() + '</div>' +
       '<div class="formula-box"><span class="fid">[' + (r.formula || '') + ']</span> ' +
       formulaExpr(r.formula) + '</div>';
     $('inspector').innerHTML = html;
     drawRoofline(r);
+  }
+
+  function quantLabel() {  // 从运行快照读实际精度（不写死；UI=CLI=JSON 同源）
+    var q = state.bundle && state.bundle.scenario_snapshot &&
+            state.bundle.scenario_snapshot.quant;
+    if (!q) return '';
+    return '权重 ' + q.dense_w + 'b/' + q.expert_w + 'b · 激活 ' + q.act +
+           'b · KV ' + q.kv + 'b';
   }
 
   function formulaExpr(fid) {

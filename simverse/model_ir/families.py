@@ -59,7 +59,10 @@ _STRUCT_KEYS = {
                  "n_shared_experts", "num_experts_per_tok", "moe_intermediate_size",
                  "routed_scaling_factor", "scoring_func", "topk_method",
                  "max_position_embeddings", "tie_word_embeddings",
-                 "num_nextn_predict_layers", "norm_topk_prob"},
+                 "num_nextn_predict_layers", "norm_topk_prob",
+                 # mHC（2026-11-10 mapped：count/work.hc_boundary_rows +
+                 # lowering/memory hc 权重；vLLM pin source-checked）
+                 "hc_mult", "hc_eps", "hc_sinkhorn_iters"},
 }
 
 # 已核不影响文本推理结构、也不进 IR 的键（metadata/ignored 分类）
@@ -307,10 +310,13 @@ def parse_deepseek_v3(config: Dict[str, Any], source: SourceIdentity, model_id: 
 
 def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str,
                    label: str) -> ModelIR:
-    """DeepSeek-V4.1-Flash：MLA+CSA2 压缩层计划 + 全层 MoE + Engram/hc 缺口。
+    """DeepSeek-V4.1-Flash：MLA+CSA2 压缩层计划 + 全层 MoE + mHC 建模 + Engram 缺口。
 
-    Engram/hc 字段参与 forward（vLLM 源码证据）但结构/计数未建模 →
-    unsupported-semantic，gaps 非空，structure_complete=False。
+    mHC（hc_mult/hc_eps/hc_sinkhorn_iters）：2026-11-10 按 vLLM pin 源码建模
+    （count/work.hc_boundary_rows + lowering/memory hc 权重）→ mapped；
+    Engram 8 键仍 unsupported-semantic（注入点/批级哈希/层位已从 model.py 证实，
+    但 common/engram.py 未 pin：forward 内部算子与表 dtype 未知，不猜常数）
+    → gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
     tc = config
@@ -352,19 +358,31 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                         produces_candidates=i == candidate),
             moe=moe))
     gaps_hint = {
-        "engram_vocab_size": "Engram 查表参与 forward（vLLM 源码证实）但未建模",
-        "engram_compressed_vocab_size": "同上",
-        "engram_head_dim": "同上",
+        "engram_vocab_size": "Engram 表规模已知（num_embeddings 精确）但表 dtype "
+                             "未 pin（common/engram.py 不在评审包）→ 容量字节未知，"
+                             "不猜；默认 cpu_offload 在主机内存（engram_config）",
+        "engram_compressed_vocab_size": "同上（哈希压缩词表参与批级 ngram 哈希）",
+        "engram_head_dim": "Engram.forward 内部算子未 pin → 注入算子不计猜测常数",
         "engram_n_heads": "同上",
-        "engram_num_embeddings": "同上",
-        "engram_max_ngram_size": "同上",
-        "engram_layer_ids": "同上",
-        "engram_pad_token_id": "同上",
-        "hc_mult": "hc 混合流状态参与 forward（vLLM 源码证实）但未建模",
-        "hc_eps": "同上",
-        "hc_sinkhorn_iters": "同上",
+        "engram_num_embeddings": "同 engram_vocab_size",
+        "engram_max_ngram_size": "批级 ngram 哈希窗口（NgramHashState，每批一次）"
+                                 "已证实；哈希算量小未单列（误差异常小，登记近似）",
+        "engram_layer_ids": "注入层位已证实（residual 流上、层 1/14，post/pre 分立）"
+                            "；注入算子本身未建模",
+        "engram_pad_token_id": "padding 参与哈希语义，随 Engram forward 缺口",
     }
+    # hc_* → mapped（计数 count/work.hc_boundary_rows；容量 lowering/memory；
+    # 证据 vllm deepseek_v41 model.py pin @f358f057 source-checked 2026-11-10）
     coverage, gaps = _coverage("v41_csa2", tc, gaps_hint)
+    # mHC 参数（消费方：count/work.hc_boundary_rows、lowering/memory）。
+    # post_alpha=2.0 为源码常数（model.py self.hc_post_alpha），入册便于对账。
+    hc_spec = {
+        "mult": int(tc["hc_mult"]),
+        "sinkhorn_iters": int(tc["hc_sinkhorn_iters"]),
+        "eps": float(tc["hc_eps"]),
+        "post_alpha": 2.0,
+        "engram_layer_ids": list(tc.get("engram_layer_ids", [])),
+    }
     # dspark_* 归方法层消费（登记 metadata-only，消费者 methods）
     for key in list(coverage):
         if key.startswith("dspark_"):
@@ -393,7 +411,8 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             "compress_ratios": ratios,
             "kv_source_layer_ids": kv_ids,
             "index_source_layer_ids": ix_ids,
-        }})
+        },
+        "hc": hc_spec})
 
 
 def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id: str,

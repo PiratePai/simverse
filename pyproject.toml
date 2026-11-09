@@ -1,6 +1,6 @@
 [project]
 name = "simverse"
-version = "0.1.0"
+version = "0.2.1"
 description = "统一推理仿真仓（暂名）首个垂直切片：投机解码 / DT 分离的可追溯验证"
 requires-python = ">=3.10"
 dependencies = ["flask>=3.0"]

@@ -7,8 +7,9 @@
     每请求常数容量单列 state_capacity；
   * MLA（V3）按压缩布局计 KV（kv_lora+rope），展开式/吸收式 recipe 差异
     在 lowering 登记，本层给默认展开投影集；
-  * V4.1 CSA2 沿用已对账的闭式（v0.1 移植 attention_structure，100% 对齐），
-    Engram/hc 缺口由 ModelIR.gaps 携带，不在此假装补齐。
+  * V4.1 CSA2 沿用已对账的闭式（v0.1 移植 attention_structure，100% 对齐）；
+    mHC 边界（hc_*，2026-11-10 按 vLLM pin 源码建模，替代该族通用 norm/add 行）
+    与 Engram 注入缺口由 ModelIR.gaps 携带（Engram forward 未 pin，不猜）。
 """
 from __future__ import annotations
 
@@ -385,6 +386,62 @@ def norm_add_rows(stage: str, li: int, T: int, h: int, quant: dict) -> List[OpRo
     return rows
 
 
+def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
+                     quant: dict, first_layer: bool = False) -> List[OpRow]:
+    """mHC（mega hyper-connections）边界算子（v41_csa2 专用）。
+
+    证据（vllm models/deepseek_v41/nvidia/model.py pin @f358f057；
+    source-checked 2026-11-10）：
+      * 每层 2 次边界（attn 侧 hc_attn_fn / ffn 侧 hc_ffn_fn），常规路径为
+        mhc_shifted_post_pre 融合核 = 前一子层 post（流更新）+ 本侧系数 GEMM
+        + sinkhorn(hc_sinkhorn_iters) + collapse + RMSNorm（norm_weight 即
+        attn_norm/ffn_norm）→ v41 层**不再**另计通用 norm/add 行（防重复计费）；
+      * hc_dim = hc_mult·h 为全宽流：mHC 边界不随 TP 切分（attention 内部自行
+        分片；hc 权重每卡复制，见 lowering/memory），本函数不除 tp；
+      * 首层输入为广播嵌入：attn 侧系数 GEMM IC=h（非 hc_dim），另有
+        hc_expand 广播行（model.py `residual = hc_expand(x, hc_mult)`）；
+      * Engram 层（extras.hc.engram_layer_ids）post/pre 分立执行 + Engram 注入
+        ——注入算子未建模（common/engram.py 未 pin），由 ModelIR.gaps 携带，
+        本函数不计猜测常数；边界算子构成与常规层相同（post+pre 总量不变）。
+    """
+    m = hc["mult"]
+    iters = hc["sinkhorn_iters"]
+    mix = (2 + m) * m                     # mix_hc（hc_attn_fn/hc_ffn_fn 行数）
+    hc_dim = m * h
+    b_a = quant["act"] / 8
+    rows: List[OpRow] = []
+    if first_layer:
+        rows.append(OpRow(
+            stage, li, "hc_expand", flops=T * hc_dim,
+            act_read=int(T * h * b_a), act_write=int(T * hc_dim * b_a),
+            formula=FR.F_MHC_EXPAND, shape=f"嵌入广播 {m} 流 × h"))
+    for side, fn in (("attn", "hc_attn_fn"), ("ffn", "hc_ffn_fn")):
+        ic = h if (first_layer and side == "attn") else hc_dim
+        rows.append(OpRow(
+            stage, li, f"hc_{side}_mix", flops=2 * T * ic * mix,
+            weight_read=int(mix * hc_dim * 4),          # FP32（源码 dtype）
+            weight_capacity=int(mix * hc_dim * 4),
+            act_read=int(T * ic * b_a), act_write=int(T * mix * 4),
+            formula=FR.F_MHC_MIX,
+            shape=f"[{T},{ic}]@[{ic},{mix}]·{fn}（fp32，每卡复制）"))
+        rows.append(OpRow(
+            stage, li, f"hc_{side}_sinkhorn", flops=T * mix * iters * 5,
+            act_read=int(T * mix * 4), act_write=int(T * mix * 4),
+            formula=FR.F_MHC_SINKHORN, statistic="approximated",
+            shape=f"{T}×{mix} 系数 × {iters} 迭代（FP32；每迭代 OP 数近似）"))
+        norm_ops = T * (4 * h + 2)
+        rows.append(OpRow(
+            stage, li, f"hc_{side}_post_pre",
+            flops=4 * T * hc_dim + norm_ops,
+            weight_read=int(h * b_a),
+            act_read=int((T * hc_dim + T * h) * b_a),
+            act_write=int((T * hc_dim + T * h) * b_a),
+            formula=FR.F_MHC_POST_PRE,
+            shape=f"post 流更新+collapse（各 2·T·{hc_dim}）+ RMSNorm(h={h})；"
+                  f"含残差（流上）"))
+    return rows
+
+
 def head_rows(stage: str, model: ModelIR, T: int, quant: dict, tp: int) -> List[OpRow]:
     h, v = model.hidden, model.vocab
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
@@ -413,6 +470,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     S, Q = (0, ctx) if prefill else (ctx, queries)
     rows: List[OpRow] = []
     kvs = (model.extras or {}).get("kv_spec", {})
+    hc_spec = (model.extras or {}).get("hc")
+    first_layer_index = model.layers[0].index if model.layers else None
     for layer in model.layers:
         li = layer.index
         if layer.kind in (FULL, SLIDING) and layer.attn:
@@ -426,7 +485,12 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                                    prefill, tp)
         T = B * Q
         rows += ffn_or_moe_rows(stage, li, layer, T, h, quant)
-        rows += norm_add_rows(stage, li, T, h, quant)
+        if layer.kind == MLA_CSA2 and hc_spec:
+            # mHC 边界核融合 norm+残差（F_MHC_POST_PRE）：不再另计通用 norm/add 行
+            rows += hc_boundary_rows(stage, li, T, h, hc_spec, quant,
+                                     first_layer=(li == first_layer_index))
+        else:
+            rows += norm_add_rows(stage, li, T, h, quant)
     rows += head_rows(stage, model, B * Q, quant, tp)
     for r in rows:
         r.role = role

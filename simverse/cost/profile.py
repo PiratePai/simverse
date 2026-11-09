@@ -98,8 +98,14 @@ def synthetic_profile_fixture() -> ProfileRecord:
 
 def apply_calibration(estimate_ms: float, record: ProfileRecord,
                       calibration: Optional[CalibrationModel],
-                      domain_key: str) -> CostEstimate:
-    """校准应用规则：域内且 measured 才 selected=calibrated；否则回退解析。"""
+                      domain_key: str,
+                      selected_ms: Optional[float] = None) -> CostEstimate:
+    """校准应用规则（MERGE_CRITERIA §3）：
+    域内且 measured 且**提供了独立预测值**才 selected=calibrated；
+    否则一律回退解析并写明原因。禁止把 analytic estimate 回填为 selected
+    冒充校准（2026-11-09 修复：旧实现 measured 分支 selected=estimate_ms）。
+    预测值来源必须是查表/插值/拟合输出（如 cost.calibrated.CalibratedPricer），
+    不允许单一全局倍率（G5）。"""
     if calibration is None:
         return CostEstimate(
             target_id="", analytic_base_ms=estimate_ms, selected_ms=None,
@@ -118,8 +124,15 @@ def apply_calibration(estimate_ms: float, record: ProfileRecord,
             cost_source="analytic", profile_ref=record.profile_id,
             calibration_ref=calibration.calibration_id, coverage_status=in_cov,
             unmeasured=True, fallback_reason="记录为 synthetic，非测量")
+    if selected_ms is None:
+        return CostEstimate(
+            target_id="", analytic_base_ms=estimate_ms, selected_ms=None,
+            cost_source="analytic", profile_ref=record.profile_id,
+            calibration_ref=calibration.calibration_id, coverage_status=in_cov,
+            unmeasured=True,
+            fallback_reason="measured 域内但未提供独立预测值（缺查表/拟合输出）")
     return CostEstimate(
-        target_id="", analytic_base_ms=estimate_ms, selected_ms=estimate_ms,
+        target_id="", analytic_base_ms=estimate_ms, selected_ms=float(selected_ms),
         cost_source="calibrated", profile_ref=record.profile_id,
         calibration_ref=calibration.calibration_id, coverage_status="in",
         unmeasured=False)

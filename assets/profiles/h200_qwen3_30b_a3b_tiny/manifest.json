@@ -1,0 +1,192 @@
+{
+ "profile_set_id": "h200-qwen3-30b-a3b-tiny-op-v1",
+ "created_at": "2026-11-09",
+ "extractor": "tools/distill_h200_profiles.py",
+ "rounding": "median 四舍五入 6 位小数（ms）",
+ "source": {
+  "repo": "pi-viewer (本地路径 D:/Github/pi-viewer，只读)",
+  "git_head": "c5909a7699a1d2bb422d931bdca6cba399451f00",
+  "files_sha256": {
+   "data/profiling/compute/h200/Qwen3-30B-A3B-tiny/linear_op.csv": "42bb2b4e3a9698c54a15f50151223d7c21b70454fd09ac49d9a6ecd1c8bccfc8",
+   "data/profiling/compute/h200/Qwen3-30B-A3B-tiny/linear_op_kernel_only.csv": "110bd55c652ea00bde503cf3aba90727fbbb2b29d11c6301cbff0987f3c81cc1",
+   "data/profiling/compute/h200/Qwen3-30B-A3B-tiny/attention.csv": "08ae987500eacde736be07d1404d402be5ce66ec41d0c15dd11ad562fa27e774",
+   "data/profiling/compute/h200/Qwen3-30B-A3B-tiny/attention_kernel_only.csv": "36129ca5efc6a9443b5ab0ba85368b3b95934c204086e049b5543c75028d3203",
+   "data/profiling/compute/h200/Qwen3-30B-A3B-tiny/moe.csv": "8a265ec39015563907939b0aeb991be84461d834fb0f276d520867aa8a4c3ebe",
+   "data/profiling/compute/h200/Qwen3-30B-A3B-tiny/kernel_gap.csv": "e5c1fffd3bd198865d999f507a9b6dfaedae23b3fdce528b3915d3a6f2cc9331",
+   "data/profiling/cpu_overhead/h200_dgx/Qwen3-30B-A3B-tiny/cpu_overheads.csv": "1d21c1ba778200d33bf363ba4f660d16d0068eb34268fdb4d122e1058e7edb18",
+   "data/config/models/Qwen3-30B-A3B-tiny.json": "5feee5df704a4f3ac908ec26b0a80fe80b8cc5a92b9e36fc0b051d07473c999a"
+  },
+  "measurement_contract": "frontier/profiling/README.md: cuda_event→CUDA_EVENT（wall-clock device time between CUDA events）；kernel_only→KERNEL_ONLY 记 kernel_count",
+  "measurement_caveats": [
+   "CUDA_EVENT 事件括号内为 device wall-clock：launch-bound 时含 host launch 空闲，故逐 op median 含每 op 固定开销地板（device_timer.py CUDA_EVENT 分支；源码核对 2026-11-10）",
+   "CUDA_EVENT 路径无 L2 刷新（仅 RECORD_FUNCTION 路径 _flush_l2）；WARMUP/ACTIVE 连续重复下权重/KV 可驻留 L2，weight-bound 小 GEMM 实测值偏乐观（warm-L2 bias）",
+   "重复次数：linear WARMUP=3/ACTIVE=20，attention WARMUP=3/ACTIVE=5（linear_op_wrapper.py / attention_wrapper.py 常量）",
+   "kernel_gap eager 值在 host-ahead（spin kernel 占流、launch 预排队）条件下测得，为纯设备侧间隙（kernel_gap/main.py）；用作 launch-bound 边界间隙补贴是低估",
+   "decode-even：B 条序列×每条 1 新 query×均匀 kv_cache_size 上下文，分页 KV（block16，每序列独立连续 block，FLASHINFER）；连续组批的非均匀上下文为域外"
+  ]
+ },
+ "environment": {
+  "gpu_name": "NVIDIA H200",
+  "driver_version": "570.124.06",
+  "torch_version": "2.8.0+cu128",
+  "cuda_version": "12.8"
+ },
+ "kernel_gap": [
+  {
+   "execution_mode": "eager",
+   "kernel_gap_us": 1.3493,
+   "num_gaps": 11640,
+   "chain": "decoder_layer:Qwen3-30B-A3B-tiny:tp1"
+  },
+  {
+   "execution_mode": "cuda_graph",
+   "kernel_gap_us": 0.418,
+   "num_gaps": 12710,
+   "chain": "vllm_decode_graphs:Qwen3-30B-A3B-tiny"
+  }
+ ],
+ "composition": {
+  "selected": "域内实测 median 之和 + 域外解析（差额法） + eager 间隙补贴",
+  "gap_policy": "2026-11-10 修正：间隙补贴按计时区间边界数计（每个被测组实例 1 个边界；注意力块 4 op 各自计时）。CUDA_EVENT median 的事件括号已含区间内 kernel 间隙（launch-bound 时含 host 空闲），按全部 kernel 数计费会重复计入区间内间隙（B8 全模型673 kernel vs 433 区间，约 +0.32ms/步，~1.6%）。",
+  "gap_bound": "eager 值为 host-ahead 纯设备间隙，用作 launch-bound 边界间隙是低估；cuda_graph 档备选未采用"
+ },
+ "admission": {
+  "admit": {
+   "linear_op.csv": "387 token 网格 ×6 算子，TP1 BF16 CUDA_EVENT；形状与 Qwen3-30B-A3B 逐算子一致（hidden 2048/32q/4kv/head_dim 128/inter 768/vocab 151936）",
+   "attention.csv": "decode+even 5184 (batch 1..64 × kv 0..4095) 点；FLASHINFER/BF16/TP1/block16",
+   "kernel_gap.csv": "环境元数据 + eager/cuda_graph 每间隙 µs"
+  },
+  "reject": {
+   "moe.csv": "16 专家缩小复制品（num_experts=16）≠ 真模型 128E；grouped GEMM/router 形状域不符，不进入 v1 校准域"
+  },
+  "defer": {
+   "attention.csv:prefill/true_mixed": "v1 闭环仅 decode；蒸馏未含 prefill",
+   "cpu_overheads.csv": "v1 合成未用 CPU probe；已记录来源哈希",
+   "Qwen3-235B-A22B/llama2_7b": "另立闭环（235B 需先在 catalog 登记）"
+  },
+  "replica_note": "采集模型为 pi-viewer data/config/models/Qwen3-30B-A3B-tiny.json（官方 30B-A3B 的缩小复制品：层数 8、专家 16；逐算子形状除专家数/router 输出维外与真模型一致）。校准域内算子不含MoE/router，故专家数差异不影响已准入算子的形状一致性；层数不进入逐算子计价。"
+ },
+ "domain": {
+  "device": "h200_sxm",
+  "precision": "BF16",
+  "tensor_parallel": 1,
+  "attention_backend": "FLASHINFER",
+  "kv_block": 16,
+  "linear_tokens": [
+   1,
+   16384
+  ],
+  "attn_decode": {
+   "batch": [
+    1,
+    64
+   ],
+   "kv": [
+    0,
+    4095
+   ]
+  },
+  "shape_identity": {
+   "model_type": "qwen3_moe",
+   "hidden_size": 2048,
+   "n_q_head": 32,
+   "n_kv_head": 4,
+   "head_dim": 128,
+   "moe_intermediate_size": 768,
+   "vocab_size": 151936,
+   "num_experts_replica": 16,
+   "num_experts_per_tok": 8,
+   "torch_dtype": "bfloat16",
+   "use_qk_norm": true,
+   "use_sliding_window": false,
+   "rope_theta": 1000000.0,
+   "full_rotary": true,
+   "attention": "full"
+  },
+  "applicable_stages": "decode(Q=1)/verify 的线性算子；decode 的注意力块"
+ },
+ "holdout": {
+  "rule": "md5(key) % 100 < 15",
+  "train_keys_linear": {
+   "emb": 321,
+   "input_layernorm": 337,
+   "attn_pre_proj": 332,
+   "attn_rope": 349,
+   "attn_post_proj": 328,
+   "post_attention_layernorm": 334
+  },
+  "attn_points_total": 5184,
+  "error_report": {
+   "linear_ops": {
+    "emb": {
+     "n": 66,
+     "median_rel_err": 0.0084,
+     "p90_rel_err": 0.0532,
+     "max_rel_err": 0.0875
+    },
+    "input_layernorm": {
+     "n": 50,
+     "median_rel_err": 0.0077,
+     "p90_rel_err": 0.0311,
+     "max_rel_err": 0.0438
+    },
+    "attn_pre_proj": {
+     "n": 54,
+     "median_rel_err": 0.0057,
+     "p90_rel_err": 0.0151,
+     "max_rel_err": 0.0483
+    },
+    "attn_rope": {
+     "n": 38,
+     "median_rel_err": 0.0051,
+     "p90_rel_err": 0.0229,
+     "max_rel_err": 0.0357
+    },
+    "attn_post_proj": {
+     "n": 59,
+     "median_rel_err": 0.0112,
+     "p90_rel_err": 0.0724,
+     "max_rel_err": 0.1673
+    },
+    "post_attention_layernorm": {
+     "n": 53,
+     "median_rel_err": 0.0091,
+     "p90_rel_err": 0.0229,
+     "max_rel_err": 0.1151
+    }
+   },
+   "attn_decode": {
+    "attn_input_reshape": {
+     "n": 756,
+     "median_rel_err": 0.0115,
+     "p90_rel_err": 0.056,
+     "max_rel_err": 0.8922
+    },
+    "attn_kv_cache_save": {
+     "n": 739,
+     "median_rel_err": 0.0115,
+     "p90_rel_err": 0.0499,
+     "max_rel_err": 2.384
+    },
+    "attn_decode": {
+     "n": 768,
+     "median_rel_err": 0.0118,
+     "p90_rel_err": 0.029,
+     "max_rel_err": 0.1075
+    },
+    "attn_output_reshape": {
+     "n": 765,
+     "median_rel_err": 0.011,
+     "p90_rel_err": 0.0698,
+     "max_rel_err": 0.4788
+    }
+   },
+   "method": "键 md5 哈希 15% 留出；线性/双线性插值于训练网格；相对误差 |pred-measured|/measured"
+  }
+ },
+ "distill_files": {
+  "linear_ops.json": "4668ac290be2e192c6a6904a4eb830844426d4aab6b89524fe270fd2560a495d",
+  "linear_kernel_counts.json": "d2713d52da00093a3d58bbbca21acd4fb2987f0a8b8cc14ac170794370bf5656",
+  "attn_decode.json": "76d2165e821eef92bbc6e821bd5066a24aa0507f47f115acca25ad787794c27f"
+ }
+}

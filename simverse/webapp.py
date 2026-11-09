@@ -54,6 +54,7 @@ def api_v2_catalog():
     from .methods.plans import UNSUPPORTED
     from .validation import registry_json
     from .importers import source_map_json
+    from .cost.profile_store import PROFILE_SETS
     return jsonify(js_safe({
         "schema_version": "0.2",
         "catalog": catalog_json(),
@@ -62,6 +63,7 @@ def api_v2_catalog():
         "methods": {"supported": ["baseline", "dflash_v1", "chain_draft", "mtp",
                                   "chain_moe_proxy"],
                     "unsupported": UNSUPPORTED},
+        "profile_sets": sorted(PROFILE_SETS),
         "evidence": registry_json(),
         "source_map": source_map_json(),
     }))

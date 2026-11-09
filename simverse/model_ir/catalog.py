@@ -155,6 +155,18 @@ def _qwen3_30b() -> ModelIR:
         "qwen3_30b_a3b", "Qwen3-30B-A3B (48L GQA MoE 128E top-8)")
 
 
+def _qwen3_235b() -> ModelIR:
+    path = ASSETS / "config" / "qwen3_235b_a22b__config.json"
+    cfg = _load(path)
+    return parse_qwen3_moe(
+        cfg, _src("Qwen/Qwen3-235B-A22B",
+                  "8efa61729e24bd65b1d152b5ab5409052aa80e65", _sha(path),
+                  "官方 main 快照（2026-11-10 经 HF resolve/main 获取并取 revision；"
+                  "pi-viewer 二手副本逐字段核对一致，仅其多自加 profiling 键）"),
+        "qwen3_235b_a22b",
+        "Qwen3-235B-A22B (94L GQA MoE 128E top-8; 官方身份 2026-11-10 补，G-D3 解除)")
+
+
 def _qwen3_next() -> ModelIR:
     path = ASSETS / "config" / "qwen3_next_80b_a3b__config.json"
     cfg = _load(path)
@@ -202,6 +214,7 @@ def build_catalog() -> Dict[str, Any]:
         "deepseek_v41_flash": _v41(),
         "qwen36_35b_a3b": _qwen36(),
         "qwen3_30b_a3b": _qwen3_30b(),
+        "qwen3_235b_a22b": _qwen3_235b(),
         "qwen3_next_80b_a3b": _qwen3_next(),
         "deepseek_v3": _deepseek_v3(),
     }

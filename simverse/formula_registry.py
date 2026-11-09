@@ -58,6 +58,30 @@ F_LM_HEAD = _f("v2.lm_head", "FLOPs = 2·T·h·V_card", "列切分 per card", "�
 F_EMBED = _f("v2.embed", "读 = T·h·B_e（查表）；容量 = h·V·B_e（untied）",
              "嵌入查表", "输入嵌入")
 
+# ---- mHC（mega hyper-connections，V4.1；证据 vllm deepseek_v41/nvidia/model.py
+#       pin @f358f057，source-checked 2026-11-10）----
+F_MHC_MIX = _f(
+    "v2.mhc_mix",
+    "coeff GEMM FLOPs = 2·T·IC·mix_hc；IC=hc_dim=m·h（首层 attn 侧 IC=h），"
+    "mix_hc=(2+m)·m；权重 FP32（hc_*_fn 参数 dtype=float32）",
+    "model.py hc_attn_fn/hc_ffn_fn 形状 (mix_hc, hc_dim)、hc_post_alpha 常数 2.0",
+    "mHC 边界系数生成（每层 attn/ffn 各一次）")
+F_MHC_SINKHORN = _f(
+    "v2.mhc_sinkhorn",
+    "ops ≈ T·mix_hc·iters·5（每迭代每系数约 5 OP：减/幂/行和/列和/归一）",
+    "iters=hc_sinkhorn_iters 精确（model.py sinkhorn_repeat=hc_sinkhorn_iters）；"
+    "每迭代 OP 数为解析近似（tilelang kernel 未 pin）→ 行标 approximated",
+    "mHC 系数 sinkhorn 归一化（FP32 系数）")
+F_MHC_POST_PRE = _f(
+    "v2.mhc_post_pre",
+    "FLOPs = 4·T·hc_dim（post 流更新 + collapse 各 2·T·hc_dim）"
+    "+ T·(4h+2)（融合 RMSNorm，norm_weight=attn_norm/ffn_norm）",
+    "model.py forward：常规路径 mhc_shifted_post_pre 融合前一子层 post 与本侧 "
+    "pre（else 分支）；Engram 层为 mhc_post_tilelang + engram + mhc_pre 分立",
+    "mHC 流折叠/展开边界（含残差与 norm；v41 层不再另计通用 norm/add 行）")
+F_MHC_EXPAND = _f("v2.mhc_expand", "写 = T·m·h（首层嵌入广播到 m 流）",
+                  "model.py 首层 hc_expand(x, hc_mult)", "首层流广播")
+
 # ---- Cost（T0 解析估算；Q2：无实测数字） ----
 F_ROOFLINE = _f("v2.roofline", "t = max(F/P_eff, Q/BW_eff) + ρ·min(...)；ρ=0.15 登记",
                 "原理 §5：乐观约束 + 显式经验尾部", "kernel 级 T0")

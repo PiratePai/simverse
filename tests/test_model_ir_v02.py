@@ -71,13 +71,20 @@ def test_deepseek_v3_mla_and_dense_moe_split(cat):
 
 
 def test_v41_structure_and_gaps(cat):
-    """V4.1：40 层 MLA+CSA2；Engram/hc 11 键 → structure_complete=False。"""
+    """V4.1：40 层 MLA+CSA2；hc 3 键已映射、Engram 8 键缺口 → structure_complete=False。"""
     m = cat["models"]["deepseek_v41_flash"]
     assert len(m.layers) == 40
     assert m.kind_counts() == {"mla_csa2": 40}
-    assert not m.structure_complete
+    assert not m.structure_complete          # Engram 仍阻断（不冒充）
     gap_keys = {g.split(":")[0] for g in m.gaps}
-    assert len(gap_keys & {"hc_mult", "engram_vocab_size"}) == 2
+    assert "engram_vocab_size" in gap_keys
+    assert not gap_keys & {"hc_mult", "hc_eps", "hc_sinkhorn_iters"}  # hc 已解除
+    assert len(gap_keys) == 8                 # 8 engram 键
+    # hc 参数入册 extras（消费方 count/memory）
+    hc = m.extras["hc"]
+    assert hc["mult"] == 4 and hc["sinkhorn_iters"] == 20
+    assert hc["eps"] == 1e-6 and hc["post_alpha"] == 2.0
+    assert hc["engram_layer_ids"] == [1, 14]
     # 前 40 层 r 分布 0:2 / 2:18 / 1:20（主控已独立确认）
     ratios = [l.csa2.ratio for l in m.layers]
     assert ratios.count(0) == 2 and ratios.count(2) == 18 and ratios.count(1) == 20
@@ -121,7 +128,9 @@ def test_every_config_key_has_coverage(cat):
             assert entry["status"] in valid, (mid, key, entry)
         if mid == "deepseek_v41_flash":
             eng = [k for k, v in cov.items() if v["status"] == "unsupported-semantic"]
-            assert len(eng) == 11  # 8 engram + 3 hc
+            assert len(eng) == 8   # 8 engram；hc 3 键已 mapped（2026-11-10）
+            for hk in ("hc_mult", "hc_eps", "hc_sinkhorn_iters"):
+                assert cov[hk]["status"] == "mapped"
 
 
 def test_v41_dspark_fields_are_method_scoped(cat):

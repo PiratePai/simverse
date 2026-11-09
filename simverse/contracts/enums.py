@@ -45,6 +45,8 @@ class ResultKind(str, Enum):
     OPTIMISTIC_BOUND = "optimistic-bound"
     EVENT_SIMULATION = "event-simulation"
     MEASUREMENT = "measurement"
+    # 算子级实测中位数组合估算（非整步实测；evidence 列 MEASURED 的组合值用它）
+    MEASURED_COMPOSITE = "measured-composite"
 
 
 class Statistic(str, Enum):

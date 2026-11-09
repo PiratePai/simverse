@@ -15,6 +15,8 @@ from .count import build_model_work, totals
 from .count.draft import chain_step_rows, dflash_round_rows, mtp_step_rows
 from .devices import DEVICES, LINKS  # v0.1 设备注册表（v0.2 沿用数值+分层预算）
 from .cost.t0 import dtype_route, price_rows, stage_total
+from .cost.calibrated import CalibratedPricer
+from .cost.profile_store import PROFILE_SETS, load_profile_set
 from .execute.serial import build_serial_round
 from .lowering import (DeviceBudget, LinkLike, colocated_rank_memory,
                        kv_shard_note, validate_tp)
@@ -75,6 +77,19 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
         draft_ir = draft
     acc = acceptance_summary(plan)
 
+    # ---- 实测 profile 校准（可选；MERGE_CRITERIA §3：只改成本不改计数）----
+    pricer = None
+    if scenario.cost_profile:
+        pset = load_profile_set(scenario.cost_profile)  # 完整性不符即抛错
+        pricer = CalibratedPricer(pset, model, scenario)
+        if pricer.applicable:
+            cap.add("cost_profile_domain", "supported",
+                    f"{scenario.cost_profile}：设备/精度/TP/形状域匹配")
+        else:
+            cap.add("cost_profile_domain", "approximated",
+                    f"{scenario.cost_profile} 域不匹配：{'；'.join(pricer.domain_reasons)}",
+                    affected_metrics=["M01_tpot_profile_calibrated"])
+
     # ---- 部署合法性 ----
     dep = scenario.deployment
     tp_errors = validate_tp(model, dep.target_tp)
@@ -99,6 +114,12 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     work: Dict[str, Any] = {}
     cost: Dict[str, Any] = {}
     tp_link = _link_like(dep.link)
+    calibration: Dict[str, Any] = {
+        "profile_set": scenario.cost_profile,
+        "stages": {},
+        "note": "selected=域内实测+域外解析(差额)+kernel间隙；原始计数不变（G7）"
+                "；草稿阶段无匹配域不校准",
+    } if pricer else None
 
     base_rows = build_model_work(model, "target_decode", B, ctx, 1, quant,
                                  dep.target_tp, role="target")
@@ -108,6 +129,10 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     # TP collectives（baseline decode 每层 2 次）
     col_base = _collectives_cost(model, dep.target_tp, B, quant, tp_link)
     t_base += col_base["t_ms"]
+    if pricer:
+        cal = pricer.price_stage("target_decode", base_rows, base_prices, B, ctx, 1)
+        cal["collectives_ms"] = col_base["t_ms"]
+        calibration["stages"]["target_decode"] = cal
     work["target_decode"] = _rows_json(base_rows)
     cost["target_decode"] = {"t_ms": t_base, "collectives": col_base["detail"]}
     cost["roofline_points"] = roofline_points
@@ -164,6 +189,13 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             col_v = _collectives_cost(model, dep.target_tp, B * plan.block_size,
                                       quant, tp_link)
             t_verify += col_v["t_ms"]
+            if pricer:
+                calibration["stages"]["verify_block"] = pricer.price_stage(
+                    "verify_block", verify_rows, v_prices, B, ctx, plan.block_size)
+                calibration["stages"]["draft_block"] = {
+                    "stage": "draft_block", "domain_ok": False,
+                    "reasons": ["草稿模型（DFlash 6L dense GQA）无匹配 profile 域"],
+                    "selected_ms": None}
             blk = plan.block_size
             greedy = scenario.acceptance.get("kind") == "geometric"  # 概率随采样策略
             msg_bytes = {
@@ -185,7 +217,12 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             verify_rows = build_model_work(model, "verify", B, ctx,
                                            plan.k_effective + 1, quant,
                                            dep.target_tp, role="target")
-            t_verify = stage_total(price_rows(verify_rows, target_dev, gemm_dt, ew_dt))
+            v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
+            t_verify = stage_total(v_prices_m)
+            if pricer:
+                calibration["stages"]["verify"] = pricer.price_stage(
+                    "verify", verify_rows, v_prices_m, B, ctx,
+                    plan.k_effective + 1)
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
                          "t2d": int(e_n * model.hidden * (quant["act"] / 8))}
             stage_costs = {"draft_step_0": t_draft, "verify": t_verify}
@@ -208,7 +245,12 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             verify_rows = build_model_work(model, "verify", B, ctx,
                                            plan.k_effective + 1, quant,
                                            dep.target_tp, role="target")
-            t_verify = stage_total(price_rows(verify_rows, target_dev, gemm_dt, ew_dt))
+            v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
+            t_verify = stage_total(v_prices_c)
+            if pricer:
+                calibration["stages"]["verify"] = pricer.price_stage(
+                    "verify", verify_rows, v_prices_c, B, ctx,
+                    plan.k_effective + 1)
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
                          "t2d": int(B * 256)}
             stage_costs = {f"draft_step_{j}": t_draft / max(1, plan.k_effective)
@@ -225,8 +267,6 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
         else:
             t_d2t = t_t2d = 0.0
         step_map = {"d2t": t_d2t, "t2d": t_t2d}
-        for sid in list(stage_costs):
-            pass
         stage_costs.update({k: v for k, v in step_map.items() if v or dep.mode == "dt_serial"})
         cost["link"] = {"t_d2t_ms": t_d2t, "t_t2d_ms": t_t2d, "bytes": msg_bytes}
         if dep.mode == "dt_pipeline_sim":
@@ -250,6 +290,45 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             round_obj = build_serial_round(plan, stage_costs, e_n)
         # 串行时间线补 link 事件（计划步骤已含 d2t/t2d）
 
+    # ---- 校准摘要与 selected 轮成本（不改 stage_costs 解析值与原始计数）----
+    calibrated_tpot = None
+    calibrated_baseline = None
+    if pricer and calibration is not None:
+        cost["calibration"] = calibration
+        cov_rows = sum(s.get("coverage_rows", [0, 0])[0]
+                       for s in calibration["stages"].values())
+        tot_rows = sum(s.get("coverage_rows", [0, 0])[1]
+                       for s in calibration["stages"].values())
+        calibration["coverage"] = {
+            "rows_covered": cov_rows, "rows_total": tot_rows,
+            "holdout_error_report": pricer.pset.manifest["holdout"]["error_report"],
+            "environment": pricer.pset.manifest["environment"],
+            "source_head": pricer.pset.manifest["source"]["git_head"]}
+        if scenario.method_id == "baseline":
+            cal0 = calibration["stages"]["target_decode"]
+            if cal0.get("selected_ms") is not None:
+                sel = cal0["selected_ms"] + col_base["t_ms"]
+                calibrated_tpot = sel
+                calibrated_baseline = sel
+        else:
+            sel_costs = dict(stage_costs)
+            repl = {}
+            for stname, cal in calibration["stages"].items():
+                if cal.get("selected_ms") is None or not cal.get("domain_ok"):
+                    continue
+                base_t = cal["analytic_ms"]
+                extra = (cal.get("collectives_ms") or 0.0)
+                # collectives 已在 stage_costs 内（t_verify 含 col_v）→ 差额替换
+                repl[stname] = cal["selected_ms"] + extra
+                sel_costs[stname] = repl[stname]
+            if repl:
+                round_sel = build_serial_round(plan, sel_costs, e_n)
+                if round_sel.tpot_ms is not None:
+                    calibrated_tpot = round_sel.tpot_ms
+                cal0 = calibration["stages"].get("target_decode")
+                if cal0 and cal0.get("selected_ms") is not None:
+                    calibrated_baseline = cal0["selected_ms"] + col_base["t_ms"]
+
     # ---- 容量 ----
     memory = _memory_block(model, draft if scenario.method_id == "dflash_v1" else None,
                            quant, dquant, dep, B, ctx, cap)
@@ -257,10 +336,31 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     # ---- 指标 ----
     metrics = _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                              base_rows, memory, cap, model, draft)
+    if calibrated_tpot is not None:
+        metrics["M01_tpot_profile_calibrated"] = metric_from(
+            calibrated_tpot, "ms", "profile:" + scenario.cost_profile,
+            statistic=Statistic.EXPECTATION,
+            result_kind=ResultKind.MEASURED_COMPOSITE,
+            support=Support.APPROXIMATED,
+            evidence=(Evidence.MEASURED, Evidence.ASSUMED),
+            scope=Scope(role="target", phase="steady-decode",
+                        time_basis=TimeBasis.COMMITTED.value),
+            assumptions=[
+                "算子级实测 median 组合（域内查表/插值），非整步实测；"
+                "组合含 eager kernel 间隙估计",
+                "域外部分（MoE/router/lm_head/草稿/verify 注意力）仍为解析估算",
+                f"留出误差见 cost.calibration.coverage（来源 "
+                f"{scenario.cost_profile}）"])
+    if calibrated_baseline is not None:
+        metrics["M01_tpot_baseline_calibrated"] = metric_from(
+            calibrated_baseline, "ms", "profile:" + scenario.cost_profile,
+            statistic=Statistic.EXPECTATION,
+            result_kind=ResultKind.MEASURED_COMPOSITE,
+            support=Support.APPROXIMATED, evidence=(Evidence.MEASURED,),
+            scope=Scope(role="target", phase="steady-decode",
+                        time_basis=TimeBasis.COMMITTED.value),
+            assumptions=["同 M01_tpot_profile_calibrated 口径"])
     # M18 周期/利用率/流水（dt_pipeline_sim；周期≠单请求 TPOT，分列）
-    sim = (scenario.deployment.mode == "dt_pipeline_sim")
-    if sim or True:
-        pass
     if cost.get("pipeline_sim"):
         ps = cost["pipeline_sim"]
         n_round_equiv = scenario.deployment.pipeline_rounds *             scenario.deployment.pipeline_microbatches
@@ -293,7 +393,8 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                            input_digest=scenario.scenario_digest(),
                            model_ir_digest=digest(model.to_json()),
                            method_digest=digest(plan.to_json()),
-                           cost_digest=digest({"t0": FR.F_ROOFLINE}),
+                           cost_digest=digest({"t0": FR.F_ROOFLINE,
+                                               "profile": scenario.cost_profile}),
                            device_snapshot_digest=digest(
                                {"target": dep.target_device, "tp": dep.target_tp,
                                 "draft": dep.draft_device, "link": dep.link}),
@@ -317,7 +418,8 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                            "本值作同假设对照"},
         metrics=metrics,
         capability=cap.to_json(),
-        evidence_refs=["ev-qwen36-main-config", "ev-qwen36-dflash-config",
+        evidence_refs=[*(["ev-h200-tiny-distill"] if pricer else []),
+                       "ev-qwen36-main-config", "ev-qwen36-dflash-config",
                        "ev-dflash-impl", "ev-dflash-readme", "ev-v41-config"],
         formula_dict=FR.formulas_json()["formulas"],
         assumption_dict=_assumptions(scenario, plan),
@@ -560,6 +662,11 @@ def _assumptions(scenario, plan) -> Dict[str, str]:
                        "（可编辑演示默认值，非用户确认）",
         "A6_budget": "设备容量为标称规格；可分配预算未提供 → feasible 判定 unknown",
     }
+    if scenario.cost_profile:
+        out["A1_performance"] = (
+            f"混合口径：域内算子为实测 profile 校准（{scenario.cost_profile}，"
+            "算子级 median 组合+kernel 间隙），域外部分仍为 T0 解析估算；"
+            "见 cost.calibration 披露")
     for a in plan.approximations:
         out[f"plan:{a[:24]}"] = a
     return out

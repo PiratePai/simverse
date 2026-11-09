@@ -1,0 +1,129 @@
+# 能力缺口清单（需要工程实现的能力）
+
+与 [数据缺口清单](data-gaps.md) 分开维护：本页只列**工程实现**缺口（不依赖新数据，
+或先有实现才能消费数据）。每项含：影响面/缺什么/旧仓为何不足/需要什么实现/
+验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
+新增 G-C11）。
+
+## G-C1 V4.1 Engram 语义建模（hc 已解除 2026-11-10）⭐P0
+
+- **影响**：必需场景①（deepseek_v41_flash）全部性能/容量结论——structure_complete=
+  False，M02/M04/M05/M06 降级，不参与排名。
+- **2026-11-10 进展**：**hc（mHC 混合流）三键已建模解除**——每层 2 次边界算子
+  （post 流更新+系数 GEMM+sinkhorn+collapse+RMSNorm 融合核；首层 hc_expand 广播；
+  FP32 权重每卡复制）计入 count（hc_* 行，替代该族通用 norm/add 行防重复计费）
+  与 memory（-w-mhc 分配）；测试 tests/test_v41_hc.py（手算锚点/整模型复算/TP
+  不变性/复制守恒/权重守恒）。公式 v2.mhc_* 四条。
+- **仍缺（8 键）**：Engram 查表注入——`vllm/models/deepseek_v41/common/engram.py`
+  未入评审包：forward 内部算子与表 dtype 未知，不猜常数（注入点/批级 ngram 哈希/
+  层位 1/14 已从 model.py pin 证实并写入 coverage note）。
+- **解除条件**：补 pin common/engram.py + mhc tilelang kernel 源 → Engram 算子
+  计数与表容量（dtype 决定字节）→ coverage 全 mapped。
+- **当前降级**：structure gate 拦截（capability 可见；hc 部分已不再缺）。
+- **优先级**：P0（必需场景）。依赖：上游源码入评审包（用户/网络）。
+
+## G-C2 verify/prefill 形状域建模 + 蒸馏扩展（消费 G-D4）
+
+- **影响**：投机 verify 注意力块、未来 TTFT/prefill。
+- **缺什么**：CalibratedPricer 目前只有 decode(Q=1) 注意力域；prefill/混合批蒸馏
+  与"多 query 前缀"形状映射。
+- **旧仓不足**：pi-viewer 有数据有训练器；新仓侧缺映射与域声明。
+- **需要**：distill 扩展（prefill-even 表）+ calibrated 映射（显式假设登记）。
+- **验收**：verify 块进域（或显式假设近似档）+ 留出误差 + 回放不变性。
+- **当前降级**：verify 注意力解析回退（reason 记录）。
+- **优先级**：P1；依赖：G-D4 数据（蒸馏侧可先行）。
+
+## G-C3 DFlash 服务端集成逐行核对（SGLang DFLASH / vLLM PR#40898）
+
+- **影响**：部署矩阵"已部署验证"标记（当前 unknown，不冒充）。
+- **缺什么**：对两个引擎实现的逐行阅读证据（块调度、KV 回退、协议常数字节）。
+- **旧仓不足**：无 DFlash 集成分析。
+- **需要**：source_map 增条目 + 协议字节对账（6B/token 等估算升级为按实现核对）。
+- **验收**：dflash_serving_integration 从 unknown → supported/unsupported 带证据。
+- **当前降级**：capability unknown + "模拟按 HF 语义"注记。
+- **优先级**：P1；依赖：无。
+
+## G-C4 请求级事件轨迹 + 单请求超前（lookahead）
+
+- **影响**：M17 TTFT/ITL、单请求 TPOT、取消/浪费资源账（M3 剩余部分）。
+- **缺什么**：请求级事件 schema 扩展（request_id 贯穿）、超前分支/取消/浪费建模。
+- **旧仓不足**：model-verse 有跨轮事件资产但无请求级超前；本仓 schema 已留字段。
+- **需要**：resource_core 扩展 + reduce 的请求口径归约 + V07/V08 负例。
+- **验收**：单请求依赖链独立重建测试；取消浪费入账；TTFT 人工 oracle。
+- **当前降级**：M01 附"周期≠单请求延迟"注；请求指标不输出。
+- **优先级**：P1（M3 收尾）。
+
+## G-C5 双口径校准列（CUDA_EVENT vs KERNEL_ONLY/graph，消费 G-D6）
+
+- **影响**：小 batch 结论的口径敏感性（3× 量级差）。
+- **缺什么**：profile_store 支持 measurement_type 维度 + 组合策略选择（显式登记）。
+- **需要**：distill 扩展 + pricer 参数化；UI 展示两列。
+- **验收**：两口径各自留出报告；切换不改原始计数（G7 类重放）。
+- **当前降级**：单一 CUDA_EVENT + eager gap（披露）。
+- **优先级**：P1；依赖：G-D6。
+
+## G-C6 服务特性（Chunked Prefill → PD 分离 → Prefix Cache，Q5 顺序）
+
+- **影响**：服务端口径指标（TTFT/SLO/goodput 部署级）。
+- **缺什么**：到达过程、预算组批、KV 分页底座（M4 范围）。
+- **旧仓不足**：pi-viewer/frontier 有 DES 实现可参考（不可整体搬入，按证据抽机制）。
+- **需要**：serving 子包 + UNSUPPORTED 表逐项转正。
+- **验收**：每特性先结构/状态对照，再指标人工 oracle（V 系列）。
+- **当前降级**：显式 unsupported（不空实现）。
+- **优先级**：P2（按 Q5 顺序）；依赖：G-C4。
+
+## G-C7 Qwen3.8 本地模型身份辨认
+
+- **影响**：四历史锚点之一的正名与回归。
+- **缺什么**：用户提供本地模型路径/revision → 以 model_type/revision 辨认（可能实为
+  Qwen3.5/3.6 家族）。
+- **当前降级**：PENDING_ASSET 注册，不入目录。
+- **优先级**：P2（等用户输入）。
+
+## G-C8 三仓完整对账（V09b）
+
+- **影响**：M5 迁移准入与旧入口切换。
+- **缺什么**：pi-viewer 侧适配器（本仓已有 model-verse 薄适配器同款模式）；三方
+  （旧值/新值/独立 oracle）对账矩阵。
+- **当前降级**：V09b 未做；旧仓入口不动。
+- **优先级**：P2；依赖：G-D2/G-D3（性能列对账需先有域）。
+
+## G-C10 ~~UI 场景栏精度选择器~~ → 已解除（2026-11-10）
+
+- 场景栏新增精度档选择（BF16 16/16/16/16、W8A8、W8A8+FP4 专家），档位映射后端
+  量化契约（scenario.validate 4/8/16）；检查器精度标签改从场景快照读取（不再
+  写死）。**不把"profile 需要 BF16"转成输入精度**：profile 域门禁仍按其采集
+  精度独立核对，不匹配组合显示具体回退原因。
+- 验收：tests/test_calibration_h200.py::test_ui_bf16_preset_enters_calibration_domain
+  （UI 场景 JSON → /api/v2/run 与进程内/CLI 同 run_id 同值，域 supported，
+  M01_tpot_profile_calibrated 出现）+ 静态接线核对。
+- 浏览器像素级观感仍待人工复核（本会话无图像通道，同前口径）。
+
+## G-C11 per-rank MoE 分片账本统一（V04 扩展；235B MoE 准入前置）⭐P1
+
+- **影响**：count 的 MoE 行（moe_router/moe_routed）为整模型口径且不带 tp 参数，
+  memory 按 experts//tp（EP=tp 假设）——两者互相矛盾，也与 235B 实测的
+  TP8/EP1（inter/tp）配方不一致；MoE 实测替换（G-D2 首选路径）在统一前会混尺。
+- **需要**：moe_rows 带 tp/ep 参数（按显式配方：专家不切+inter/tp 或 experts/ep），
+  count 行、memory 分配、lowering EP 通信三方同配方；TP/EP 守恒断言
+  （Σ per-rank flops/bytes == 整模型）。
+- **验收**：守恒测试 ×配方×tp∈{1,2,8}；235B moe.csv TP8/EP1 蒸馏准入后
+  moe_block 组合独立复算（对齐 loop1/loop2 测试模式）。
+- **当前降级**：MoE 解析整模型口径（TP8 下高估 per-rank 时间）+ 235B moe defer。
+- **优先级**：P1（G-D2 首选路径的工程前置）。
+
+## G-C9 小形状地板解析模型（暂缓；判定实验已明确）
+
+- **影响**：解析档在小 batch 相对 CUDA_EVENT 组合估计低 1.95–11.59×（9 点）。
+  **2026-11-10 口径修正**：该倍数是相对组合估计的差异，非部署延迟结论；
+  host launch 与 kernel 地板在 CUDA_EVENT 口径下不可分。
+- **缺什么**：可解释地板模型所需的判定数据——G-D6 的 KERNEL_ONLY per-op 时间列
+  （区分 host launch 与 kernel 执行）+ graph 模式整步时间；以及 G-D5 E2E 对照
+  （约束"实际运行时"一侧）。
+- **需要**（数据齐后）：price_row 可选地板项（每算子固定开销 + 达峰 shape 阈值），
+  参数显式 assumed 并做敏感度扫描；不回填 measured 冒充解析；适用域显式登记。
+- **判定实验**（G-D6 数据到手后）：对 B1/B8 各算子比较 CUDA_EVENT vs KERNEL_ONLY
+  median——差值≈host/launch 贡献，残差≈kernel 地板；两者分别入地板模型后对
+  留出点验收（p90 改善 + 域外不外推）。
+- **当前降级**：解析档低 batch 低估已知并按口径披露（loop1 报告 §5）。
+- **优先级**：P1 但**阻塞于 G-D6/G-D5 数据**（在数据前实现即是无据拟合，不做）。

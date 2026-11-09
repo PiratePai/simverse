@@ -185,6 +185,14 @@
         </select></div>
       <div class="wb-ctrl"><label for="sel-draft-dev">草稿设备（DT）</label>
         <select id="sel-draft-dev"></select></div>
+      <div class="wb-ctrl"><label for="sel-profile">成本校准 Profile</label>
+        <select id="sel-profile"><option value="">（无 · 纯解析 T0）</option></select></div>
+      <div class="wb-ctrl"><label for="sel-prec">精度 Quant</label>
+        <select id="sel-prec">
+          <option value="bf16">BF16（16/16/16/16）</option>
+          <option value="w8a8">W8A8（8/8/8/8）</option>
+          <option value="w8a8_fp4e" selected>W8A8+FP4 专家（8/4/8/8）</option>
+        </select></div>
       <div class="wb-ctrl"><label for="inp-ctx">上下文 ctx</label>
         <select id="inp-ctx">
           <option>4096</option><option>8192</option><option selected>32768</option>
