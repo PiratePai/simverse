@@ -1,0 +1,16 @@
+{
+ "repo": "huggingface/transformers",
+ "head_sha": "b6401d6605d16620e0f95b54fb2906f92de7e33f",
+ "captured": "2026-11-09",
+ "note": "qwen3_5_moe 不在 v4.57.1 release；按 config transformers_version=4.57.1 与 main 实际模块位置，以 main HEAD 为 forward 参考 pin（差异如实登记）",
+ "files": {
+  "modeling_qwen3_5_moe.py": {
+   "sha256": "abac917f54dfe822a35f3bdb846593f76a2d74b251c96c45a245df273554c44c",
+   "bytes": 95325
+  },
+  "configuration_qwen3_5_moe.py": {
+   "sha256": "b4292600803686a2d0aca86f39309177cc5564cc751ec81479594369a6b88416",
+   "bytes": 8565
+  }
+ }
+}

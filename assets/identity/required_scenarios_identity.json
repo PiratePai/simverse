@@ -71,5 +71,20 @@
    "bytes": 1222,
    "pinned_equals_main": true
   }
+ },
+ "qwen3_30b_a3b": {
+  "repo_id": "Qwen/Qwen3-30B-A3B",
+  "revision_main_sha": "ad44e777bcd18fa416d9da3bd8f70d33ebb85d39",
+  "config_sha256": "2850ddb3bf7aecad20b611e2d44f3077fc8193f4827c93beddd4c02ad63c2297",
+  "bytes": 963
+ },
+ "qwen3_next_80b_a3b": {
+  "status": "unreachable"
+ },
+ "deepseek_v3": {
+  "repo_id": "deepseek-ai/DeepSeek-V3",
+  "revision_main_sha": "e815299b0bcbac849fa540c768ef21845365c9eb",
+  "config_sha256": "cbf0b95dc614de208a109bb5fd4e7eed11385e9c68411d2c17db5319443035d9",
+  "bytes": 1660
  }
 }
