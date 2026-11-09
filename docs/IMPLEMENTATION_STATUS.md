@@ -166,6 +166,8 @@
 
 ## 4. 恢复入口
 
+- **一键**：双击仓库根目录 `启动工作台.bat`（起服务+开浏览器，可选端口参数；
+  重复双击=只开浏览器；`停止工作台.bat` 停止）。已实测 冷启动/已在运行/停止 三路径。
 - 测试：`py -3.12 -m pytest tests -q`
 - 工作台：`py -3.12 -m simverse.cli serve`（/ 生产、/legacy 旧视图）
 - 必需场景：`py -3.12 -m simverse.cli run-v2`（内置默认=Qwen3.6+DFlash colocated）

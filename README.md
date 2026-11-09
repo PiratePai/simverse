@@ -1,8 +1,28 @@
-# simverse（暂名）— 统一推理仿真仓 · 首个垂直切片
+# simverse — 统一推理仿真仓
 
-对应《统一推理仿真仓库重构方案 v2.2》（model-verse 仓 `重构方案_新仿真仓库.html`）的
-M0 基线 + M1 首链：**投机解码 / Draft-Target 分离的可追溯验证**。
-当前交付报告见 [docs/verification_report.md](docs/verification_report.md)。
+v0.2 重构（2026-11-09 起，依据 `docs/rebuild-20261106/` 计划包）：ModelIR 共享子包 →
+计数 → 降层 → T0 成本 → 串行/资源事件执行 → ResultBundle，CLI/Web/导出同入口。
+实施状态与验收清单见 **[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)**。
+v0.1 首切片（投机解码/DT 分离可追溯验证）报告保留于
+[docs/verification_report.md](docs/verification_report.md)。
+
+## 一键启动
+
+双击 **`启动工作台.bat`**（或拖到命令行带端口参数 `启动工作台.bat 9000`）：
+自动起本地服务器并在就绪后打开浏览器 `http://127.0.0.1:8765/`。
+停止：双击 `停止工作台.bat`，或关闭最小化的 `simverse-server` 窗口。
+已在运行时再次双击 = 直接打开浏览器，不会重复起服务。
+
+## 命令行入口
+
+```bash
+python -m pytest tests -q                    # 86 项验收（手算 oracle + 一致性 + 负例）
+python -m simverse.cli run-v2                # v0.2 管线（Qwen3.6-35B-A3B + DFlash，默认场景）
+python -m simverse.cli run-v2 --csv ops.csv --trace events.csv --html report.html
+python -m simverse.cli serve --port 8765     # Web 工作台（同上；/ 生产 v0.2，/legacy v0.1）
+python -m simverse.cli run                   # v0.1 legacy 固定场景（V4.1 Flash + DSpark 链式）
+```
+
 
 ## 结构（三段流水，公式单一维护点）
 
