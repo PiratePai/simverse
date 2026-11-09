@@ -213,6 +213,12 @@ UNSUPPORTED = {
               "DeepSpec/vLLM pin 实现程序图；当前不可用链式代理冒名",
     "dflash2": "DFlash2（候选选择器+动态卷积迭代）未接入；v1 已可用",
     "empirical_hist_acceptance": "A/K 直方图输入属 trace 扩展",
+    # M4 服务特性（Q5 顺序；契约保留，不空实现掩盖缺口）
+    "chunked_prefill": "M4：需分块边界/插队/队列事件（依赖 M3 资源事件核）",
+    "pd_disaggregation": "M4：Prefill/Decode 角色分离的状态转移/传输/双端生命周期"
+                         "（与目标/草稿 DT 分离不同域，不混名）",
+    "prefix_cache": "M4：命中 token/block 分母、冷/暖初态、驱逐与实际节省"
+                    "（不是单一 h 系数）",
 }
 
 
