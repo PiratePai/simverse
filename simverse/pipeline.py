@@ -104,11 +104,13 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                                  dep.target_tp, role="target")
     base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt)
     t_base = stage_total(base_prices)
+    roofline_points = _roofline_points(base_rows, base_prices, target_dev, gemm_dt)
     # TP collectives（baseline decode 每层 2 次）
     col_base = _collectives_cost(model, dep.target_tp, B, quant, tp_link)
     t_base += col_base["t_ms"]
     work["target_decode"] = _rows_json(base_rows)
     cost["target_decode"] = {"t_ms": t_base, "collectives": col_base["detail"]}
+    cost["roofline_points"] = roofline_points
 
     stage_costs: Dict[str, float] = {}
     if scenario.method_id == "baseline":
@@ -120,9 +122,32 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     else:
         e_n = acc["E_N"]
         if e_n is None:
-            return _bundle_error(
-                scenario, cap, "unknown_acceptance",
-                f"E[N] 未知：{acc['reason']}（受影响：TPOT/收益比较全部 null）")
+            # 依赖污染按指标传播（plan §4）：保留结构/基线/容量已知部分
+            cap.add("acceptance_known", "unsupported",
+                    f"E[N] 未知：{acc['reason']}",
+                    affected_metrics=["M01 TPOT", "M02 加速比", "M03 E[N]", "M04 轮分解"])
+            memory = _memory_block(model, None, quant, dquant, dep, B, ctx, cap)
+            from .execute.serial import SerialRound
+            empty = SerialRound("r0", [], 0.0, None, None, acc["reason"])
+            metrics = _build_metrics_null_acceptance(acc, t_base, memory, cap, model)
+            manifest = RunManifest(run_id="", status="completed",
+                                   input_digest=scenario.scenario_digest(),
+                                   model_ir_digest=digest(model.to_json()),
+                                   method_digest=digest(plan.to_json()),
+                                   code_revision=code_revision())
+            manifest.compute_run_id()
+            return ResultBundle(
+                manifest=manifest, scenario_snapshot=scenario.to_json(),
+                model_ref={"id": model.id, "structure_complete": model.structure_complete,
+                           "gaps": model.gaps, "source": model.source.to_json()},
+                method_plan=plan.to_json(),
+                work={"target_decode": _rows_json(base_rows)},
+                cost={"target_decode": {"t_ms": t_base}},
+                execution={"rounds": [empty.to_json()], "mode": "serial-analytical"},
+                metrics=metrics, capability=cap.to_json(),
+                evidence_refs=["ev-qwen36-main-config"],
+                formula_dict=FR.formulas_json()["formulas"],
+                assumption_dict=_assumptions(scenario, plan))
         if scenario.method_id == "dflash_v1":
             draft_rows = dflash_round_rows(
                 "draft_block", draft, model.vocab, e_n, ctx, dquant,
@@ -262,6 +287,28 @@ def _collectives_cost(model, tp: int, tokens: int, quant: dict, link: LinkLike):
         "per_layer": [c.to_json() for c in cols[:2]],
         "n_collectives_per_layer": 2, "layers": len(model.layers),
         "total_t_ms": t}}
+
+
+def _roofline_points(rows, prices, device, gemm_dtype: str, limit: int = 40):
+    """算子 Roofline 坐标（后端算好：AI/attained/bound；前端只画点）。"""
+    pts = []
+    for row, price in zip(rows, prices):
+        if row.flops <= 0:
+            continue
+        total_bytes = price.get("bytes_exact", 0) + price.get("bytes_expected", 0)
+        if total_bytes <= 0:
+            continue
+        dtype = gemm_dtype if row.op not in __import__(
+            "simverse.cost.t0", fromlist=["_ELEMENTWISE"])._ELEMENTWISE else gemm_dtype
+        pts.append({
+            "row_id": f"{row.stage}:{row.layer}:{row.op}",
+            "layer": row.layer, "op": row.op, "stage": row.stage,
+            "ai_flop_per_byte": row.flops / total_bytes,
+            "attained_tflops": row.flops / (price["t_ms"] * 1e-3) / 1e12 if price["t_ms"] else 0.0,
+            "bound": price["bound"], "t_ms": price["t_ms"],
+        })
+    pts.sort(key=lambda x: -x["t_ms"])
+    return pts[:limit]
 
 
 def _rows_json(rows):
@@ -479,3 +526,22 @@ def _bundle_error(scenario: ScenarioV2, cap: CapabilityReport, status: str,
         capability=cap.to_json(),
         metrics={"error": Metric.unsupported("none", detail)},
         assumption_dict={"error": status})
+
+
+def _build_metrics_null_acceptance(acc, t_base, memory, cap, model) -> Dict[str, Any]:
+    sc = Scope(role="target", phase="steady-decode", time_basis=TimeBasis.COMMITTED.value)
+    reason = acc["reason"] or "接受分布未知"
+    return {
+        "M01_tpot_analytical": Metric.unknown("ms", reason),
+        "M01_tpot_baseline": metric_from(
+            t_base, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION, scope=sc,
+            evidence=(Evidence.COUNTED,)),
+        "M02_speedup_vs_baseline": Metric.unknown("ratio", f"TPOT 未知：{reason}"),
+        "M03_E_N": Metric.unknown("tokens/round", reason),
+        "M03_K": metric_from(0, "tokens", "internal", statistic=Statistic.EXACT,
+                             scope=sc, evidence=(Evidence.COUNTED,)),
+        "M07_support_summary": {
+            "capability_checks": {k: v["status"] for k, v in cap.checks.items()},
+            "structure_complete": model.structure_complete,
+            "result_kind": "analytical-estimate"},
+    }

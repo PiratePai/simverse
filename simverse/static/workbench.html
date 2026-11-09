@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simverse 工作台 · 生产管线 v0.2</title>
+<style>
+  :root {
+    --ink:#0f172a;--ink2:#334155;--ink3:#64748b;--line:#e2e8f0;--line-strong:#cbd5e1;
+    --bg:#f8fafc;--card:#fff;--blue:#1d4ed8;--blue-mid:#2563eb;--blue-soft:#eff6ff;
+    --blue-border:#bfdbfe;--teal:#0f766e;--teal-soft:#f0fdfa;--teal-border:#99f6e4;
+    --red:#b91c1c;--red-soft:#fef2f2;--red-border:#fecaca;--amber:#b45309;
+    --amber-soft:#fffbeb;--amber-border:#fde68a;--purple:#6d28d9;--purple-soft:#f5f3ff;
+    --purple-border:#ddd6fe;--code-bg:#0f172a;--code-ink:#e2e8f0;
+    --mono:"JetBrains Mono","SFMono-Regular",Consolas,"Courier New",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);
+       line-height:1.6;font-size:14.5px}
+  a{color:var(--blue-mid);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .top-header{position:sticky;top:0;z-index:100;background:rgba(15,23,42,.96);
+    backdrop-filter:blur(8px);color:#fff;border-bottom:1px solid #1e293b;
+    padding:10px 24px;display:flex;align-items:center;justify-content:space-between;
+    flex-wrap:wrap;gap:12px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand-logo{background:linear-gradient(135deg,#3b82f6,#14b8a6);color:#fff;
+    font-weight:800;font-family:var(--mono);font-size:14px;padding:4px 10px;
+    border-radius:6px;letter-spacing:.5px}
+  .brand-title{font-weight:700;font-size:15.5px}
+  .brand-sub{font-size:12px;color:#94a3b8}
+  .top-header nav{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .top-header a,.top-header button{color:#dbeafe;font-size:13px;padding:6px 10px;
+    border:1px solid #475569;border-radius:6px;background:transparent;cursor:pointer}
+  .top-header button:hover,.top-header a:hover{background:#334155}
+  .full-main{max-width:1460px;margin:0 auto;padding:20px 28px 80px}
+  .status-strip{background:#f0fdfa;border:1px solid var(--teal-border);
+    border-left:5px solid var(--teal);padding:10px 16px;border-radius:8px;
+    margin:0 0 12px;font-size:13px;color:#134e4a}
+  .status-strip.err{background:var(--red-soft);border-color:var(--red-border);
+    border-left-color:var(--red);color:var(--red)}
+  .status-strip .mono{font-family:var(--mono);font-size:12px}
+  .wb-shell{border:1.5px solid #1e293b;border-radius:12px;background:#fff;
+    overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,.08)}
+  .wb-topbar{background:#0f172a;color:#f8fafc;padding:10px 14px;display:flex;
+    flex-wrap:wrap;gap:10px;align-items:flex-end;border-bottom:1px solid #334155}
+  .wb-ctrl{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .wb-ctrl label{font-size:10.5px;color:#94a3b8;text-transform:uppercase;
+    letter-spacing:.4px;font-weight:700}
+  .wb-ctrl select,.wb-ctrl input{background:#1e293b;color:#f8fafc;
+    border:1px solid #475569;border-radius:6px;padding:4px 8px;font-size:12px;
+    font-family:var(--sans);max-width:100%}
+  .wb-ctrl .runbtn{background:#2563eb;color:#fff;border:1px solid #60a5fa;
+    border-radius:6px;padding:6px 18px;font-size:13px;font-weight:700;cursor:pointer}
+  .wb-ctrl .runbtn:disabled{opacity:.5;cursor:wait}
+  .wb-kpi-strip{background:#f1f5f9;border-bottom:1px solid var(--line);
+    padding:8px 14px;display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+  .kpi-box{background:#fff;border:1px solid var(--line);border-radius:8px;
+    padding:6px 10px}
+  .kpi-box .k-label{font-size:11px;color:var(--ink3);font-weight:600}
+  .kpi-box .k-val{font-size:19px;font-weight:800;color:var(--ink);
+    font-family:var(--mono)}
+  .kpi-box .k-sub{font-size:10.5px;color:var(--teal);font-weight:600;min-height:28px}
+  .kpi-box .k-sub.unknown{color:var(--amber)}
+  .wb-grid{display:grid;grid-template-columns:minmax(430px,1.12fr) minmax(260px,.8fr) minmax(340px,1fr);
+    gap:10px;padding:10px;background:#f8fafc}
+  .wb-pane{background:#fff;border:1px solid var(--line-strong);border-radius:10px;
+    display:flex;flex-direction:column;overflow:hidden;min-width:0}
+  .wb-pane-head{background:#f8fafc;border-bottom:1px solid var(--line);
+    padding:7px 12px;font-weight:700;font-size:12.5px;display:flex;
+    justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px}
+  .wb-pane-body{padding:10px;overflow:auto;max-height:430px}
+  .mx-table{width:100%;border-collapse:collapse;font-size:11.5px;min-width:430px}
+  .mx-table th,.mx-table td{padding:5px 6px;text-align:center;border:1px solid var(--line)}
+  .mx-cell{cursor:pointer;font-family:var(--mono);font-weight:700;transition:all .12s}
+  .mx-cell:hover{outline:2px solid var(--blue-mid)}
+  .mx-cell.selected{outline:2.5px solid var(--blue);background:var(--blue-soft)!important}
+  .mx-cell.pending{background:#f1f5f9;color:#94a3b8;font-weight:400}
+  .mx-cell.na{background:#f8fafc;color:var(--ink3);font-weight:400;cursor:not-allowed}
+  .mx-cell.bad{background:var(--red-soft);color:var(--red)}
+  .mx-note{font-size:10.5px;color:var(--ink3);margin-top:6px}
+  .dag-list{display:flex;flex-direction:column;gap:5px}
+  .dag-node{border:1.5px solid var(--line-strong);border-radius:7px;padding:6px 10px;
+    cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+    background:#fff;transition:all .12s;font-size:12px}
+  .dag-node:hover{border-color:var(--blue-mid);background:#f8fafc}
+  .dag-node.active{border-color:var(--blue);background:var(--blue-soft);
+    box-shadow:0 0 0 2px rgba(37,99,235,.15)}
+  .dag-badge{font-family:var(--mono);font-size:10.5px;padding:1px 6px;
+    border-radius:4px;background:#f1f5f9;color:var(--ink2)}
+  .dag-badge.mem{background:#fef3c7;color:#92400e}
+  .dag-badge.cmp{background:#dcfce7;color:#166534}
+  .op-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+    font-size:11.8px;margin-bottom:8px}
+  .op-cell{background:#f8fafc;padding:6px 8px;border-radius:6px;border:1px solid var(--line)}
+  .op-cell b{display:block;font-size:10.5px;color:var(--ink3)}
+  .op-cell .v{font-family:var(--mono);font-size:13.5px;font-weight:800;color:var(--blue)}
+  .kv{font-size:11.8px;margin:4px 0}
+  .formula-box{font-size:11.5px;background:var(--code-bg);color:var(--code-ink);
+    padding:6px 9px;border-radius:6px;font-family:var(--mono);margin-top:6px}
+  .formula-box .fid{color:#38bdf8}
+  .tl-track{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .tl-label{width:120px;flex:0 0 120px;font-size:11.5px;font-weight:700;color:var(--ink2)}
+  .tl-bars{flex:1;display:flex;height:26px;background:#f1f5f9;border-radius:6px;
+    overflow:hidden;position:relative}
+  .tl-seg{height:100%;display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:10.5px;font-family:var(--mono);font-weight:600;
+    cursor:pointer;border-right:1px solid rgba(255,255,255,.35);overflow:hidden;
+    white-space:nowrap}
+  .tl-seg:hover{opacity:.88}
+  .wb-timeline-pane{margin:0 10px 10px;background:#fff;
+    border:1px solid var(--line-strong);border-radius:10px;overflow:hidden}
+  .drawer{margin:12px 0;border:1px solid var(--line);border-radius:10px;
+    background:#fff;overflow:hidden}
+  .drawer summary{cursor:pointer;font-weight:700;font-size:13.2px;padding:10px 16px;
+    background:#f8fafc}
+  .drawer .body{padding:10px 16px;font-size:12.5px;overflow-x:auto}
+  .status-strip .mono{word-break:break-all}
+  table.plain{border-collapse:collapse;width:100%;font-size:12.3px;background:#fff}
+  table.plain th,table.plain td{border:1px solid var(--line);padding:6px 8px;
+    text-align:left;vertical-align:top}
+  table.plain th{background:#f1f5f9}
+  .tag{display:inline-block;font-size:11px;font-weight:700;border-radius:5px;
+    padding:1px 7px;margin-right:4px}
+  .tag.ok{background:var(--teal-soft);color:var(--teal);border:1px solid var(--teal-border)}
+  .tag.warn{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-border)}
+  .tag.bad{background:var(--red-soft);color:var(--red);border:1px solid var(--red-border)}
+  .tag.na{background:#f1f5f9;color:var(--ink2);border:1px solid var(--line-strong)}
+  .unknown-note{font-size:11.5px;color:var(--amber);background:var(--amber-soft);
+    border:1px solid var(--amber-border);border-radius:5px;padding:4px 8px;
+    display:inline-block;margin:3px 0}
+  button:focus-visible,select:focus-visible,[role=button]:focus-visible,
+  a:focus-visible{outline:3px solid #1d4ed8;outline-offset:3px}
+  @media(max-width:1200px){.wb-grid{grid-template-columns:1fr 1fr}
+    .wb-grid>.wb-pane:first-child{grid-column:1/-1}
+    .wb-kpi-strip{grid-template-columns:repeat(4,1fr)}}
+  @media(max-width:720px){.wb-grid{display:block}.wb-pane{margin-bottom:14px}
+    .wb-topbar{display:grid;grid-template-columns:1fr 1fr}
+    .wb-ctrl select{width:100%}
+    .wb-kpi-strip{grid-template-columns:repeat(2,1fr)}
+    .full-main{padding:12px!important}.top-header{padding:12px}
+    .tl-bars{min-width:520px}.tl-wrap{overflow-x:auto}}
+</style>
+</head>
+<body>
+<header class="top-header">
+  <div class="brand"><span class="brand-logo">simverse</span>
+    <span class="brand-title">架构实验工作台</span>
+    <span class="brand-sub">生产管线 v0.2 · 全部数字来自 ResultBundle</span></div>
+  <nav>
+    <a href="/api/v2/catalog" target="_blank">能力目录</a>
+    <a href="../../docs/rebuild-20261106/plan.md" target="_blank">重构计划</a>
+    <a href="../../docs/rebuild-20261106/principles.md" target="_blank">计算原理</a>
+    <a href="../../docs/rebuild-20261106/ui-data-contract.md" target="_blank">数据契约</a>
+    <a href="../../docs/rebuild-20261106/prototype/index.html" target="_blank">原型存档</a>
+    <a href="/legacy">v0.1 视图</a>
+    <button id="btn-export-json" type="button">导出 JSON</button>
+    <button id="btn-export-csv" type="button">导出算子 CSV</button>
+  </nav>
+</header>
+
+<div class="full-main">
+  <div class="status-strip" id="run-status" role="status">
+    尚未运行。选择场景后点【运行】；每个数字携带口径/证据/假设，未知不填零。
+  </div>
+
+  <div class="wb-shell">
+    <div class="wb-topbar">
+      <div class="wb-ctrl"><label for="sel-model">主模型 Target</label>
+        <select id="sel-model"></select></div>
+      <div class="wb-ctrl"><label for="sel-method">投机方法 SpecMethod</label>
+        <select id="sel-method"></select></div>
+      <div class="wb-ctrl"><label for="sel-deploy">部署 Deployment</label>
+        <select id="sel-deploy">
+          <option value="colocated">同卡混部（Target 组内草稿）</option>
+          <option value="dt_serial">DT 分离串行（独立草稿设备）</option>
+        </select></div>
+      <div class="wb-ctrl"><label for="sel-target-dev">目标设备</label>
+        <select id="sel-target-dev"></select></div>
+      <div class="wb-ctrl"><label for="sel-tp">目标 TP</label>
+        <select id="sel-tp">
+          <option>1</option><option>2</option><option selected>8</option><option>16</option>
+        </select></div>
+      <div class="wb-ctrl"><label for="sel-draft-dev">草稿设备（DT）</label>
+        <select id="sel-draft-dev"></select></div>
+      <div class="wb-ctrl"><label for="inp-ctx">上下文 ctx</label>
+        <select id="inp-ctx">
+          <option>4096</option><option>8192</option><option selected>32768</option>
+          <option>65536</option><option>131072</option>
+        </select></div>
+      <div class="wb-ctrl"><label for="inp-batch">并发 B</label>
+        <select id="inp-batch">
+          <option selected>1</option><option>2</option><option>4</option>
+          <option>8</option><option>16</option><option>32</option>
+        </select></div>
+      <div class="wb-ctrl"><label for="sel-acc">接受率（假设输入）</label>
+        <select id="sel-acc">
+          <option value="0.5">α=0.50</option><option value="0.6">α=0.60</option>
+          <option value="0.72" selected>α=0.72（演示默认）</option>
+          <option value="0.8">α=0.80</option><option value="0.9">α=0.90</option>
+          <option value="mean2">τ=2.0（mean-only→未知）</option>
+          <option value="dynk">动态 K（→未知）</option>
+        </select></div>
+      <div class="wb-ctrl"><label for="inp-blk">块长 blk（DFlash）</label>
+        <select id="inp-blk"><option value="8">8</option><option value="16" selected>16</option></select></div>
+      <div class="wb-ctrl"><label>&nbsp;</label>
+        <button class="runbtn" id="btn-run" type="button">运行</button></div>
+    </div>
+
+    <div class="wb-kpi-strip" id="kpi-strip">
+      <div class="kpi-box"><div class="k-label">M01 等效 TPOT（解析）</div>
+        <div class="k-val" id="kpi-tpot">–</div>
+        <div class="k-sub" id="kpi-tpot-sub">E[T_round]/E[N]，committed 口径</div></div>
+      <div class="kpi-box"><div class="k-label">M01 基线 TPOT / M02 加速比</div>
+        <div class="k-val" id="kpi-speedup">–</div>
+        <div class="k-sub" id="kpi-speedup-sub">同 B/ctx/精度配对</div></div>
+      <div class="kpi-box"><div class="k-label">M03 每轮产出 E[N] / K</div>
+        <div class="k-val" id="kpi-en">–</div>
+        <div class="k-sub" id="kpi-en-sub">接受率为假设输入（Q8）</div></div>
+      <div class="kpi-box"><div class="k-label">M04 单轮耗时与分解</div>
+        <div class="k-val" id="kpi-round">–</div>
+        <div class="k-sub" id="kpi-round-sub">串行解析：阶段和=墙钟</div></div>
+      <div class="kpi-box"><div class="k-label">M05 MoE 期望并集读</div>
+        <div class="k-val" id="kpi-moe">–</div>
+        <div class="k-sub">均匀路由假设，期望非精确</div></div>
+      <div class="kpi-box"><div class="k-label">M06 每卡显存（唯一存活对象）</div>
+        <div class="k-val" id="kpi-mem">–</div>
+        <div class="k-sub" id="kpi-mem-sub">标称口径：feasible 判定 unknown</div></div>
+      <div class="kpi-box"><div class="k-label">M07 证据与支持状态</div>
+        <div class="k-val" style="font-size:13px" id="kpi-ev">–</div>
+        <div class="k-sub" id="kpi-ev-sub">结构/容量/来源逐项</div></div>
+    </div>
+
+    <div class="wb-grid">
+      <div class="wb-pane">
+        <div class="wb-pane-head"><span>① 部署 × 方法矩阵（每格独立 run_id）</span>
+          <button type="button" id="btn-matrix" style="font-size:11px;padding:2px 8px;
+            border-radius:4px;border:1px solid var(--line-strong);background:#fff;
+            cursor:pointer">批量运行矩阵</button></div>
+        <div class="wb-pane-body">
+          <table class="mx-table"><thead id="matrix-head"></thead>
+            <tbody id="matrix-body"></tbody></table>
+          <div class="mx-note">颜色=解析估算同口径显示；资格不合格（结构缺口/容量
+            unknown）保留数值并标注，不参与排名。</div>
+        </div>
+      </div>
+      <div class="wb-pane">
+        <div class="wb-pane-head"><span>② 算子账本（target decode）</span>
+          <span class="tag na" id="op-count-tag">–</span></div>
+        <div class="wb-pane-body"><div class="dag-list" id="dag-list"></div></div>
+      </div>
+      <div class="wb-pane">
+        <div class="wb-pane-head"><span id="inspector-title">③ 算子七维透视</span>
+          <span class="tag ok" id="op-bound-tag">–</span></div>
+        <div class="wb-pane-body"><div id="inspector"></div>
+          <div style="margin-top:8px;border:1px solid var(--line);border-radius:8px;
+            padding:6px;background:#fcfdff">
+            <div style="font-size:11.5px;font-weight:700;display:flex;
+              justify-content:space-between"><span>Roofline（后端计算坐标）</span>
+              <span class="mono" style="font-family:var(--mono);font-size:11px;
+                color:var(--blue)" id="roofline-coord"></span></div>
+            <svg id="roofline-svg" viewBox="0 0 380 150"
+              style="width:100%;height:auto;display:block"></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wb-timeline-pane">
+      <div class="wb-pane-head"><span>④ 代表轮三轨时间轴（串行事件，含依赖 ID）</span>
+        <span style="font-size:11.5px;color:var(--ink3)" id="tl-summary">–</span></div>
+      <div class="tl-wrap" style="padding:10px 14px" id="timeline"></div>
+    </div>
+  </div>
+
+  <details class="drawer"><summary>证据 / 能力检查 / 假设 / 公式（当前 run）</summary>
+    <div class="body" id="evidence-body">运行后显示。</div></details>
+  <details class="drawer"><summary>模型结构与缺口（model_ir 目录 · 固定 revision）</summary>
+    <div class="body" id="catalog-body">载入中…</div></details>
+  <details class="drawer"><summary>参数扫描（α / B / ctx / blk；每点独立 run）</summary>
+    <div class="body" id="sweep-body">
+      <button type="button" id="btn-sweep" style="padding:6px 14px;border-radius:6px;
+        border:1px solid var(--line-strong);background:#fff;cursor:pointer">
+        运行扫描（当前场景）</button>
+      <div id="sweep-result" style="margin-top:8px"></div></div></details>
+</div>
+
+<script src="/static/workbench.js"></script>
+</body>
+</html>

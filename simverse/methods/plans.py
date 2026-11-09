@@ -226,11 +226,14 @@ def build_method_plan(method_id: str, scenario_acceptance: dict, k_limit: int,
     if method_id in UNSUPPORTED:
         raise ValueError(f"unsupported_method: {method_id} — {UNSUPPORTED[method_id]}")
     if method_id in ("chain_draft", "custom_chain"):
-        plan = plan_chain("chain_draft", "自定义链式草稿",
-                          "dense 草稿按参数量聚合计（未展开层结构）", k_limit)
+        plan = plan_chain("chain_draft",
+                          "链式草稿（演示：tiny_gqa 合成草稿结构）",
+                          "v0.2 目录中的链式草稿用 tiny_gqa 合成结构演示闭环；"
+                          "真实自定义草稿需注册 DraftIR/ModelIR", k_limit)
     elif method_id == "chain_moe_proxy":
-        plan = plan_chain("chain_moe_proxy", "链式 MoE 代理（假想方法，非 DSpark）",
-                          "MoE 草稿按 config 公式参数聚合；假想方法", k_limit)
+        plan = plan_chain("chain_moe_proxy",
+                          "链式 MoE 代理（假想方法，非 DSpark；演示结构同 tiny_gqa）",
+                          "假想方法保留作对照；原生 DSpark 另列 unsupported", k_limit)
     elif method_id == "mtp":
         plan = plan_chain("mtp", "MTP（config 原生微头链式）", "",
                           k_limit, mtp_layers=mtp_layers, t2d_hidden=True)

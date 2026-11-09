@@ -6,6 +6,11 @@
   simverse export run.json [--csv ops.csv] [--events timeline.csv]  从 RunResult 导出
   simverse serve [--host --port]                              启动 Web 工作台
   simverse list [models|drafts|devices|links|formulas]        注册表
+
+v0.2 命令（ResultBundle 管线；JSON/CSV/trace/HTML 四类导出）：
+  simverse run-v2 [场景.json] [-o run.json] [--csv ops.csv] [--trace events.csv] [--html report.html]
+  simverse sweep-v2 [场景.json] [-o sweep.json]
+  simverse export-v2 run.json [--csv ...] [--trace ...] [--html ...]
 """
 from __future__ import annotations
 
@@ -152,6 +157,154 @@ def cmd_export(args):
         print(f"已写 {p}")
 
 
+V2_DEFAULT_SCENARIO = {
+    "schema_version": "0.2", "name": "cli-default",
+    "model_id": "qwen36_35b_a3b", "draft_id": "dflash_qwen36_35b_a3b",
+    "method_id": "dflash_v1", "k": 15, "block_size": 16,
+    "deployment": {"mode": "colocated", "target_device": "h100_sxm",
+                   "target_tp": 8, "draft_device": "l40", "draft_tp": 1},
+    "workload": {"batch": 1, "ctx_tokens": 32768},
+    "acceptance": {"kind": "geometric", "alpha": 0.72},
+}
+
+
+def _v2_scenario(path):
+    import json as _json
+    from .scenario import ScenarioV2
+    data = (_json.loads(Path(path).read_text(encoding="utf-8")) if path
+            else dict(V2_DEFAULT_SCENARIO))
+    return ScenarioV2.from_json(data)
+
+
+def _ops_csv_v2(bundle: dict) -> str:
+    cols = ["stage", "layer", "op", "flops", "weight_read", "weight_read_expected",
+            "act_read", "act_write", "kv_read", "kv_write", "state_read",
+            "state_write", "weight_capacity", "statistic", "formula", "shape"]
+    lines = [",".join(cols)]
+    rows = ((bundle.get("work") or {}).get("target_decode") or {}).get("rows") or []
+    for o in rows:
+        lines.append(",".join(
+            str(o.get(c, "") if o.get(c) is not None else "").replace(",", ";")
+            for c in cols))
+    return chr(10).join(lines)
+
+
+def _trace_csv_v2(bundle: dict) -> str:
+    cols = ["event_id", "round_id", "role", "stage", "t_ms", "start_ms",
+            "depends_on", "label"]
+    lines = [",".join(cols)]
+    for rnd in (bundle.get("execution") or {}).get("rounds") or []:
+        for e in rnd.get("events") or []:
+            lines.append(",".join(str(e.get(c, "")) for c in cols))
+    return chr(10).join(lines)
+
+
+def _report_html_v2(bundle: dict) -> str:
+    m = bundle.get("metrics") or {}
+
+    def row(name):
+        x = m.get(name) or {}
+        v = x.get("value")
+        reason = x.get("reason") or ""
+        return ("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                % (name, "UNKNOWN" if v is None else v, x.get("unit", ""),
+                   reason[:80]))
+
+    checks = (bundle.get("capability") or {}).get("checks") or {}
+    cap_rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (k, v.get("status"),
+                                                         v.get("reason", ""))
+        for k, v in sorted(checks.items()))
+    return ("<!DOCTYPE html><html lang=zh><meta charset=utf-8>"
+            "<title>simverse run report</title>"
+            "<body style=font-family:sans-serif;margin:24px>"
+            "<h2>simverse ResultBundle 摘要</h2>"
+            "<p>run_id <code>%s</code> · 状态 %s</p>"
+            "<table border=1 cellpadding=6 style=border-collapse:collapse>"
+            "<tr><th>指标</th><th>值</th><th>单位</th><th>缺口原因</th></tr>%s</table>"
+            "<h3>能力检查</h3>"
+            "<table border=1 cellpadding=6 style=border-collapse:collapse>"
+            "<tr><th>检查</th><th>状态</th><th>原因</th></tr>%s</table>"
+            "<p style=color:#64748b>静态导出：结果身份与假设随文件携带；"
+            "非实时后端。全部性能为 T0 解析估算（Q2）。</p></body></html>"
+            % (bundle["manifest"]["run_id"], bundle["manifest"]["status"],
+               "".join(row(k) for k in sorted(m) if not isinstance(m[k], dict)),
+               cap_rows))
+
+
+def cmd_run_v2(args):
+    from .pipeline import run_v2
+    scenario = _v2_scenario(args.scenario)
+    bundle = run_v2(scenario).to_json()
+    bundle["replay"] = {"scenario_file": str(args.scenario) if args.scenario
+                        else "builtin:cli-default"}
+    _summary_v2(bundle)
+    if args.out:
+        _dump(bundle, Path(args.out))
+    if args.csv:
+        Path(args.csv).write_text(_ops_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.csv}")
+    if args.trace:
+        Path(args.trace).write_text(_trace_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.trace}")
+    if args.html:
+        Path(args.html).write_text(_report_html_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.html}")
+
+
+def _summary_v2(bundle: dict):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    man = bundle["manifest"]
+    print(f"status={man['status']} run_id={man['run_id'][:19]}... "
+          f"code={man['code_revision'][:10]}")
+    m = bundle.get("metrics") or {}
+    for key in ("M01_tpot_analytical", "M01_tpot_baseline",
+                "M02_speedup_vs_baseline", "M03_E_N", "M04_round_ms"):
+        x = m.get(key)
+        if not x:
+            continue
+        if x.get("value") is None:
+            print(f"  {key:26} 未知 —— {(x.get('reason') or '')[:60]}")
+        else:
+            print(f"  {key:26} {x['value']:.4f} {x.get('unit', '')}"
+                  + ("   ! " + x["reason"][:44] if x.get("reason") else ""))
+    checks = (bundle.get("capability") or {}).get("checks") or {}
+    bad = [k for k, v in checks.items() if v["status"] != "supported"]
+    if bad:
+        print("  注意：", ", ".join(bad))
+
+
+def cmd_sweep_v2(args):
+    from .experiments import sweep_suite
+    scenario = _v2_scenario(args.scenario)
+    data = sweep_suite(scenario)
+    out = Path(args.out) if args.out else ROOT / "outputs" / "sweep_v2.json"
+    _dump(data, out)
+    import json as _json
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    print("breakevens:", _json.dumps(data["breakevens"], ensure_ascii=False))
+
+
+def cmd_export_v2(args):
+    import json as _json
+    bundle = _json.loads(Path(args.run).read_text(encoding="utf-8"))
+    if args.csv:
+        Path(args.csv).write_text(_ops_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.csv}")
+    if args.trace:
+        Path(args.trace).write_text(_trace_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.trace}")
+    if args.html:
+        Path(args.html).write_text(_report_html_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.html}")
+
+
 def cmd_list(args):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -195,6 +348,23 @@ def main(argv=None):
     p_ls = sub.add_parser("list", help="注册表")
     p_ls.add_argument("what", nargs="?", default="models")
     p_ls.set_defaults(fn=cmd_list)
+    p_r2 = sub.add_parser("run-v2", help="v0.2 管线单场景（JSON/CSV/trace/HTML 导出）")
+    p_r2.add_argument("scenario", nargs="?", default=None)
+    p_r2.add_argument("-o", "--out", default=None)
+    p_r2.add_argument("--csv", default=None)
+    p_r2.add_argument("--trace", default=None)
+    p_r2.add_argument("--html", default=None)
+    p_r2.set_defaults(fn=cmd_run_v2)
+    p_s2 = sub.add_parser("sweep-v2", help="v0.2 参数扫描（不可变快照）")
+    p_s2.add_argument("scenario", nargs="?", default=None)
+    p_s2.add_argument("-o", "--out", default=None)
+    p_s2.set_defaults(fn=cmd_sweep_v2)
+    p_e2 = sub.add_parser("export-v2", help="从 v0.2 ResultBundle 导出四类文件")
+    p_e2.add_argument("run")
+    p_e2.add_argument("--csv", default=None)
+    p_e2.add_argument("--trace", default=None)
+    p_e2.add_argument("--html", default=None)
+    p_e2.set_defaults(fn=cmd_export_v2)
     p_srv = sub.add_parser("serve", help="Web 工作台")
     p_srv.add_argument("--host", default="127.0.0.1")
     p_srv.add_argument("--port", type=int, default=8765)
