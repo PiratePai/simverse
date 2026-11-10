@@ -1,0 +1,4 @@
+# 固定源码/评审包：内容哈希（git blob sha1 / SHA256）被 tests 与 manifest 锚定，
+# 行尾转换会破坏哈希（Windows autocrlf=true 下 CI clean checkout 会转 CRLF）。
+# eol=lf 保证任意平台 checkout 后字节不变（refs 内文件本就以 LF 入库）。
+docs/rebuild-20261106/references/** text eol=lf

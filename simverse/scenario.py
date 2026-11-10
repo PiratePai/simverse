@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 from .contracts import RngScheme, digest
 from .draft_quant import FUSED_RAW, UNKNOWN, normalize_ctx_kv_path
+from .lowering.memory import ENGRAM_TABLE_PLACEMENTS
 
 DEPLOY_MODES = ("baseline", "colocated", "dt_serial", "dt_pipeline_sim")
 
@@ -96,6 +97,11 @@ class DeploymentSpec:
     pipeline_rounds: int = 6               # 有限 cohort（warmup/drain 可见）
     budget: Optional[BudgetInput] = None            # target/colocated 组预算（R03a）
     draft_budget: Optional[BudgetInput] = None      # dt_serial 草稿组预算
+    # R04（2026-11-11）：V4.1 Engram 表驻留位置（显式研究假设配方，缺失/非法
+    # 拒绝；默认 cpu_offload 的证据 = pinned 源码 cpu_offload 路径 +
+    # 101.4 GiB/层客观不可驻留单卡 GPU——不证明实际部署配置）。仅影响带
+    # Engram 层的模型（deepseek_v41_flash），其他模型该字段不被消费。
+    engram_table_placement: str = "cpu_offload"
 
 
 @dataclass
@@ -166,6 +172,13 @@ class ScenarioV2:
                 "draft_ctx_kv_path=unknown：ctx-KV 实现路径必须有证据，"
                 "不能由 dense_w 推断；请显式指定 fused_raw/"
                 "mxfp8_context_proj/per_layer_fallback")
+        # R04：Engram 表位置是显式配方输入（镜像 ctx_kv_path 的拒绝模式；
+        # 默认 cpu_offload 是研究假设，不是从位宽/层数推出来的执行分支）
+        if dep.engram_table_placement not in ENGRAM_TABLE_PLACEMENTS:
+            raise ValueError(
+                f"engram_table_placement={dep.engram_table_placement!r} 非法："
+                f"必须 ∈ {ENGRAM_TABLE_PLACEMENTS}（默认 cpu_offload 为研究"
+                "假设配方；gpu 驻留 101.4 GiB/层需显式选择）")
         # 一致性护栏（不是用位宽选分支）：raw 融合副本要求未量化权重；
         # 4bit 计价档与 fused_raw 矛盾，必须显式改为 per_layer_fallback。
         if path == FUSED_RAW and (self.draft_quant or {}).get("dense_w", 16) < 8:

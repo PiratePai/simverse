@@ -123,24 +123,50 @@ ENTRIES: List[SourceMapEntry] = [
         model_or_method="deepseek_v41_flash Engram/hc",
         semantic="hc(mHC) 混合流已建模（每层 2 次边界：post+系数 GEMM+sinkhorn+"
                  "collapse+RMSNorm 融合核；首层 hc_expand 广播；FP32 权重每卡复制）；"
-                 "Engram 查表注入（层 1/14 residual 流）参与 forward",
+                 "Engram 查表注入（层 1/14 residual 流，post/pre 分立）已建模："
+                 "素数桶 FP8+E8M0 表 264B/行、TP head ceil 切分、批级 n-gram "
+                 "哈希一次算全部层、wkv 6144→25600 列切 gather、q/k 门控注入",
         source_pin=VLLM_PIN,
-        source_location="vllm/models/deepseek_v41/nvidia/model.py:388-499（hc 参数 "
-                        "mix_hc=(2+m)·m、fp32）、501-678（forward 边界分支：首层 "
-                        "hc_expand/engram 层 post+pre 分立/常规 shifted 融合）、"
-                        "103-119（imports；kernel 实现在 vllm.model_executor.kernels."
-                        "mhc，未入评审包）",
+        source_location="vllm/models/deepseek_v41/common/engram.py:211-252"
+                        "（EngramLayout 素数桶分配）、426-604（NgramHashState："
+                        "token_map int32[vocab]、rolling hash kernel grid "
+                        "(cdiv(T,32),n_layers)、V1 slot cache 挂首本地层 SWA）、"
+                        "642-732（_engram_lookup_kernel：FP8 行 + ue8m0 scale "
+                        "byte<<23 dequant → bf16）、960-981（can_share 全表字节 "
+                        "Σrows×(head_dim+head_dim//32)）、1021-1330"
+                        "（ParallelEngramEmbedding：264B/行、TP head ceil 切分 "
+                        "断言 (tp−1)·part<24、all-gather dim=1）、1334-1422"
+                        "（_fused_engram_post_wkv_kernel 门控公式）、1664-1908"
+                        "（Engram：dim=hidden、hc_mult、eps=1e-20、clamp=1e-6、"
+                        "wkv ColumnParallelLinear gather_output=True、q/k_weight "
+                        "bf16 复制、staged_rows max_num_batched_tokens）；"
+                        "nvidia/model.py:350-361（构造）、563-567 与 583-600"
+                        "（注入点：前一子层 post 分立 → Engram → mhc_pre）、"
+                        "858-877（engram 层前一层不得 defer_finalize；调度细节"
+                        "不建模）、1030-1092（批级哈希每 forward 一次）、"
+                        "919-948（NgramHashState 挂第一个本地层 SWA cache）",
         branch_predicate="engram_layer_ids 覆盖层启用 Engram；hc_mult/hc_eps/"
-                         "hc_sinkhorn_iters 控制 mhc 边界（全层执行，非可选开关）",
-        input_domain="V4.1 主干",
+                         "hc_sinkhorn_iters 控制 mhc 边界（全层执行，非可选开关）；"
+                         "cpu_offload 默认路径（表在 host pinned memory，UVA 读）"
+                         "为研究假设配方（场景 engram_table_placement 显式输入）",
+        thresholds="TP 合法性：(tp−1)·ceil(24/tp)<24（合法 {1,2,3,4,5,6,8}）；"
+                   "wkv 列切要求 25600%tp==0",
+        input_domain="V4.1 主干（2 个 engram 层：1/14；24 哈希列/层）",
         both_sides_covered=False,
-        uncovered_domain=["Engram.forward 内部算子未 pin（vllm/models/deepseek_v41/"
-                          "common/engram.py 不在评审包）→ 注入算子不计猜测常数",
-                          "Engram 表 dtype 未知 → 容量字节未知（默认 cpu_offload）",
-                          "mhc tilelang kernel 每迭代 OP 数为解析近似（行标 "
-                          "approximated）"],
-        note="hc 三键 mapped（2026-11-10）；Engram 8 键 unsupported → "
-             "structure_complete=False 仍阻断完整结论，不冒充"),
+        uncovered_domain=["DP 分片交换（all-to-all/EngramPeerExchange/symmetric "
+                          "memory/DPSharedEngramStorage）未建模——本仓默认单副本"
+                          "路径不启用（EngramBatch L1539-1661 仅 DP>1+无 TP+"
+                          "dim%128==0 时启用）",
+                          "EngramBatch MXFP8 打包路径（kMxfp8Dynamic）未建模",
+                          "cpu_offload 运行时行为（预取流/TLB/36864·4096 排序"
+                          "阈值，GB200 实测值不进模型）未建模",
+                          "amd/engram.py 变体（ROCm 路径）未 pin 未建模",
+                          "kernel 内部 op 数（哈希/门控）为解析近似计数，非指令数"],
+        note="hc 三键 mapped（2026-11-10）；Engram 8 键 mapped（2026-11-11 R04，"
+             "common/engram.py pin blob sha1 ba4ceea6 对 vllm-tree.json 校验）；"
+             "count/work.engram_rows + lowering/memory engram 对象 + "
+             "sharding engram gathers；CSA2/MoE/量化缺口仍阻断 "
+             "structure_complete=False，不冒充"),
     SourceMapEntry(
         entry_id="sm-v41-csa2-moe-unverified",
         model_or_method="deepseek_v41_flash CSA2/MoE",

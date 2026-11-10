@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-11（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录；A 组二轮审计、ctx-KV 路径修正与 k_norm dtype 复核修正见下）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-11（两模型 forward/合入门禁轮 + R04 Engram 建模；早前 A 组/校准段落保留为历史记录；A 组二轮审计、ctx-KV 路径修正与 k_norm dtype 复核修正见下）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（候选分支 `codex/dflash-ctx-kv-path-fix`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-11 外层 Codex 在 k_norm dtype 修正后全量 **212 passed**，exit 0；更早历史：A 组二轮 201 passed，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：212**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-11；201→212 为 ctx-KV 路径修正新增 11 项；复核轮只改测试断言/名称，收集数不变）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-11 R04 轮全量 **234 passed**，exit 0；更早历史：k_norm 修正后 212 passed，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：234**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-11 R04 轮；212→234 为 V4.1 Engram 新增 tests/test_v41_engram.py 22 项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -49,6 +49,29 @@ dtype 缺失/不支持显式拒绝，不回退位宽。默认 steady/known 因�
 §6 见 [A 组二轮审计报告](validation/agroup-lmhead-ctxkv-audit-20261110.md)。
 外层 Codex 已全量验收：212 passed，exit 0；远端 CI 以候选 PR 检查为准。
 
+**2026-11-11 R04：V4.1 Engram 建模（B 组 R04 交付）**：上游源码由主控
+pin 入仓（vLLM @f358f057；common/engram.py blob sha1 ba4ceea6 + nvidia
+ops engram_* 三文件 + amd/engram.py + configs/deepseek_v41.py，blob sha1
+逐项对 references/vllm-tree.json 校验）。落地：engram 8 键 → mapped
+（extras.engram spec；264 B/行 = FP8 e4m3 256 + ue8m0 8，n_hash_cols=24，
+桶分配 L211-252 忠实移植 families.engram_bucket_primes）；count 四行
+（engram_hash/lookup/wkv/post_wkv，层 1/14，批级哈希一次挂首层行）；
+memory 三对象/层 + staged 下界（表默认 **cpu_offload 研究假设**，场景
+显式 engram_table_placement 输入，host 驻留不进 GPU 峰值单列
+host_resident_bytes；显式 gpu → TP8 合计超标称如实 OOM）；TP>1 补
+head/wkv 两次 all-gather 通信行。独立 oracle：tests/test_v41_engram.py
+22 项（自写 Miller-Rabin 层桶和 == engram_num_embeddings 精确相等
+384,006,168/384,016,682、首 8 素数硬编码、TP1 表 202,758,032,400 B、
+tp=7/9/16 拒绝、逐行手算绝对值、开/关账本差=精确新增、count↔memory
+对账、blob sha1 防漂移）。门禁随事实更新（G9/G10/test_model_ir_v02
+断言归因见报告 §8，剩余缺口不变仍在阻断）。默认 V4.1 replay 前后
+逐项归因：decode FLOPs 7,067,478,214→7,146,543,454、TPOT
+113.34→116.15ms、GPU steady +39,485,440B（仅 wkv+qk）、host 表
+25,344,443,520B、行 909→916；structure_complete 仍 False（CSA2/MoE/
+量化缺口不变）。报告：[docs/validation/v41-engram-20261111.md]
+(validation/v41-engram-20261111.md)；证据 ev-vllm-v41-engram；G-C1
+单机算子解除（DP 交换/cpu_offload 运行时/amd 变体仍登记未覆盖）。
+
 **CI hermetic 修复（2026-11-10）**：`tests/test_consistency.py` 两项验收不再读取
 被 `.gitignore` 忽略的 `outputs/run_v41.json`。CSV 导出改为复核本次 `run` 新落盘的
 RunResult；固定场景重放改用纳入版本库、带 provenance 的历史快照
@@ -84,8 +107,10 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   - Qwen3.6：config 覆盖完整；GDN/full-attn gate/MoE router+shared gate/TP-EP
     分片 source-checked；MTP 只有 config+目标首层模板 → **unverified**；
     forward 仍不完整，不能参与部署排名。
-  - V4.1：Engram 8 键、CSA2/MoE、candidate、swiglu、quantization_config 仍为
-    缺口；mHC 仅 source-checked；CPU/GPU 均未执行。
+  - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
+    DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2/MoE、
+    candidate、swiglu、quantization_config 仍为缺口；mHC 仅
+    source-checked；CPU/GPU 均未执行。
   - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成未核、拒绝采样/KV
     回退/hidden 提取仍 0 占位；CPU/GPU 未执行。
 - **本轮修复**：V4.1 `o_a_proj` 分组在 work/memory 同步乘 `ng`，并补 V4.1
@@ -104,7 +129,8 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 复核：
   main branch protection 要求经 PR 合入及 `pytest (Windows, Python 3.12)`
   必需检查（strict），审批数为 0，且 `enforce_admins=true`。
-- **未完成**：V4.1 Engram/CSA2/MoE 源码与执行、Qwen3.6 MTP 原生 forward、
+- **未完成**：V4.1 CSA2/MoE scoring/量化映射源码与执行、Engram DP 分片
+  交换路径、Qwen3.6 MTP 原生 forward、
   两款主模型 CPU/GPU 实测、DFlash 服务端集成与运行时池尺寸、真实可分配预算。
 
 ## 0.1 必读上下文
@@ -360,9 +386,11 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 
 ## 3. 已知缺口与外部依赖（不虚构补齐；完整清单见 docs/gaps/）
 
-1. **V4.1**：Engram（8 键，`common/engram.py` 未 pin）、CSA2/MoE
+1. **V4.1**：Engram 单副本路径已建模（R04，2026-11-11，pin+source-checked；
+   剩余：DP 分片交换/EngramBatch MXFP8/cpu_offload 运行时行为/amd 变体，
+   G-C1）；CSA2/MoE
    scoring/top-k/分组路由、candidate block、swiglu clamp、quantization_config
-   均为显式缺口；mHC 仅 source-checked、tilelang kernel 未执行。G-C1。
+   仍为显式缺口；mHC 仅 source-checked、tilelang kernel 未执行。G-C1。
 2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
    丢弃 `mtp.` → method status=unverified，不进入部署排名。
 3. **DFlash**：服务端集成（SGLang DFLASH/vLLM PR#40898）未逐行核对；拒绝采样/
@@ -403,7 +431,8 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   trace_v2.csv、report_v2.html（历史轮）；A 组轮：
   run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
   trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
-- 下一工作项：V4.1 Engram/CSA2/MoE 源 pin 与执行；Qwen3.6 MTP 原生 forward；
+- 下一工作项：V4.1 CSA2/MoE scoring 与量化映射源 pin、Engram DP 分片交换
+  路径（或显式永久登记单副本口径）；Qwen3.6 MTP 原生 forward；
   两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/运行时池尺寸；
   可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；G-C4 单请求超前 → M17；
   V09b 三方对账。历史 235B MoE 蒸馏仅作归档研究，不再是产品优先项。

@@ -692,6 +692,9 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                                   kv_allocations, target_weight_allocations)
     pplan = plan
     blocks: Dict[str, Any] = {}
+    # R04：Engram 表位置显式输入 + staged_rows 下界按稳态 decode T=B×1 计
+    e_place = getattr(dep, "engram_table_placement", "cpu_offload")
+    e_tokens = B if (model.extras or {}).get("engram") else 0
     if dep.mode == "colocated":
         tp = dep.target_tp if pplan is None else pplan.tp
         ep = dep.target_ep if pplan is None else pplan.ep
@@ -701,7 +704,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                 model, draft_ir, quant, dquant, tp, B, ctx,
                 _device_budget(dep.target_device, dep.budget),
                 ep=ep, rank=r, block_size=block_size, e_produced=e_produced,
-                draft_ctx_kv_path=draft_ctx_kv_path)
+                draft_ctx_kv_path=draft_ctx_kv_path,
+                engram_table_placement=e_place, engram_tokens=e_tokens)
             rep = rank_mem.peak_vs_budget()
             rep["inventory"] = rank_mem.inventory()
             ranks.append(rep)
@@ -720,9 +724,16 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
         ep = dep.target_ep if pplan is None else pplan.ep
         rm = RM("target-r0", dep.target_device, tb)
         for a in target_weight_allocations(model, quant, dep.target_tp,
-                                           ep=ep, plan=pplan):
+                                           ep=ep, plan=pplan,
+                                           engram_table_placement=e_place):
             a.consumers = ["target"]
             rm.add(a)
+        if e_tokens:
+            from .lowering.memory import engram_staged_allocations
+            for a in engram_staged_allocations(
+                    (model.extras or {})["engram"], dep.target_tp, e_tokens):
+                a.consumers = ["target"]
+                rm.add(a)
         for a in kv_allocations(model, quant, B, ctx, tp=dep.target_tp):
             a.consumers = ["target"]
             rm.add(a)

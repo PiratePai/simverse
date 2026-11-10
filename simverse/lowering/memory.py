@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from ..model_ir.schema import ModelIR
+from ..model_ir.families import engram_bucket_primes
 from ..draft_quant import (FUSED_RAW, MXFP8_CONTEXT_PROJ, PER_LAYER_FALLBACK,
                            dtype_bytes, path_unknown_components,
                            require_ctx_kv_path)
@@ -39,6 +40,24 @@ UNKNOWN_RUNTIME_COMPONENTS = (
     "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
     "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）",
 )
+
+# R04（2026-11-11）：Engram 表驻留位置（显式场景输入，缺失/非法拒绝，不猜）。
+# 默认 cpu_offload 为**研究假设配方**：证据 = pinned 源码 cpu_offload 路径
+# （engram.py L1037-1039/L1205-1221 pinned host memory + UVA 读取）+
+# 101.4 GiB/层（≈94 GiB）客观不可驻留单卡 GPU；不证明实际部署以该配置运行。
+ENGRAM_PLACEMENT_CPU_OFFLOAD = "cpu_offload"
+ENGRAM_PLACEMENT_GPU = "gpu"
+ENGRAM_TABLE_PLACEMENTS = (ENGRAM_PLACEMENT_CPU_OFFLOAD, ENGRAM_PLACEMENT_GPU)
+
+
+def _require_engram_placement(value: str) -> str:
+    """Engram 表位置输入校验（镜像 draft_quant 路径的显式拒绝模式）。"""
+    if value not in ENGRAM_TABLE_PLACEMENTS:
+        raise ValueError(
+            f"engram_table_placement 必须是 {ENGRAM_TABLE_PLACEMENTS} 之一，"
+            f"收到 {value!r}：表驻留位置是显式配方输入（默认 cpu_offload 为"
+            "研究假设），不能由位宽/层数推断")
+    return value
 
 
 @dataclass
@@ -51,6 +70,7 @@ class Allocation:
     lifecycle: str = "resident"  # resident | per-request | cross-round | phase:draft | phase:verify
     consumers: List[str] = field(default_factory=list)
     live_note: str = ""
+    placement: str = "gpu"       # gpu | cpu_offload（host 驻留不进 GPU 峰值）
 
     def to_json(self) -> dict:
         return dict(self.__dict__)
@@ -125,9 +145,17 @@ class RankMemory:
         return out
 
     def live_total(self, kinds: Optional[Tuple[str, ...]] = None) -> int:
-        """存活对象求和（kinds 过滤；默认全部实体对象）。"""
+        """存活对象求和（kinds 过滤；默认全部实体对象）。
+
+        R04：placement != "gpu"（cpu_offload 的 Engram 表）是 host 驻留对象，
+        不进 GPU 侧任何求和；host 字节经 host_resident_bytes() 单列披露。
+        """
         return sum(a.bytes for a in self._dedup()
-                   if kinds is None or a.kind in kinds)
+                   if (kinds is None or a.kind in kinds) and a.placement == "gpu")
+
+    def host_resident_bytes(self) -> int:
+        """host 驻留对象字节（cpu_offload Engram 表等；不进 GPU 峰值）。"""
+        return sum(a.bytes for a in self._dedup() if a.placement != "gpu")
 
     def steady_bytes(self) -> int:
         """常驻 + 每请求（稳态占用，不含临时缓冲）。"""
@@ -138,12 +166,14 @@ class RankMemory:
 
         colocated 串行路径配方（dflash_generate pin：draft 前向 → verify
         → 拒绝/回退，两阶段不重叠）；phase:* 各自内部按同阶段并存求和。
+        host 驻留对象（cpu_offload 表）不进 GPU 峰值（R04）。
         """
-        cross = sum(a.bytes for a in self._dedup()
-                    if a.lifecycle == "cross-round")
+        dedup = self._dedup()
+        cross = sum(a.bytes for a in dedup
+                    if a.lifecycle == "cross-round" and a.placement == "gpu")
         phases: Dict[str, int] = {}
-        for a in self._dedup():
-            if a.lifecycle.startswith("phase:"):
+        for a in dedup:
+            if a.lifecycle.startswith("phase:") and a.placement == "gpu":
                 phases[a.lifecycle] = phases.get(a.lifecycle, 0) + a.bytes
         return cross + (max(phases.values()) if phases else 0)
 
@@ -189,6 +219,7 @@ class RankMemory:
             "rank_id": self.rank_id, "steady_bytes": steady,
             "transient_peak_bytes": self.transient_peak_bytes(),
             "known_peak_bytes": known,
+            "host_resident_bytes": self.host_resident_bytes(),
             "nominal_bytes": nominal,
             "allocatable_bytes": self.budget.allocatable_bytes,
             "allocatable_kind": self.budget.allocatable_kind,
@@ -210,15 +241,111 @@ class RankMemory:
 # ---------------------------------------------------------------------------
 
 
+def engram_allocations(engram_spec: dict, hidden: int, quant: dict, tp: int,
+                       layer_id: int, role: str = "target", rank: int = 0,
+                       table_placement: str = ENGRAM_PLACEMENT_CPU_OFFLOAD
+                       ) -> List[Allocation]:
+    """一个 Engram 层的驻留对象（R04；common/engram.py pin @f358f057
+    blob sha1 ba4ceea6，source-checked 2026-11-11）。
+
+      * 表：per-rank 行数 = 该 rank 分到的素数桶长之和 × 264 B/行
+        （FP8 [rows,256] + ue8m0 [rows,8]，L1151-1161/L968-969；桶分配
+        engram.py L211-252 → families.engram_bucket_primes 移植；TP head
+        ceil 切分，断言 (tp−1)·part < 24，L1094-1099）。**不是**
+        num_embeddings/tp；
+      * 表位置：显式 table_placement（默认 cpu_offload = 研究假设配方，
+        证据 = 源码 cpu_offload/pinned-host 路径 L1037-1039/L1205-1221 +
+        101.4 GiB/层不可驻留单卡；host 驻留不进 GPU 峰值，经
+        host_resident_bytes 披露）；gpu 驻留需显式场景输入；
+      * wkv：ColumnParallelLinear 6144→25600 列切 /tp（L1719-1733）；
+      * qk：q_weight/k_weight [hc_mult,5120] bf16 每 rank 复制（L1707-1714）。
+    """
+    _require_engram_placement(table_placement)
+    cols = int(engram_spec["n_hash_cols"])
+    d_v = int(engram_spec["head_dim"])
+    row_b = int(engram_spec["bytes_per_row"])
+    layer_ids = list(engram_spec["layer_ids"])
+    if layer_id not in layer_ids:
+        raise ValueError(f"层 {layer_id} 不在 engram_layer_ids {layer_ids}")
+    idx = layer_ids.index(layer_id)
+    primes = engram_bucket_primes(int(engram_spec["vocab_size"]),
+                                  len(layer_ids),
+                                  int(engram_spec["max_ngram_size"]),
+                                  int(engram_spec["n_heads"]))
+    part = -(-cols // tp)
+    if (tp - 1) * part >= cols:
+        raise ValueError(
+            f"Engram TP{tp} 非法：(tp−1)·part={(tp - 1) * part} ≥ {cols} 个"
+            "哈希头（engram.py L1096 断言；合法 tp 见 count/work.engram_rows）")
+    b_w = quant["dense_w"] / 8
+    wkv_out = hidden * (int(engram_spec["hc_mult"]) + 1)
+    if wkv_out % tp:
+        raise ValueError(
+            f"Engram wkv 输出宽 {wkv_out} 不整除 TP{tp}（列切要求整除）")
+    head_start = min(rank * part, cols)
+    head_end = min(head_start + part, cols)
+    rows_r = sum(primes[idx][head_start:head_end])
+    return [
+        Allocation(
+            f"{role}-w-engram-table-L{layer_id}", "weights", role,
+            int(rows_r * row_b), placement=table_placement,
+            live_note=(f"素数桶 head 分片 {rows_r} 行×{row_b}B（TP{tp} "
+                       f"part={part}，非 num_embeddings/tp；L211-252/"
+                       "L1151-1161）；默认 cpu_offload（engram_config "
+                       "cpu_offload 路径 + "
+                       f"{rows_r * row_b / 2**30:.1f} GiB/层客观不可驻留 GPU；"
+                       "研究假设配方），表在 host pinned memory（UVA 读取）；"
+                       "gpu 驻留需显式场景输入 engram_table_placement")),
+        Allocation(
+            f"{role}-w-engram-wkv-L{layer_id}", "weights", role,
+            int(cols * d_v * (wkv_out // tp) * b_w),
+            live_note=f"常驻（ColumnParallelLinear {cols * d_v}→{wkv_out} 列切 "
+                      f"/tp={tp}，gather_output=True；L1719-1733）"),
+        Allocation(
+            f"{role}-w-engram-qk-L{layer_id}", "weights", role,
+            int(2 * int(engram_spec["hc_mult"]) * hidden * 2),
+            live_note="q_weight/k_weight [hc_mult,h] bf16 每 rank 复制"
+                      "（不随 TP 缩放；L1707-1714）"),
+    ]
+
+
+def engram_staged_allocations(engram_spec: dict, tp: int, tokens: int,
+                              role: str = "target") -> List[Allocation]:
+    """Engram staged_rows 查表暂存（下界；跨轮常驻缓冲）。
+
+    源码按 max_num_batched_tokens×dp ×part_heads×256 bf16 一次性分配
+    （engram.py L1749-1756，persistent storage 稳定 graph 重放地址）——
+    运行时常数未 pin，此处按场景 tokens 给**下界**并注明；不计 0。
+    """
+    cols = int(engram_spec["n_hash_cols"])
+    d_v = int(engram_spec["head_dim"])
+    part = -(-cols // tp)
+    allocs: List[Allocation] = []
+    for li_e in engram_spec["layer_ids"]:
+        staged = int(tokens * part * d_v * 2)     # bf16 下界
+        allocs.append(Allocation(
+            f"{role}-t-engram-staged-L{li_e}", "transient", role, staged,
+            lifecycle="cross-round",
+            live_note=f"staged_rows [tokens×part_heads×{d_v}] bf16 下界 "
+                      f"（TP{tp} part={part}）；实际按 max_num_batched_tokens"
+                      "×dp 分配（L1749-1756，运行时常数未 pin）"))
+    return allocs
+
+
 def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                               role: str = "target", ep: int = 1, rank: int = 0,
-                              plan=None) -> List[Allocation]:
+                              plan=None,
+                              engram_table_placement: str =
+                              ENGRAM_PLACEMENT_CPU_OFFLOAD
+                              ) -> List[Allocation]:
     """主模型每 rank 权重驻留（TP/EP 分片后口径；R01 统一配方）。
 
     embed/lm_head 词表行切 V/tp（VocabParallelEmbedding/ParallelLMHead）；
     attn q/o 切 heads/tp、k/v 按 KV 头规则；GDN qkvz/ba/conv 列切、
     out_proj 行切；MoE router/shared_gate 复制、shared inter/tp、
     routed 按 EP 关(inter/tp)/开(E_l 整专家)。
+    V4.1 Engram 层另加表/wkv/qk 对象（R04，engram_allocations）；
+    engram_table_placement 为显式配方输入（默认 cpu_offload 研究假设）。
     """
     b_dense = quant["dense_w"] / 8
     b_expert = quant["expert_w"] / 8
@@ -285,6 +412,12 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             allocs.append(Allocation(
                 f"{role}-w-mhc-L{li}", "weights", role, int(hc_b),
                 live_note="常驻 fp32 每卡复制（hc_attn_fn/hc_ffn_fn）"))
+        engram_spec = (model.extras or {}).get("engram") \
+            if fam == "v41_csa2" else None
+        if engram_spec and li in engram_spec.get("layer_ids", ()):
+            allocs += engram_allocations(
+                engram_spec, model.hidden, quant, tp, layer_id=li,
+                role=role, rank=rank, table_placement=engram_table_placement)
         if layer.dense_inter:
             dense_b += 3 * model.hidden * (layer.dense_inter // tp) * b_dense
         if dense_b:
@@ -585,7 +718,10 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                           rank: int = 0, block_size: int = 0,
                           e_produced: float = 0.0,
                           with_transients: bool = True,
-                          draft_ctx_kv_path: str = "unknown") -> RankMemory:
+                          draft_ctx_kv_path: str = "unknown",
+                          engram_table_placement: str =
+                          ENGRAM_PLACEMENT_CPU_OFFLOAD,
+                          engram_tokens: int = 0) -> RankMemory:
     """同卡混部 per-rank 账本（R02a/R02b）。
 
     草稿与 target 同 TP 组（vLLM pin）；embed/lm_head 为 target 的物理
@@ -593,15 +729,25 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
     重复驻留。draft_batch：草稿批（默认 = target batch B；逐请求草稿）。
     draft_ctx_kv_path：显式 ctx-KV 实现路径（draft_quant.py 枚举）；
     未知时拒绝，不按 dense_w 猜分支。
+    R04：engram_table_placement 显式表位置（默认 cpu_offload 研究假设）；
+    engram_tokens>0 时补 staged_rows 下界临时对象（V4.1 主模型）。
     """
     if draft_batch is None:
         draft_batch = batch
     path = None
     rank_mem = RankMemory(f"colocated-r{rank}", budget.device_id, budget)
     for a in target_weight_allocations(model, quant, tp, role="target",
-                                       ep=ep, rank=rank):
+                                       ep=ep, rank=rank,
+                                       engram_table_placement=
+                                       engram_table_placement):
         a.consumers = ["target"]
         rank_mem.add(a)
+    engram_spec = (model.extras or {}).get("engram")
+    if engram_spec and engram_tokens > 0:
+        for a in engram_staged_allocations(engram_spec, tp, engram_tokens,
+                                           role="target"):
+            a.consumers = ["target"]
+            rank_mem.add(a)
     for a in kv_allocations(model, quant, batch, ctx, role="target", tp=tp):
         a.consumers = ["target"]
         rank_mem.add(a)

@@ -3,24 +3,35 @@
 与 [数据缺口清单](data-gaps.md) 分开维护：本页只列**工程实现**缺口（不依赖新数据，
 或先有实现才能消费数据）。每项含：影响面/缺什么/旧仓为何不足/需要什么实现/
 验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
-新增 G-C11；A 组轮 G-C11 解除）。
+新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）。
 
-## G-C1 V4.1 Engram 语义建模（hc 已解除 2026-11-10）⭐P0
+## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 
 - **影响**：必需场景①（deepseek_v41_flash）全部性能/容量结论——structure_complete=
   False，M02/M04/M05/M06 降级，不参与排名。
+- **2026-11-11 R04 进展**：**单副本路径 Engram 已建模解除**——common/engram.py
+  pin（vllm @f358f057，blob sha1 ba4ceea6 对 vllm-tree.json 校验）后：素数桶
+  表布局（FP8 e4m3 + ue8m0 264 B/行、层桶和 == engram_num_embeddings 精确相等）、
+  批级 n-gram 哈希/查表/wkv 投影/门控注入四行计入 count（engram_*），表/wkv/qk/
+  staged 对象计入 memory（表默认 cpu_offload 研究假设，host 驻留不进 GPU 峰值；
+  场景显式 engram_table_placement 输入），TP>1 补 head/wkv 两次 all-gather
+  通信行；测试 tests/test_v41_engram.py（独立 Miller-Rabin/首 8 素数/表字节/
+  手算锚点/守恒/负例，22 项）。公式 v2.engram_* 四条；证据 ev-vllm-v41-engram。
 - **2026-11-10 进展**：**hc（mHC 混合流）三键已建模解除**——每层 2 次边界算子
   （post 流更新+系数 GEMM+sinkhorn+collapse+RMSNorm 融合核；首层 hc_expand 广播；
   FP32 权重每卡复制）计入 count（hc_* 行，替代该族通用 norm/add 行防重复计费）
   与 memory（-w-mhc 分配）；测试 tests/test_v41_hc.py（手算锚点/整模型复算/TP
   不变性/复制守恒/权重守恒）。公式 v2.mhc_* 四条。
-- **仍缺（8 键）**：Engram 查表注入——`vllm/models/deepseek_v41/common/engram.py`
-  未入评审包：forward 内部算子与表 dtype 未知，不猜常数（注入点/批级 ngram 哈希/
-  层位 1/14 已从 model.py pin 证实并写入 coverage note）。
-- **解除条件**：补 pin common/engram.py + mhc tilelang kernel 源 → Engram 算子
-  计数与表容量（dtype 决定字节）→ coverage 全 mapped。
-- **当前降级**：structure gate 拦截（capability 可见；hc 部分已不再缺）。
-- **优先级**：P0（必需场景）。依赖：上游源码入评审包（用户/网络）。
+- **仍缺（G-C1 剩余）**：Engram **DP 分片交换**（all-to-all/EngramPeerExchange/
+  symmetric memory/DPSharedEngramStorage）与 EngramBatch MXFP8 打包路径未建模
+  （本仓默认单副本路径不启用，登记未覆盖）；cpu_offload 运行时行为（预取流/
+  TLB/GB200 排序阈值 36864/4096）未建模；amd/engram.py 变体未 pin；mhc
+  tilelang kernel 源码仍未入评审包。CSA2/MoE scoring、量化映射、swiglu clamp、
+  candidate block、compress_ratios 尾部为独立缺口（不在 G-C1 内）。
+- **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
+  mhc tilelang kernel 源；structure_complete 还需 CSA2/MoE/量化缺口闭环。
+- **当前降级**：structure gate 拦截（capability 可见；Engram 单机/hc 部分已不再缺）。
+- **优先级**：P0（必需模型场景）。
 
 ## G-C2 verify/prefill 形状域建模 + 蒸馏扩展（消费 G-D4）
 

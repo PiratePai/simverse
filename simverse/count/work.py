@@ -9,7 +9,8 @@
     在 lowering 登记，本层给默认展开投影集；
   * V4.1 CSA2 沿用已对账的闭式（v0.1 移植 attention_structure，100% 对齐）；
     mHC 边界（hc_*，2026-11-10 按 vLLM pin 源码建模，替代该族通用 norm/add 行）
-    与 Engram 注入缺口由 ModelIR.gaps 携带（Engram forward 未 pin，不猜）。
+    与 Engram 注入（engram_*，2026-11-11 R04 按 common/engram.py pin
+    @f358f057 blob ba4ceea6 建模：批级哈希/查表/wkv/门控四行）同源 extras。
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .. import formula_registry as FR
+from ..model_ir.families import engram_bucket_primes
 from ..model_ir.schema import (FULL, LINEAR, MLA, MLA_CSA2, SLIDING, LayerIR,
                                ModelIR)
 from .moe import moe_rows
@@ -426,8 +428,9 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
       * 首层输入为广播嵌入：attn 侧系数 GEMM IC=h（非 hc_dim），另有
         hc_expand 广播行（model.py `residual = hc_expand(x, hc_mult)`）；
       * Engram 层（extras.hc.engram_layer_ids）post/pre 分立执行 + Engram 注入
-        ——注入算子未建模（common/engram.py 未 pin），由 ModelIR.gaps 携带，
-        本函数不计猜测常数；边界算子构成与常规层相同（post+pre 总量不变）。
+        ——注入算子已由 engram_rows 建模（2026-11-11 R04，common/engram.py
+        pin @f358f057 blob ba4ceea6）；本函数边界算子构成与常规层相同
+        （post+pre 总量不变，分立不改变计数）。
     """
     m = hc["mult"]
     iters = hc["sinkhorn_iters"]
@@ -464,6 +467,105 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
             formula=FR.F_MHC_POST_PRE,
             shape=f"post 流更新+collapse（各 2·T·{hc_dim}）+ RMSNorm(h={h})；"
                   f"含残差（流上）"))
+    return rows
+
+
+def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
+                quant: dict, tp: int = 1,
+                first_engram_layer: bool = False) -> List[OpRow]:
+    """Engram 注入算子（v41_csa2 专用；per-rank 口径）。
+
+    证据（vllm models/deepseek_v41/common/engram.py pin @f358f057，
+    blob sha1 ba4ceea6；source-checked 2026-11-11 R04；注入点
+    nvidia/model.py L583-600、批级哈希 L1030-1092）：
+      * 常数不猜：264 B/行（FP8 256 + ue8m0 256/32，L1151-1161/L968-969）、
+        24 哈希列 = (max_ngram−1)×n_heads（L243）、wkv 6144→25600 列切
+        （L1719-1733）、q/k_weight [hc,d] bf16 每 rank 复制（L1707-1714）；
+      * engram_hash：整批一次 kernel 算全部 engram 层（grid
+        (cdiv(T,32), n_layers)，L565）→ 只挂首 engram 层行（T=B·Q 一次，
+        G13 口径自动满足）；
+      * engram_lookup：表行读为**数据依赖期望流量**（同 token 重复 n-gram
+        不去重的保守上界，MoE 并集先例单列 weight_read_expected），
+        weight_read=0；表容量 = 本 rank 分到的素数桶长之和 × 264（**不是**
+        num_embeddings/tp；桶分配见 families.engram_bucket_primes）；
+      * engram_wkv：ColumnParallelLinear 列切 /tp，gather_output=True →
+        通信行的 all-gather（lowering/sharding）；
+      * engram_post_wkv：每 (token,hc) 门控核，op 计数为解析近似口径
+        （常数 10d+5 见公式 v2.engram_post_wkv）。
+    """
+    cols = int(engram_spec["n_hash_cols"])
+    d_v = int(engram_spec["head_dim"])
+    row_b = int(engram_spec["bytes_per_row"])
+    e_max = int(engram_spec["max_ngram_size"])
+    n_heads = int(engram_spec["n_heads"])
+    layer_ids = list(engram_spec["layer_ids"])
+    b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
+    # TP 合法性：镜像源码断言 (shards−1)·part < n_hash_cols（L1096-1099）。
+    part = -(-cols // tp)
+    if tp < 1 or (tp - 1) * part >= cols:
+        legal = [t for t in range(1, cols + 2)
+                 if (t - 1) * (-(-cols // t)) < cols]
+        raise ValueError(
+            f"Engram TP{tp} 非法：{cols} 个哈希头 ceil 切分 part={part}，"
+            f"(tp−1)·part={(tp - 1) * part} ≥ {cols}（engram.py L1096 断言；"
+            f"合法 tp = {legal}）")
+    # 本层素数桶（rank=0 均匀假设：前 part 个 head 的桶长之和）
+    primes = engram_bucket_primes(int(engram_spec["vocab_size"]), len(layer_ids),
+                                  e_max, n_heads)
+    rank_rows = sum(primes[layer_ids.index(li)][:part])
+    rows: List[OpRow] = []
+    if first_engram_layer:
+        rows.append(OpRow(
+            stage, li, "engram_hash",
+            flops=T * len(layer_ids)
+            * (2 * e_max + 2 * (e_max - 1) * n_heads),
+            act_read=int(T * 4),
+            act_write=int(T * len(layer_ids) * cols * 4),
+            formula=FR.F_ENGRAM_HASH, statistic="exact",
+            shape=f"批级一次 kernel 算全部 {len(layer_ids)} 个 engram 层"
+                  f"（grid (cdiv(T,32),n_layers)，L565）；整数 op 计数："
+                  f"每 (token,layer,shift) 1 mul+1 xor ×{e_max} + shift>0 "
+                  f"每 head 1 mod+1 add ×{e_max - 1}×{n_heads}"))
+    rows.append(OpRow(
+        stage, li, "engram_lookup",
+        flops=T * cols * d_v,
+        weight_read=0,
+        weight_read_expected=float(T * cols * row_b),
+        act_read=int(T * cols * 4), act_write=int(T * cols * d_v * b_a),
+        weight_capacity=int(rank_rows * row_b),
+        formula=FR.F_ENGRAM_LOOKUP, statistic="expectation",
+        shape=f"[T,{cols}] int32 ids → [T,{cols},{d_v}] bf16（dequant 逐元素 "
+              f"1 乘，L726-731）；表行读 {T * cols}×{row_b}B 为数据依赖期望"
+              f"流量（weight_read_expected；重复 n-gram 不去重保守上界），"
+              f"weight_read=0；表容量另计（rank0 分片 {rank_rows} 行×{row_b}B）"))
+    wkv_in = cols * d_v                            # 6144（L1703-1705）
+    wkv_out = h * (int(engram_spec["hc_mult"]) + 1)  # 25600（L1726）
+    if wkv_out % tp:
+        raise ValueError(
+            f"Engram wkv 输出宽 {wkv_out} 不整除 TP{tp}（ColumnParallelLinear "
+            "列切要求整除，L1724-1733；V4.1 部署配方 tp∈{{1,2,4,8}}）")
+    oc_r = wkv_out // tp
+    rows.append(OpRow(
+        stage, li, "engram_wkv",
+        flops=2 * T * wkv_in * oc_r,
+        weight_read=int(wkv_in * oc_r * b_w), weight_capacity=int(wkv_in * oc_r * b_w),
+        act_read=int(T * wkv_in * b_a), act_write=int(T * oc_r * b_a),
+        formula=FR.F_ENGRAM_WKV, statistic="exact",
+        shape=f"[{T},{wkv_in}]@[{wkv_in},{oc_r}]（列切 25600/tp={oc_r}，"
+              f"gather_output=True → 全宽 [T,{wkv_out}] all-gather 见通信行）"))
+    hc = int(engram_spec["hc_mult"])
+    rows.append(OpRow(
+        stage, li, "engram_post_wkv",
+        flops=T * hc * (10 * h + 5),
+        weight_read=int(2 * hc * h * 2), weight_capacity=int(2 * hc * h * 2),
+        act_read=int(T * hc * h * b_a + T * (hc + 1) * h * b_a + T),
+        act_write=int(T * hc * h * b_a),
+        formula=FR.F_ENGRAM_POST_WKV, statistic="exact",
+        shape=f"grid (T×{hc},)（L1879）：ρ=(Σ hidden·q·k·key)·rsqrt(mean h²+eps)"
+              f"·rsqrt(mean key²+eps)·rsqrt(d)，gate=sigmoid(sign(ρ)·"
+              f"sqrt(clamp|ρ|,1e-6))，out=hidden+gate·value（L1334-1422）；"
+              f"op 计数口径：乘 6d + 加 3(d−1)+d + 标量≈8 = 10d+5；"
+              f"mask bool {T}B；q/k_weight [hc,d] bf16 每 rank 复制"))
     return rows
 
 
@@ -508,6 +610,7 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     rows: List[OpRow] = []
     kvs = (model.extras or {}).get("kv_spec", {})
     hc_spec = (model.extras or {}).get("hc")
+    engram_spec = (model.extras or {}).get("engram")
     first_layer_index = model.layers[0].index if model.layers else None
 
     def _local_experts(layer):
@@ -540,6 +643,12 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                                      first_layer=(li == first_layer_index))
         else:
             rows += norm_add_rows(stage, li, T, h, quant)
+        # Engram 注入（R04；层位 extras.engram.layer_ids，与 hc_spec 同源 extras；
+        # 哈希行只挂首个 engram 层——批级 kernel 一次算全部层）
+        if (engram_spec and li in engram_spec.get("layer_ids", ())
+                and layer.kind == MLA_CSA2):
+            rows += engram_rows(stage, li, T, h, engram_spec, quant, tp,
+                                first_engram_layer=(li == engram_spec["layer_ids"][0]))
     rows += head_rows(stage, model, B * Q, quant, tp)
     for r in rows:
         r.role = role

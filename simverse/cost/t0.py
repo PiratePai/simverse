@@ -20,6 +20,9 @@ _ELEMENTWISE = {
     "candidate_publish", "embed_lookup", "attention_core", "sparse_attention",
     "mla_absorbed_core", "causal_conv1d", "gdn_recurrence", "v_norm_gated",
     "q_a_norm", "draft_kv_scan", "shared_gate",
+    # Engram 非 GEMM 算子（R04）：哈希/查表 dequant/门控核按 act 位宽计价
+    #（engram_wkv 是 GEMM，走 dense_w 路由）
+    "engram_hash", "engram_lookup", "engram_post_wkv",
 }
 
 

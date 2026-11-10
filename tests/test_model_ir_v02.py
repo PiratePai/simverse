@@ -79,18 +79,24 @@ def test_deepseek_v3_mla_and_dense_moe_split(cat):
 
 
 def test_v41_structure_and_gaps(cat):
-    """V4.1：40 层 MLA+CSA2；hc 3 键已映射、Engram 8 键缺口 → structure_complete=False。"""
+    """V4.1：40 层 MLA+CSA2；hc 3 键 + Engram 8 键已映射（R04）→ 剩余缺口仍阻断。
+
+    归因更新（2026-11-11 R04）：Engram 8 键曾为缺口（common/engram.py 未
+    pin）；现按 engram.py pin（blob sha1 ba4ceea6 对 vllm-tree.json 校验）
+    source-checked 建模 → mapped，CSA2/MoE/量化等缺口不变，
+    structure_complete 仍 False（不冒充）。
+    """
     m = cat["models"]["deepseek_v41_flash"]
     assert len(m.layers) == 40
     assert m.kind_counts() == {"mla_csa2": 40}
-    assert not m.structure_complete          # Engram/CSA2/MoE 仍阻断（不冒充）
+    assert not m.structure_complete          # CSA2/MoE/量化仍阻断（不冒充）
     assert not m.config_coverage_complete
     assert m.evidence.forward_source == "partial-source"
     gap_keys = {g.split(":")[0] for g in m.gaps}
-    assert "engram_vocab_size" in gap_keys
     assert not gap_keys & {"hc_mult", "hc_eps", "hc_sinkhorn_iters"}  # hc 已解除
-    engram = {k for k in gap_keys if k.startswith("engram_")}
-    assert len(engram) == 8                   # 8 engram 键
+    assert not gap_keys & {f"engram_{k}" for k in (
+        "vocab_size", "num_embeddings", "layer_ids", "n_heads", "head_dim",
+        "max_ngram_size", "compressed_vocab_size", "pad_token_id")}  # R04 已解除
     # 2026-11-10 审查新增：swiglu clamp/candidate block/compress_ratios 尾部/
     # quantization_config 也是显式缺口，不默认 ignored。
     assert {"swiglu_limit", "candidate_block_size", "quantization_config"} <= gap_keys
@@ -101,6 +107,17 @@ def test_v41_structure_and_gaps(cat):
     assert hc["mult"] == 4 and hc["sinkhorn_iters"] == 20
     assert hc["eps"] == 1e-6 and hc["post_alpha"] == 2.0
     assert hc["engram_layer_ids"] == [1, 14]
+    # Engram spec 入册 extras（R04；消费方 count/work.engram_rows、
+    # lowering/memory engram 对象；常数见 ev-vllm-v41-engram）
+    eng = m.extras["engram"]
+    assert eng["layer_ids"] == [1, 14]
+    assert eng["num_embeddings"] == [384006168, 384016682]
+    assert eng["n_hash_cols"] == 24 and eng["max_ngram_size"] == 4
+    assert eng["n_heads"] == 8 and eng["head_dim"] == 256
+    assert eng["block_size"] == 32 and eng["bytes_per_row"] == 264
+    assert eng["value_dtype"] == "fp8_e4m3" and eng["scale_encoding"] == "ue8m0"
+    assert eng["vocab_size"] == 16000000 and eng["compressed_vocab_size"] == 99092
+    assert eng["pad_token_id"] == 2 and eng["hc_mult"] == 4
     # 前 40 层 r 分布 0:2 / 2:18 / 1:20（主控已独立确认）
     ratios = [l.csa2.ratio for l in m.layers]
     assert ratios.count(0) == 2 and ratios.count(2) == 18 and ratios.count(1) == 20
@@ -151,10 +168,13 @@ def test_every_config_key_has_coverage(cat):
         for key, entry in cov.items():
             assert entry["status"] in valid, (mid, key, entry)
         if mid == "deepseek_v41_flash":
+            # R04（2026-11-11）：Engram 8 键从 unsupported → mapped
+            # （common/engram.py pin source-checked；曾断言 len(eng)==8 为
+            # unsupported——底层事实变化，随证据更新，非放宽）
             eng = [k for k, v in cov.items()
-                   if v["status"] == "unsupported-semantic"
-                   and k.split(".")[-1].startswith("engram_")]
-            assert len(eng) == 8   # 8 engram；hc 3 键已 mapped（2026-11-10）
+                   if k.split(".")[-1].startswith("engram_")]
+            assert len(eng) == 8
+            assert all(cov[k]["status"] == "mapped" for k in eng)
             for hk in ("hc_mult", "hc_eps", "hc_sinkhorn_iters"):
                 assert cov[f"text_config.{hk}"]["status"] == "mapped"
     # 完整 config 的每个叶键都必须有登记（2026-11-10 F7）
