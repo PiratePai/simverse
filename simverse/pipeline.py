@@ -19,7 +19,7 @@ from .cost.calibrated import CalibratedPricer
 from .cost.profile_store import PROFILE_SETS, load_profile_set
 from .execute.serial import build_serial_round
 from .lowering import (DeviceBudget, LinkLike, colocated_rank_memory,
-                       kv_shard_note, validate_tp)
+                       kv_shard_note, model_collectives, validate_parallel)
 from .methods import build_method_plan, acceptance_summary
 from .methods.plans import UNSUPPORTED
 from .model_ir import build_catalog
@@ -32,10 +32,23 @@ def _link_like(link_id: str) -> LinkLike:
     return LinkLike(bw=lk.bw, fixed_ms=lk.fixed_ms, label=lk.label)
 
 
-def _device_budget(device_id: str) -> DeviceBudget:
+def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
+    """设备预算：标称容量 + 场景预算输入（R03a；缺省 unknown 不套标称）。"""
     d = DEVICES[device_id]
-    return DeviceBudget(device_id, int(d.mem_capacity), None, source="spec",
-                        budget_note="标称容量；可分配预算未提供 → feasible 判定 unknown（§7.4）")
+    b = DeviceBudget(device_id, int(d.mem_capacity), None,
+                     budget_note="标称容量；可分配预算未提供 → feasible 判定 "
+                                 "unknown（§7.4；已知对象超标称仍判 OOM）")
+    if budget_input is not None:
+        b.allocatable_bytes = budget_input.allocatable_bytes
+        b.allocatable_kind = budget_input.allocatable_kind
+        b.allocatable_source = budget_input.allocatable_source
+        b.extra_overhead_bytes = budget_input.extra_overhead_bytes
+        b.overhead_source = budget_input.overhead_source
+        if b.allocatable_bytes is not None and b.allocatable_bytes > b.nominal_bytes:
+            raise ValueError(
+                f"allocatable_bytes {b.allocatable_bytes} > 标称容量 "
+                f"{b.nominal_bytes}（{device_id}）：非法输入")
+    return b
 
 
 def run_v2(scenario: ScenarioV2) -> ResultBundle:
@@ -93,16 +106,26 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                     f"{scenario.cost_profile} 域不匹配：{'；'.join(pricer.domain_reasons)}",
                     affected_metrics=["M01_tpot_profile_calibrated"])
 
-    # ---- 部署合法性 ----
+    # ---- 部署合法性（R01：统一 ParallelPlan；非法组合显式拒绝）----
     dep = scenario.deployment
-    tp_errors = validate_tp(model, dep.target_tp)
-    if tp_errors:
-        cap.add("tp_valid", "invalid", "; ".join(tp_errors[:2]),
+    pplan = validate_parallel(model, dep.target_tp, dep.target_ep,
+                              draft if (draft is not None
+                                        and scenario.method_id == "dflash_v1"
+                                        and dep.mode in ("colocated",
+                                                         "dt_pipeline_sim"))
+                              else None)
+    if not pplan.valid:
+        cap.add("parallel_valid", "invalid", "; ".join(pplan.errors[:2]),
                 affected_metrics=["全部"])
         return _bundle_error(scenario, cap, "unsupported_combo",
-                             f"TP{dep.target_tp} 非法：{tp_errors[0]}")
-    cap.add("tp_valid", "supported",
-            f"TP{dep.target_tp}；KV 分片：{kv_shard_note(model, dep.target_tp)['strategy']}")
+                             f"TP{dep.target_tp}/EP{dep.target_ep} 非法："
+                             f"{pplan.errors[0]}")
+    cap.add("parallel_valid", "supported",
+            f"TP{dep.target_tp}/EP{dep.target_ep}（{pplan.implementation_id}，"
+            f"pin {pplan.source_pin[:22]}…）；KV 分片："
+            f"{kv_shard_note(model, dep.target_tp)['strategy']}"
+            + ("；EP 开：routed 整专家按 rank 分置" if pplan.moe_ep_enabled
+               else "；EP 关：routed inter/tp 切分"))
     if scenario.method_id == "dflash_v1" and dep.mode == "dt_serial":
         cap.add("dflash_serving_integration", "unknown",
                 "SGLang DFLASH/vLLM PR#40898 未逐行核对：模拟按 HF 语义，"
@@ -125,12 +148,13 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     } if pricer else None
 
     base_rows = build_model_work(model, "target_decode", B, ctx, 1, quant,
-                                 dep.target_tp, role="target")
+                                 dep.target_tp, role="target", ep=dep.target_ep,
+                                 plan=pplan)
     base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt)
     t_base = stage_total(base_prices)
     roofline_points = _roofline_points(base_rows, base_prices, target_dev, gemm_dt)
-    # TP collectives（baseline decode 每层 2 次）
-    col_base = _collectives_cost(model, dep.target_tp, B, quant, tp_link)
+    # 通信（R01 按层配方：attn allreduce 恒有；MLP 段 TP allreduce 或 EP all2all）
+    col_base = _collectives_cost(model, pplan, B, quant, tp_link)
     t_base += col_base["t_ms"]
     if pricer:
         cal = pricer.price_stage("target_decode", base_rows, base_prices, B, ctx, 1)
@@ -154,7 +178,8 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             cap.add("acceptance_known", "unsupported",
                     f"E[N] 未知：{acc['reason']}",
                     affected_metrics=["M01 TPOT", "M02 加速比", "M03 E[N]", "M04 轮分解"])
-            memory = _memory_block(model, None, quant, dquant, dep, B, ctx, cap)
+            memory = _memory_block(model, None, quant, dquant, dep, B, ctx,
+                                   cap, plan=pplan)
             from .execute.serial import SerialRound
             empty = SerialRound("r0", [], 0.0, None, None, acc["reason"])
             metrics = _build_metrics_null_acceptance(acc, t_base, memory, cap, model)
@@ -177,19 +202,24 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                 formula_dict=FR.formulas_json()["formulas"],
                 assumption_dict=_assumptions(scenario, plan))
         if scenario.method_id == "dflash_v1":
+            # 草稿与 target 同 TP 组（vLLM load_dflash_model pin；dt_serial
+            # 独立设备时草稿组 TP1 全量副本——无共享配方，见 memory）
+            draft_tp = dep.target_tp if dep.mode in ("colocated",
+                                                     "dt_pipeline_sim") else dep.draft_tp
             draft_rows = dflash_round_rows(
                 "draft_block", draft, model.vocab, e_n, ctx, dquant,
-                quant["act"] / 8)
+                quant["act"] / 8, tp=draft_tp)
             d_gemm, d_ew = dtype_route(dquant)
             d_dev = target_dev if dep.mode == "colocated" else draft_dev
             d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew)
             t_draft = stage_total(d_prices)
             verify_rows = build_model_work(model, "verify_block", B, ctx,
                                            plan.block_size, quant, dep.target_tp,
-                                           role="target")
+                                           role="target", ep=dep.target_ep,
+                                           plan=pplan)
             v_prices = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
             t_verify = stage_total(v_prices)
-            col_v = _collectives_cost(model, dep.target_tp, B * plan.block_size,
+            col_v = _collectives_cost(model, pplan, B * plan.block_size,
                                       quant, tp_link)
             t_verify += col_v["t_ms"]
             if pricer:
@@ -219,7 +249,8 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             t_draft = stage_total(d_prices)
             verify_rows = build_model_work(model, "verify", B, ctx,
                                            plan.k_effective + 1, quant,
-                                           dep.target_tp, role="target")
+                                           dep.target_tp, role="target",
+                                           ep=dep.target_ep, plan=pplan)
             v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
             t_verify = stage_total(v_prices_m)
             if pricer:
@@ -247,7 +278,8 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                 rows_all += rows
             verify_rows = build_model_work(model, "verify", B, ctx,
                                            plan.k_effective + 1, quant,
-                                           dep.target_tp, role="target")
+                                           dep.target_tp, role="target",
+                                           ep=dep.target_ep, plan=pplan)
             v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
             t_verify = stage_total(v_prices_c)
             if pricer:
@@ -332,9 +364,15 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                 if cal0 and cal0.get("selected_ms") is not None:
                     calibrated_baseline = cal0["selected_ms"] + col_base["t_ms"]
 
-    # ---- 容量 ----
-    memory = _memory_block(model, draft if scenario.method_id == "dflash_v1" else None,
-                           quant, dquant, dep, B, ctx, cap)
+    # ---- 容量（R02a/b：per-rank 对象账本 + 生命周期峰值；R03：预算判定）----
+    memory = _memory_block(
+        model, draft if scenario.method_id == "dflash_v1" else None,
+        quant, dquant, dep, B, ctx, cap, plan=pplan,
+        block_size=(plan.block_size
+                    if scenario.method_id == "dflash_v1" and e_n is not None else 0),
+        e_produced=(e_n if e_n is not None else 0.0))
+
+    cost["memory"] = memory       # R02a：per-rank 对象清单与判定入册（导出/UI 共用）
 
     # ---- 指标 ----
     metrics = _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
@@ -423,24 +461,32 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
         capability=cap.to_json(),
         evidence_refs=[*(["ev-h200-tiny-distill"] if pricer else []),
                        "ev-qwen36-main-config", "ev-qwen36-dflash-config",
-                       "ev-dflash-impl", "ev-dflash-readme", "ev-v41-config"],
+                       "ev-dflash-impl", "ev-dflash-readme", "ev-v41-config",
+                       "ev-vllm-parallel-recipe"],
         formula_dict=FR.formulas_json()["formulas"],
         assumption_dict=_assumptions(scenario, plan),
     )
     return bundle
 
 
-def _collectives_cost(model, tp: int, tokens: int, quant: dict, link: LinkLike):
-    from .lowering import tp_layer_collectives
-    if tp < 2:
+def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike):
+    """按层通信配方（R01）：EP 开 MoE 层为 dispatch/combine，非 2×allreduce。"""
+    if plan.tp < 2:
         return {"t_ms": 0.0, "detail": {"note": "TP1 无集合通信",
                                         "total_t_ms": 0.0}}
-    cols = tp_layer_collectives(model, tp, model.hidden, quant["act"] / 8,
-                                tokens, link)
+    top_k = next((l.moe.top_k for l in model.layers
+                  if l.moe is not None and l.moe.experts), 0)
+    cols = model_collectives(model, plan, model.hidden, quant["act"] / 8,
+                             tokens, link, moe_top_k=top_k)
     t = sum(c.t_ms for c in cols)
+    per_kind: Dict[str, int] = {}
+    for c in cols:
+        per_kind[c.kind] = per_kind.get(c.kind, 0) + 1
     return {"t_ms": t, "detail": {
-        "per_layer": [c.to_json() for c in cols[:2]],
-        "n_collectives_per_layer": 2, "layers": len(model.layers),
+        "per_layer": [c.to_json() for c in cols[:3]],
+        "counts_by_kind": per_kind, "layers": len(model.layers),
+        "recipe": ("EP all2all（MoE 层）+ attn allreduce" if plan.moe_ep_enabled
+                   else "每层 attn+mlp 2 次 allreduce"),
         "total_t_ms": t}}
 
 
@@ -472,47 +518,91 @@ def _rows_json(rows):
             "rows": [r.to_json() for r in rows]}
 
 
-def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap):
-    from .lowering.memory import kv_allocations, target_weight_allocations
+def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
+                  plan=None, block_size: int = 0, e_produced: float = 0.0):
+    """容量块（R02a/b：per-rank 对象身份 + 生命周期峰值；R03a/b：预算判定）。
+
+    colocated：草稿与 target 同 TP 组，全部 rank 各建一份账本（EP 余数
+    rank 差异显式呈现），报告逐 rank + 最坏 rank；dt_serial：target/draft
+    分设备。峰值含结构化临时缓冲；workspace/graph/NCCL 池为缺口组件
+    （不填 0）→ 峰值不完整 → feasible 判定 unknown（已知下界超标称仍 OOM）。
+    """
+    from .lowering.memory import (RankMemory, colocated_rank_memory,
+                                  kv_allocations, target_weight_allocations)
+    pplan = plan
     blocks: Dict[str, Any] = {}
     if dep.mode == "colocated":
-        rank = colocated_rank_memory(
-            model, draft_ir, quant, dquant, dep.target_tp, B, ctx,
-            _device_budget(dep.target_device))
-        blocks["colocated_r0"] = rank.peak_vs_budget()
-        for a in rank.allocations:
-            pass
+        tp = dep.target_tp if pplan is None else pplan.tp
+        ep = dep.target_ep if pplan is None else pplan.ep
+        ranks = []
+        for r in range(tp):
+            rank_mem = colocated_rank_memory(
+                model, draft_ir, quant, dquant, tp, B, ctx,
+                _device_budget(dep.target_device, dep.budget),
+                ep=ep, rank=r, block_size=block_size, e_produced=e_produced)
+            rep = rank_mem.peak_vs_budget()
+            rep["inventory"] = rank_mem.inventory()
+            ranks.append(rep)
+        blocks["colocated_ranks"] = ranks
+        # M06 键沿用 r0；ranks 非均匀（EP 余数）时逐 rank 单列
+        blocks["colocated_r0"] = dict(ranks[0])
+        if any(x["known_peak_bytes"] != ranks[0]["known_peak_bytes"] for x in ranks):
+            for r, rep in enumerate(ranks):
+                blocks[f"colocated_r{r}"] = dict(rep)
+        worst = max(ranks, key=lambda x: x["known_peak_bytes"])
+        blocks["colocated_worst"] = {"rank_id": worst["rank_id"],
+                                     "known_peak_bytes": worst["known_peak_bytes"]}
     else:
-        tb = _device_budget(dep.target_device)
-        w = sum(a.bytes for a in target_weight_allocations(model, quant, dep.target_tp))
-        kv = sum(a.bytes for a in kv_allocations(model, quant, B, ctx))
-        blocks["target_r0"] = {"live_bytes": w + kv, "weights": w, "kv": kv,
-                               **{k: v for k, v in tb.to_json().items()},
-                               "status": ("unknown" if tb.allocatable_bytes is None
-                                          else ("oom" if w + kv > tb.effective_budget
-                                                else "feasible"))}
+        from .lowering.memory import RankMemory as RM
+        tb = _device_budget(dep.target_device, dep.budget)
+        ep = dep.target_ep if pplan is None else pplan.ep
+        rm = RM("target-r0", dep.target_device, tb)
+        for a in target_weight_allocations(model, quant, dep.target_tp,
+                                           ep=ep, plan=pplan):
+            a.consumers = ["target"]
+            rm.add(a)
+        for a in kv_allocations(model, quant, B, ctx, tp=dep.target_tp):
+            a.consumers = ["target"]
+            rm.add(a)
+        rep = rm.peak_vs_budget()
+        rep["inventory"] = rm.inventory()
+        blocks["target_r0"] = rep
         if draft_ir is not None and dep.mode == "dt_serial":
-            db = _device_budget(dep.draft_device)
-            dw = sum(a.bytes for a in target_weight_allocations(
-                _draft_as_model(draft_ir), dquant, 1, role="draft"))
-            dkv = sum(a.bytes for a in kv_allocations(
-                _draft_as_model(draft_ir), dquant, B, ctx, role="draft"))
-            blocks["draft_r0"] = {"live_bytes": dw + dkv, "weights": dw, "kv": dkv,
-                                  **{k: v for k, v in db.to_json().items()},
-                                  "status": ("unknown" if db.allocatable_bytes is None
-                                             else ("oom" if dw + dkv > db.effective_budget
-                                                   else "feasible"))}
-    for rk, blk in blocks.items():
-        if blk["status"] == "oom":
-            cap.add(f"memory_{rk}", "unsupported",
-                    f"{rk} OOM：live={blk['live_bytes']} > 预算",
-                    affected_metrics=["M02 加速比", "M06 显存"])
-        else:
-            cap.add(f"memory_{rk}", "unknown" if blk["status"] == "unknown" else "supported",
-                    f"{rk} live={blk['live_bytes']}B；"
-                    + ("仅标称容量，feasible 判定 unknown" if blk["status"] == "unknown"
-                       else "在可分配预算内"),
-                    affected_metrics=["M06 显存"])
+            # 草稿独立设备 TP1：无共享对象配方（vLLM 配方为同组共享，
+            # 独立组需全量 embed/lm_head 副本——服务栈未见证据，如实登记）
+            db = _device_budget(dep.draft_device, dep.draft_budget)
+            drm = RM("draft-r0", dep.draft_device, db)
+            from .lowering.memory import _as_model, draft_extra_allocations
+            dm = _as_model(draft_ir)
+            dq = dict(quant)
+            dq.update(dquant or {})
+            for a in target_weight_allocations(dm, dq, dep.draft_tp,
+                                               role="draft"):
+                a.consumers = ["draft"]
+                if "embed" in a.alloc_id or "lm_head" in a.alloc_id:
+                    a.live_note += "；独立组无共享配方：按全量副本口径（保守）"
+                drm.add(a)
+            for a in draft_extra_allocations(draft_ir, dq, dep.draft_tp):
+                a.consumers = ["draft"]
+                drm.add(a)
+            for a in kv_allocations(dm, dq, B, ctx, role="draft",
+                                    tp=dep.draft_tp):
+                a.consumers = ["draft"]
+                drm.add(a)
+            rep = drm.peak_vs_budget()
+            rep["inventory"] = drm.inventory()
+            blocks["draft_r0"] = rep
+    status_key = {"oom": "unsupported", "unknown": "unknown",
+                  "feasible": "supported", "feasible-conditional": "approximated"}
+    for rk, blk in list(blocks.items()):
+        if not isinstance(blk, dict) or "status" not in blk:
+            continue
+        st = blk["status"]
+        detail = (f"{rk} known_peak={blk.get('known_peak_bytes', blk.get('live_bytes'))}B"
+                  f"（steady={blk.get('steady_bytes', '?')}）；"
+                  + "; ".join(blk.get("reasons", [])))
+        cap.add(f"memory_{rk}", status_key.get(st, "unknown"), detail,
+                affected_metrics=["M02 加速比", "M06 显存"])
     return blocks
 
 
@@ -594,19 +684,34 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
     moe_u = _moe_union_summary(base_rows)
     if moe_u:
         m["M05_moe_union"] = moe_u
-    # M06 显存：状态传播（oom→OOM；仅标称→unknown 不称 feasible §7.4）
+    # M06 显存：状态传播（oom→OOM；仅标称/峰值不完整→unknown；
+    # 假设预算→feasible 但 support=approximated 且不进实际部署排名）
     for rk, blk in memory.items():
+        if not isinstance(blk, dict) or "status" not in blk:
+            continue
         feas = {"oom": Feasibility.OOM, "unknown": Feasibility.UNKNOWN,
-                "feasible": Feasibility.FEASIBLE}[blk["status"]]
+                "feasible": Feasibility.FEASIBLE,
+                "feasible-conditional": Feasibility.FEASIBLE}[blk["status"]]
+        conditional = blk["status"] == "feasible-conditional"
         m[f"M06_memory_{rk}"] = Metric(
-            value=blk["live_bytes"], unit="B", statistic=Statistic.EXACT,
-            support=Support.SUPPORTED, feasibility=feas,
+            value=blk["known_peak_bytes"], unit="B", statistic=Statistic.EXACT,
+            support=(Support.APPROXIMATED if conditional else Support.SUPPORTED),
+            feasibility=feas,
             formula_ref="v2.moe_routed",
             scope=Scope(role="target" if "target" in rk or "colocated" in rk else "draft",
                         phase="steady-decode", rank=rk),
             evidence_refs=["ev-qwen36-main-config"],
-            reason=None if blk["status"] != "unknown"
-            else "仅标称容量：低于标称不能证明 runtime feasible")
+            reason=("; ".join(blk.get("reasons", [])) or None)
+                if blk["status"] in ("unknown", "oom", "feasible-conditional")
+                else None,
+            assumption_refs=(["假设预算输入（hypothesis）：结论为条件可行，"
+                              "非实测可部署"] if conditional else []))
+        m[f"M06_memory_{rk}_detail"] = {
+            "steady_bytes": blk.get("steady_bytes"),
+            "transient_peak_bytes": blk.get("transient_peak_bytes"),
+            "peak_complete": blk.get("peak_complete"),
+            "unknown_components": blk.get("unknown_components", []),
+            "allocatable_kind": blk.get("allocatable_kind", "unknown")}
     # M11 五类字节（target decode）
     t = totals(base_rows)
     m["M11_bytes_target_decode"] = {
@@ -637,11 +742,13 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
 
 
 def _eligibility(cap: CapabilityReport) -> bool:
-    """比较资格：结构完整 + 无 OOM + 容量非 unknown（§7.2）。"""
+    """比较资格：结构完整 + 无 OOM + 容量非 unknown/条件（§7.2；R03b：
+    假设预算（approximated/feasible-conditional）不进实际部署排名）。"""
     for cid, chk in cap.checks.items():
         if cid == "model_structure_complete" and chk["status"] != "supported":
             return False
-        if cid.startswith("memory_") and chk["status"] in ("unsupported", "unknown"):
+        if cid.startswith("memory_") and chk["status"] in (
+                "unsupported", "unknown", "approximated"):
             return False
     return True
 
@@ -666,7 +773,13 @@ def _assumptions(scenario, plan) -> Dict[str, str]:
         "A4_routing": "MoE 路由按均匀独立假设；期望并集非精确计数",
         "A5_workload": f"负载假设：B={scenario.workload.batch} ctx={scenario.workload.ctx_tokens}"
                        "（可编辑演示默认值，非用户确认）",
-        "A6_budget": "设备容量为标称规格；可分配预算未提供 → feasible 判定 unknown",
+        "A6_budget": "设备容量为标称规格；可分配预算未提供 → feasible 判定 "
+                    "unknown（已知对象下界超标称仍判 OOM）；假设预算只产生"
+                    "条件结论（R03a/b）",
+        "A7_parallel": f"TP{scenario.deployment.target_tp}/EP"
+                       f"{scenario.deployment.target_ep} per-rank 配方 "
+                       "(vLLM @dc74b8cb pin：EP 关 inter/tp 切分，EP 开整专家"
+                       "分置；KV 头 <tp 复制；GDN 头/通道切分)",
     }
     if scenario.cost_profile:
         out["A1_performance"] = (

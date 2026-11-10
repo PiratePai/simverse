@@ -160,12 +160,14 @@ def test_tiny_gqa_decode_totals_hand_derived(cat):
                  + 2 * h * (2 * ffn) + 2 * ffn * h              # gate_up + down
                  + 2 * (4 * h + 2)                              # attn/mlp norm
                  + 2 * h)                                       # 残差加（E09）
-    expect_flops = L * per_layer + 2 * h * V
+    # final norm（model.norm，2026-11-10 补齐缺行）：T·(4h+2) 每模型一次
+    expect_flops = L * per_layer + 2 * h * V + (4 * h + 2)
     assert t["flops"] == expect_flops
     # q/k head-norm 的 scale 权重按 head_dim 共享（HF Qwen3RMSNorm(head_dim)），每层各 1 份
+    # final norm 权重 h（2026-11-10 补齐）；16bit → 2 B/param
     expect_wr = L * ((h * heads * d + 2 * h * kv * d + heads * d * h
                       + h * 2 * ffn + ffn * h) * 2      # 16bit → 2 B/param
-                     + 2 * (2 * h * 2) + 2 * (2 * d * 2)) + h * V * 2
+                     + 2 * (2 * h * 2) + 2 * (2 * d * 2)) + h * V * 2 + 2 * h * 2
     assert t["weight_read"] == expect_wr
     assert t["kv_read"] == L * 100 * (2 * kv * d) * 2
     assert t["kv_write"] == L * 1 * (2 * kv * d) * 2

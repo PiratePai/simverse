@@ -183,6 +183,14 @@
         <select id="sel-tp">
           <option>1</option><option>2</option><option selected>8</option><option>16</option>
         </select></div>
+      <div class="wb-ctrl"><label for="sel-ep">专家并行 EP</label>
+        <select id="sel-ep">
+          <option value="1" selected>关（inter/tp 切分）</option>
+          <option value="tp">开（=TP，整专家分置）</option>
+        </select></div>
+      <div class="wb-ctrl"><label for="inp-budget">可分配预算 GB（假设）</label>
+        <input id="inp-budget" type="number" min="0" step="0.1" placeholder="留空=unknown">
+        </div>
       <div class="wb-ctrl"><label for="sel-draft-dev">草稿设备（DT）</label>
         <select id="sel-draft-dev"></select></div>
       <div class="wb-ctrl"><label for="sel-profile">成本校准 Profile</label>

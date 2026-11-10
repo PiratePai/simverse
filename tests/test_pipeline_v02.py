@@ -146,7 +146,10 @@ def test_tp_validation_rejects_illegal():
     sc = _dflash_sc(deployment={"target_tp": 5})   # 不整除 16 头
     b = run_v2(sc)
     assert b.manifest.status == "failed"
-    assert "TP/EP5" in b.capability["checks"]["tp_valid"]["reason"]
+    # R01：检查项更名 parallel_valid（TP+EP 统一配方判定）
+    chk = b.capability["checks"]["parallel_valid"]
+    assert chk["status"] == "invalid"
+    assert "不整除 Q 头数" in chk["reason"] or "TP5" in chk["reason"]
 
 
 def test_collectives_included_at_tp8_absent_at_tp1():

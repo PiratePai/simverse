@@ -111,6 +111,9 @@
         mode: $('sel-method').value === 'baseline' ? 'baseline' : $('sel-deploy').value,
         target_device: $('sel-target-dev').value,
         target_tp: parseInt($('sel-tp').value, 10),
+        // EP：关闭=inter/tp 切分；开启=整专家分置（必须等于 TP，vLLM 配方）
+        target_ep: ($('sel-ep').value === 'tp')
+          ? parseInt($('sel-tp').value, 10) : 1,
         draft_device: $('sel-draft-dev').value, draft_tp: 1
       },
       workload: {
@@ -126,6 +129,17 @@
       cost_profile: ($('sel-profile') && $('sel-profile').value) || null,
       seed: 0
     };
+    // 预算输入（R03a）：数值输入 → hypothesis 假设预算（只产生条件结论）；
+    // 留空 = unknown（不自动套标称容量）
+    var budgetGB = parseFloat($('inp-budget') && $('inp-budget').value);
+    if (isFinite(budgetGB) && budgetGB > 0) {
+      sc.deployment.budget = {
+        allocatable_bytes: Math.round(budgetGB * 1024 * 1024 * 1024),
+        allocatable_kind: 'hypothesis',
+        allocatable_source: '工作台用户输入（假设预算；非实测）',
+        extra_overhead_bytes: 0, overhead_source: ''
+      };
+    }
     if (over) {
       Object.keys(over).forEach(function (k) {
         if (typeof over[k] === 'object' && typeof sc[k] === 'object')

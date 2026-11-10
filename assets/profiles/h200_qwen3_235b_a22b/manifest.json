@@ -77,7 +77,7 @@
   },
   "reject": {},
   "defer": {
-   "moe.csv:TP8/EP1": "真 128E vllm_fused 数据在册，但新仓 count 的 MoE 行为整模型口径、memory 按 experts//tp——per-rank 分片账本（V04）未统一前实测替换会混尺；待 V04 落地后升级为准入（首选增量路径）",
+   "moe.csv:TP8/EP1": "真 128E vllm_fused 数据在册；G-C11（per-rank 分片账本统一，2026-11-10 A组 R01）已解除工程前置——count/memory/lowering 已按 vLLM 配方统一 (inter/tp 或 E/ep 整专家)。moe.csv 采集配方为 TP8/EP1（inter/tp 切分）与新账本同口径；数据准入（蒸馏+留出验收）属 G-D2 独立验收，本轮未执行",
    "moe.csv:TP1/EP4": "DP4 部署（每卡 32 专家），与 TP1 单卡场景口径不符",
    "linear:TP1:sharded / attention:TP1": "sharded 组 TP1 行为空（campaign 只在 TP2/8 采）且无 TP1 kernel_gap 行；TP1 场景用 30B-tiny set",
    "attention:prefill/true_mixed": "v1 域仅 decode（同 30B-tiny）",

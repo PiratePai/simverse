@@ -50,7 +50,9 @@ def test_manifest_identity_and_admission():
     assert ident["revision"].startswith("8efa6172")
     adm = man["admission"]
     assert "moe.csv:TP8/EP1" in adm["defer"]
-    assert "V04" in adm["defer"]["moe.csv:TP8/EP1"]      # 混尺理由显式
+    # 2026-11-10 A组 R01（G-C11）解除后：defer 理由改为数据准入（G-D2），
+    # 分片账本混尺（V04）不再是阻塞项
+    assert "G-D2" in adm["defer"]["moe.csv:TP8/EP1"]
     assert man["tp_invariant_groups"] == ["emb", "input_layernorm",
                                           "post_attention_layernorm"]
     assert man["domain"]["tensor_parallel"] == [2, 8]
@@ -160,8 +162,12 @@ def test_stage_composition_tp8():
     # MoE 按准入裁决回退（defer），不产生 measured 组
     group_names = {g["group"] for g in cal["groups"]}
     assert not any("moe" in g for g in group_names)
-    assert cal["fallback_ms"] > cal["measured_ms"] * 0.9   # MoE 占主导
-    assert 0 < cal["coverage_time_frac"] < 0.5             # MoE 在域外
+    # R01（2026-11-10）后 MoE 解析行为 per-rank 口径（TP8 inter/tp 切分，
+    # flops/字节 ≈ 整模型/8）：fallback 从 38.30ms 降至 ~4.85ms，不再
+    # "占主导"（旧断言 fallback>0.9×measured 编码的是整模型口径高估）。
+    assert cal["fallback_ms"] > 0
+    assert cal["fallback_ms"] < cal["measured_ms"]          # per-rank 口径
+    assert 0.5 < cal["coverage_time_frac"] < 1.0            # MoE 仍在域外
 
 
 def test_tp2_also_in_domain():

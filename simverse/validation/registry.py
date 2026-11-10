@@ -73,6 +73,24 @@ _PINNED_ASSETS = [
      "model-verse 指定提交（git show 固定）",
      "旧口径数值对账（含已知错误 38.9 等）",
      ["原文含已归档错误（E14），只作历史对照"], False),
+    ("ev-vllm-parallel-recipe", "source-checked",
+     "vLLM TP/EP 并行分片配方（Qwen3.5/3.6 qwen3_5_moe + DFlash 集成）：MoE "
+     "EP 关 inter/tp 切分（fused_moe/config.py L1402）、EP 开整专家分置"
+     "（FusedMoEParallelConfig.make L1157-1288 + expert_map_manager 余数规则）、"
+     "router GateLinear replicated、shared expert TP 切分、attention KV 头 "
+     "kvh<tp 复制（qwen3_next.py L302-315）、GDN in_proj_qkvz/ba/conv 列切与"
+     "状态切分（qwen_gdn_linear_attn.py + mamba_utils state_shape）、词表行切、"
+     "DFlash 草稿同 TP 组并共享 target embed/lm_head 模块对象"
+     "（spec_decode/dflash/utils.py load_dflash_model）",
+     "identity/vllm_qwen35_pin/manifest.json",   # 逐文件 SHA256 在该 manifest
+     "vllm-project/vllm @dc74b8cbbbe3dbb9399fe369757d63defd614cc2（main 2026-11-10 "
+     "经 GitHub raw 网络获取固定；文件级 SHA256 清单见目录内 manifest.json）",
+     "R01 per-rank 分片配方（count/memory/lowering 共用 ParallelPlan）；"
+     "R02a 草稿共享对象身份",
+     ["源码阅读（source-checked），非执行验证；量化/Marlin 特殊分支"
+      "（ba_proj disable_tp 等）未入配方，BF16 路径为准",
+      "tp×ep 独立组合（ep∉{1,tp}）无实现配方，显式拒绝"],
+     False),
     ("ev-h200-tiny-distill", "measured",
      "H200 实测 profile 蒸馏集（Qwen3-30B-A3B-tiny 复制品采集：linear 6 算子 ×387 "
      "token 网格 + decode 注意力 5184 点，CUDA_EVENT median；环境 H200/driver 570.124.06/"

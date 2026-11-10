@@ -3,7 +3,7 @@
 与 [数据缺口清单](data-gaps.md) 分开维护：本页只列**工程实现**缺口（不依赖新数据，
 或先有实现才能消费数据）。每项含：影响面/缺什么/旧仓为何不足/需要什么实现/
 验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
-新增 G-C11）。
+新增 G-C11；A 组轮 G-C11 解除）。
 
 ## G-C1 V4.1 Engram 语义建模（hc 已解除 2026-11-10）⭐P0
 
@@ -99,18 +99,16 @@
   M01_tpot_profile_calibrated 出现）+ 静态接线核对。
 - 浏览器像素级观感仍待人工复核（本会话无图像通道，同前口径）。
 
-## G-C11 per-rank MoE 分片账本统一（V04 扩展；235B MoE 准入前置）⭐P1
+## G-C11 ~~per-rank MoE 分片账本统一（V04 扩展；235B MoE 准入前置）~~ → 已解除（2026-11-10 A组 R01）
 
-- **影响**：count 的 MoE 行（moe_router/moe_routed）为整模型口径且不带 tp 参数，
-  memory 按 experts//tp（EP=tp 假设）——两者互相矛盾，也与 235B 实测的
-  TP8/EP1（inter/tp）配方不一致；MoE 实测替换（G-D2 首选路径）在统一前会混尺。
-- **需要**：moe_rows 带 tp/ep 参数（按显式配方：专家不切+inter/tp 或 experts/ep），
-  count 行、memory 分配、lowering EP 通信三方同配方；TP/EP 守恒断言
-  （Σ per-rank flops/bytes == 整模型）。
-- **验收**：守恒测试 ×配方×tp∈{1,2,8}；235B moe.csv TP8/EP1 蒸馏准入后
-  moe_block 组合独立复算（对齐 loop1/loop2 测试模式）。
-- **当前降级**：MoE 解析整模型口径（TP8 下高估 per-rank 时间）+ 235B moe defer。
-- **优先级**：P1（G-D2 首选路径的工程前置）。
+- 统一配方落地：`simverse/lowering/parallel.py` ParallelPlan（vLLM @dc74b8cb
+  pin）——EP 关 routed inter/tp、EP 开 E//ep(+余数) 整专家、router 复制、
+  shared inter/tp、attention KV 头切/复制、GDN 切分、词表行切；count 行、
+  memory 分配、EP 通信三方同 plan。
+- 验收：守恒测试 ×配方×tp∈{1,2,4,8} + EP 守恒 + 复制对象不求和 + 非法组合
+  拒绝（tests/test_parallel_sharding.py 19 项）；235B manifest defer 理由已
+  改指 G-D2 数据准入（分片混尺不再是阻塞）。
+- 残留：G-D2 的 moe 蒸馏准入与留出验收（数据侧，独立进行）。
 
 ## G-C9 小形状地板解析模型（暂缓；判定实验已明确）
 

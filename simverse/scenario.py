@@ -2,8 +2,12 @@
 
 与 v0.1 ScenarioSpec 的差异：
   * 负载/接受率作为显式假设对象（source_kind=hypothesis 登记来源）；
-  * 部署显式角色化（target/draft 设备与 TP、链路），不再用 mode 字符串隐含；
-  * 精度配方独立（storage/compute 语义在 cost 路由，不在此冒充）。
+  * 部署显式角色化（target/draft 设备与 TP/EP、链路），不再用 mode 字符串隐含；
+  * 精度配方独立（storage/compute 语义在 cost 路由，不在此冒充）；
+  * R01/R03a（2026-11-10）：target_ep 显式字段（1=TP 切 inter；=tp=EP 整
+    专家；其余组合无实现配方，validate 拒绝）；budget 预算输入契约
+    （nominal/allocatable/额外开销分列，缺省 unknown，区分 measured 与
+    hypothesis——假设预算只产生条件结论）。
 """
 from __future__ import annotations
 
@@ -13,6 +17,8 @@ from typing import Any, Dict, Optional
 from .contracts import RngScheme, digest
 
 DEPLOY_MODES = ("baseline", "colocated", "dt_serial", "dt_pipeline_sim")
+
+BUDGET_KINDS = ("measured", "hypothesis", "unknown")
 
 
 @dataclass
@@ -26,16 +32,69 @@ class WorkloadHypothesis:
 
 
 @dataclass
+class BudgetInput:
+    """设备组预算输入（R03a 契约；缺省=unknown，不自动套标称容量）。
+
+    allocatable_bytes：该设备组上模型对象（权重+KV+状态+临时缓冲）可用的
+    总额（gross 语义：运行时额外占用从其中扣除，不与对象重复扣减）。
+    allocatable_kind：measured 需非空 allocatable_source（环境/方法）；
+    hypothesis 为用户研究假设（判定只到 feasible-conditional）。
+    extra_overhead_bytes：需额外扣除的运行时开销（框架预留等），带来源。
+    """
+    allocatable_bytes: Optional[int] = None
+    allocatable_kind: str = "unknown"
+    allocatable_source: str = ""
+    extra_overhead_bytes: int = 0
+    overhead_source: str = ""
+    note: str = ""
+
+    def validate(self) -> "BudgetInput":
+        if self.allocatable_kind not in BUDGET_KINDS:
+            raise ValueError(
+                f"allocatable_kind 必须 ∈ {BUDGET_KINDS}，非 {self.allocatable_kind}")
+        if self.allocatable_bytes is not None:
+            if not isinstance(self.allocatable_bytes, int) \
+                    or isinstance(self.allocatable_bytes, bool) \
+                    or self.allocatable_bytes <= 0:
+                raise ValueError(
+                    f"allocatable_bytes 必须为正整数（B），非 {self.allocatable_bytes}")
+            if self.allocatable_kind == "unknown":
+                raise ValueError(
+                    "提供了 allocatable_bytes 必须声明 kind（measured 需来源；"
+                    "假设输入用 hypothesis）")
+            if self.allocatable_kind == "measured" and not self.allocatable_source:
+                raise ValueError(
+                    "measured 预算必须带 allocatable_source（采集方法/环境；"
+                    "准则 §3.2 同型）")
+        if self.allocatable_kind != "unknown" and self.allocatable_bytes is None:
+            raise ValueError(f"kind={self.allocatable_kind} 但无 allocatable_bytes")
+        if not isinstance(self.extra_overhead_bytes, int) \
+                or isinstance(self.extra_overhead_bytes, bool) \
+                or self.extra_overhead_bytes < 0:
+            raise ValueError(f"extra_overhead_bytes 必须为非负整数（B），非 "
+                             f"{self.extra_overhead_bytes}")
+        if self.extra_overhead_bytes > 0 and not self.overhead_source:
+            raise ValueError("extra_overhead_bytes>0 必须带 overhead_source")
+        return self
+
+    def to_json(self) -> dict:
+        return dict(self.__dict__)
+
+
+@dataclass
 class DeploymentSpec:
     mode: str = "colocated"                # baseline | colocated | dt_serial
     target_device: str = "h100_sxm"
     target_tp: int = 8
+    target_ep: int = 1                     # R01：1（TP 切 inter）或 =tp（EP 整专家）
     draft_device: str = "l40"              # dt_serial 下草稿独立设备
-    draft_tp: int = 1
+    draft_tp: int = 1                      # dt_serial：独立组 TP；colocated 草稿同 target 组
     link: str = "pcie5"
-    draft_on_target_group: bool = True     # colocated：草稿占目标组 1 rank TP1
+    draft_on_target_group: bool = True     # colocated：草稿在目标组（与 target 同 TP，vLLM 配方）
     pipeline_microbatches: int = 2         # dt_pipeline_sim：微批数
     pipeline_rounds: int = 6               # 有限 cohort（warmup/drain 可见）
+    budget: Optional[BudgetInput] = None            # target/colocated 组预算（R03a）
+    draft_budget: Optional[BudgetInput] = None      # dt_serial 草稿组预算
 
 
 @dataclass
@@ -63,7 +122,7 @@ class ScenarioV2:
 
     def __post_init__(self) -> None:
         if isinstance(self.deployment, dict):
-            self.deployment = DeploymentSpec(**self.deployment)
+            self.deployment = _deploy_from(self.deployment)
         if isinstance(self.workload, dict):
             self.workload = WorkloadHypothesis(**self.workload)
 
@@ -78,6 +137,20 @@ class ScenarioV2:
             raise ValueError("k ∈ [1,32]")
         if self.workload.batch < 1 or self.workload.ctx_tokens < 1:
             raise ValueError("batch/ctx 必须为正")
+        dep = self.deployment
+        if dep.target_tp < 1 or dep.target_ep < 1 or dep.draft_tp < 1:
+            raise ValueError("tp/ep 必须为正整数")
+        if dep.target_ep not in (1, dep.target_tp):
+            raise ValueError(
+                f"target_ep={dep.target_ep} 无实现配方：单引擎副本内只能取 1 或 "
+                f"等于 target_tp={dep.target_tp}（vLLM FusedMoEParallelConfig pin）")
+        if dep.mode == "colocated" and dep.draft_tp != 1 and not dep.draft_on_target_group:
+            raise ValueError("colocated 草稿与 target 同 TP 组（vLLM 配方）；"
+                             "draft_tp 仅在 dt_serial 独立组语义下有效")
+        if dep.budget is not None:
+            dep.budget.validate()
+        if dep.draft_budget is not None:
+            dep.draft_budget.validate()
         for key, bits in {**self.quant, **self.draft_quant}.items():
             if key != "state" and bits not in (4, 8, 16):
                 raise ValueError(f"精度 {key}={bits} 不在 4/8/16")
@@ -101,9 +174,18 @@ class ScenarioV2:
         if data.get("schema_version") not in (None, "0.2"):
             raise ValueError(f"不支持 schema_version {data.get('schema_version')}")
         known = {f: data[f] for f in ScenarioV2.__dataclass_fields__ if f in data}
-        if "deployment" in known and isinstance(known["deployment"], dict):
-            known["deployment"] = DeploymentSpec(**known["deployment"])
+        if "deployment" in known:
+            known["deployment"] = (known["deployment"] if not isinstance(
+                known["deployment"], dict) else _deploy_from(known["deployment"]))
         if "workload" in known and isinstance(known["workload"], dict):
             known["workload"] = WorkloadHypothesis(**known["workload"])
         sc = ScenarioV2(**known)
         return sc.validate()
+
+
+def _deploy_from(d: dict) -> DeploymentSpec:
+    if "budget" in d and isinstance(d["budget"], dict):
+        d = {**d, "budget": BudgetInput(**d["budget"]).validate()}
+    if "draft_budget" in d and isinstance(d["draft_budget"], dict):
+        d = {**d, "draft_budget": BudgetInput(**d["draft_budget"]).validate()}
+    return DeploymentSpec(**d)

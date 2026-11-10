@@ -30,8 +30,9 @@
     CSV 无环境元数据列（gpu/driver/torch/cuda），违反准则 §3.2（G4 同型）；
     补环境记录后可复审。
   - H200 235B moe.csv TP8/EP1（真 128E vllm_fused，451 token 网格）**defer 为
-    首选增量路径**：数据合格且环境齐备，但需先完成 G-C11（per-rank MoE 分片
-    账本统一）才能不与整模型解析混尺。
+    首选增量路径**：数据合格且环境齐备；G-C11（per-rank 分片账本统一）已于
+    2026-11-10 A组 R01 解除，moe.csv 采集配方（TP8/EP1 inter/tp 切分）与
+    新账本同口径——剩余为 G-D2 自身的蒸馏+留出验收。
   - TP1/EP4 行为 DP4 部署口径，与单卡场景不符（不采）。
 - **需要**：G-C11 工程落地（先行）→ 235B moe 蒸馏准入；或对真 30B-A3B 在 H200
   补测 moe（tokens 1..32768、EP1、TP1/8、BF16+FP8，字段沿用 pi-viewer 契约，

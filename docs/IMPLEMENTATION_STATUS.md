@@ -1,8 +1,8 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-10（校准闭环复审修复 + 235B 第二闭环 + V4.1 hc 建模轮）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-10（A 组轮：TP/EP per-rank 配方 + 同卡对象账本 + 预算判定链）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（本地，无远端——Q3 私有远端信息待补）；包版本 0.2.0（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（当前 132 passed，无警告输出）；
+运行：`py -3.12 -m pytest tests -q`（当前 176 passed，无警告输出）；
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /，v0.1 简表 /legacy）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G7 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -171,6 +171,44 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 - 远端：Q3 平台/账号/地址待补；未创建/推送任何远端。
 - v0.1 模块退役：待 M5 三方对账后。
 
+### 2026-11-10 A 组轮：Qwen3.6+DFlash TP/EP 分片与同卡可部署性（R01–R03b）
+
+报告入口：[docs/validation/agroup-tp-ep-colocated-20261110.md]
+(validation/agroup-tp-ep-colocated-20261110.md)（前后重放归因/支持矩阵/限制）。
+
+- **R01 统一配方**：新增 `simverse/lowering/parallel.py`（ParallelPlan；
+  vLLM @dc74b8cb pin 入册 assets/identity/vllm_qwen35_pin/，16 文件逐
+  SHA256，证据 ev-vllm-parallel-recipe）。count/moe、count/work（GQA/GDN/
+  head per-rank）、count/draft（同 TP 组草稿+补 q/k norm/rope/hidden_norm/
+  final norm 缺行）、lowering/memory、lowering/sharding（按层通信：EP MoE
+  层 dispatch/combine 替代 mlp allreduce）、pipeline 六处消费同一 plan。
+  TP 集合通信漏计修复（整模型 2 次 → 每层 2 次）。场景字段 target_ep
+  （∈{1,tp}，其余拒绝）入运行身份。source_map 新增 3 条（sm-vllm-*）。
+- **R02a/b 同卡账本**：物理 allocation 身份 + shared_identity + consumer
+  引用；草稿共享 target 词表行切 embed/lm_head（零字节引用，修复前幻影
+  副本≈1.017GB+去重失配）；GDN/草稿 KV/attention 权重 per-rank（补乘输入
+  宽 h）；草稿批=目标批；生命周期分列（resident/per-request/cross-round/
+  phase:draft|verify 串行取 max）+ unknown_components（workspace/graph/
+  NCCL 池，不填 0）→ peak_complete 标志；per-rank r0..r{tp-1} + 最坏 rank
+  报告（EP 余数 rank 差异显式）。
+- **R03a/b 预算与判定**：DeploymentSpec.target_ep/budget(BudgetInput:
+  allocatable_bytes/kind(measured|hypothesis)/source/extra_overhead，
+  gross 语义) ；DeviceBudget 分层；RankMemory.peak_vs_budget 四态
+  （unknown/oom/feasible/feasible-conditional；已知下界>标称即 OOM）；
+  compare/_eligibility 排除 conditional；M06 携带 known_peak/steady/完整性。
+- **UI**：工作台 EP 选择 + 预算输入（hypothesis）；浏览器实测（EP 生效
+  T_round 64.6↔112.6ms 可区分；预算进链路以原因文本证实；截图
+  docs/evidence/workbench_ep_budget_run.png）。
+- **数值归因**（默认场景前后）：TPOT 1.6874→31.70 / 基线 3.4704→112.21
+  （集合通信按层计费修复主导，pcie5 假设延迟 1.4ms×80 次；NVLink 规格
+  属 G-D8 未虚构）；显存 5,680,423,680（口径混乱单值）→ per-rank steady
+  2,827,423,168 + 临时峰值 2,135,746（明细见报告 §3）。235B TP8 校准
+  fallback 38.30→4.85ms（MoE per-rank 口径，断言随归因更新；defer 理由
+  改指 G-D2）。
+- 测试 132→176（parallel_sharding 19 + colocated_memory 11 +
+  budget_feasibility 14 + UI/场景接线 2；既有全保，tiny oracle 补 final
+  norm 项、tp 校验断言随检查项更名——均逐项归因）。
+
 ### 2026-11-09 数值可信度轮
 - [AGENTS.md](../AGENTS.md)（合入入口）+ [docs/MERGE_CRITERIA.md](MERGE_CRITERIA.md)
   （准则规范）+ G1–G7 自动门禁（tests/test_merge_gate.py）。
@@ -204,7 +242,7 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 | V01 身份与协议 | 通过 | test_negative_v02（digest 全长/大整数/NaN/null+reason）|
 | V02 结构与 forward | 部分 | 层序/覆盖/源码 pin+分支映射（source_map）；小尺寸 CPU 执行 trace 未做（无 torch 环境，登记缺口）|
 | V03 独立数学 oracle | 通过 | golden/oracles_v02 + test_model_ir/test_negative |
-| V04 lowering 与守恒 | 部分 | TP 校验/collectives 入账/容量对象；TP/EP 分片总量守恒断言未做全 |
+| V04 lowering 与守恒 | 大部分 | per-rank 统一配方（A组 R01）+ 跨 rank 守恒/复制对象不求和断言（test_parallel_sharding）；EP all2all/按层通信配方 |
 | V05 方法、协议与状态 | 部分 | 接受律/端点/未知传播/DFlash 计划绑定；事件级 transition trace 未做（M3）|
 | V06 显存生命周期 | 部分 | 静态+每请求对象、同卡去重；生命周期交错峰值未做（M3）|
 | V07 事件因果与资源 | 大部分 | 验证器六类检查+负例；资源调度核+两微批流水已接；单请求超前未做 |
@@ -242,8 +280,10 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 - v0.1 存档重放：`py -3.12 -m simverse.cli run`（legacy）
 - 证据产物（已入册 docs/evidence/）：workbench_desktop_run.png、
   workbench_mobile_run.png、run_v2_qwen36_dflash.json、ops_v2.csv、
-  trace_v2.csv、report_v2.html。
-- 下一工作项：G-C11 per-rank MoE 分片账本（→ G-D2 首选路径 235B moe 准入）；
+  trace_v2.csv、report_v2.html（历史轮）；A 组轮：
+  run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
+  trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
+- 下一工作项：G-D2 235B moe 蒸馏准入（G-C11 已解除，账本口径就绪）；
   G-C1 Engram 源 pin（等上游评审包）；G-D4/G-C2 prefill/verify 形状域；
   G-D6/G-C5 KERNEL_ONLY 双口径；G-D1/G-C3 DFlash 实测与集成核对；
   G-C4 单请求超前事件 → M17；V09b 三方对账。

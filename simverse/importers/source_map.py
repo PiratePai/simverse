@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 VLLM_PIN = "vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5"
+VLLM_PARALLEL_PIN = "vllm@dc74b8cbbbe3dbb9399fe369757d63defd614cc2"
 HF_TF_PIN = "huggingface/transformers@b6401d6605d16620e0f95b54fb2906f92de7e33f"
 DFLASH_PIN = "z-lab/dflash@07ebd93db9f472af339b644bb70221ad8428328a"
 
@@ -132,11 +133,73 @@ ENTRIES: List[SourceMapEntry] = [
         input_domain="全部草稿层（5 sliding + 1 full）",
         both_sides_covered=True,
         note="计数按 ctx+q_len 两段 KV；fc 投影 8·h→h 入账"),
+    SourceMapEntry(
+        entry_id="sm-vllm-moe-tp-ep-recipe",
+        model_or_method="qwen3_5_moe/qwen3_moe MoE 并行",
+        semantic="EP 关：routed 专家 inter/tp 切分（每 rank 全 E）；"
+                 "EP 开（ep=tp）：每 rank E//ep(+余数) 整专家；router "
+                 "GateLinear=ReplicatedLinear；shared expert 全局 TP 切分",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/model_executor/layers/fused_moe/config.py:1402 "
+                        "(intermediate_size_per_partition = inter // tp)、"
+                        "config.py:1257-1288 (FusedMoEParallelConfig.make："
+                        "use_ep → tp→1/ep→world)、router/gate_linear.py:66 "
+                        "(GateLinear(ReplicatedLinear))、expert_map_manager.py:"
+                        "62-77（余数 base+1）、qwen3_next.py:139-231 "
+                        "(Qwen3NextSparseMoeBlock)",
+        branch_predicate="enable_expert_parallel 且 world>1 → EP；否则 TP 切 inter",
+        thresholds="ep ∈ {1} 或 ep == tp；inter % tp == 0（EP 关）；"
+                   "shared_inter % tp == 0；tp <= E",
+        input_domain="Qwen3.6-35B-A3B（256E inter512 shared512）TP{1,2,4,8,16}",
+        both_sides_covered=True,
+        uncovered_domain=["量化 Marlin ba_proj disable_tp 分支未入配方（BF16 路径）",
+                          "EPLB 冗余专家（n_redundant_experts）未建模"],
+        note="R01 统一 per-rank 配方：count/moe.py、lowering/memory.py、"
+             "lowering/sharding.py 共用 ParallelPlan（G-C11 解除）"),
+    SourceMapEntry(
+        entry_id="sm-vllm-attn-gdn-shard",
+        model_or_method="qwen3_5_moe attention/GDN 分片",
+        semantic="full attn：heads/tp；kvh>=tp 切 kvh/tp、kvh<tp 复制全量；"
+                 "o_proj 行切。GDN：in_proj_qkvz((2k+2v)/tp)、in_proj_ba"
+                 "(2nv/tp)、conv1d(conv_dim/tp)、out_proj 行切；状态 "
+                 "temporal=nv/tp×hk×hv、conv=conv_dim/tp×(kernel−1)",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/model_executor/models/qwen3_next.py:302-315 "
+                        "(Qwen3NextAttention 头切分/复制断言)、"
+                        "layers/mamba/gdn/qwen_gdn_linear_attn.py:753-838 "
+                        "(MergedColumnParallelLinear/RowParallelLinear)、"
+                        "layers/mamba/mamba_utils.py:280-301 "
+                        "(gated_delta_net_state_shape)",
+        branch_predicate="kvh >= tp → assert kvh % tp == 0 切分；"
+                         "else assert tp % kvh == 0 复制",
+        input_domain="Qwen3.6（heads16/kvh2/GDN 16k32v）TP{1,2,4,8}",
+        both_sides_covered=True,
+        note="KV 复制=每 rank 同字节（不随 tp 缩减）；计数/容量同口径"),
+    SourceMapEntry(
+        entry_id="sm-vllm-dflash-colocated-sharing",
+        model_or_method="dflash v1 同卡共享",
+        semantic="草稿与 target 同 TP 组运行（DFlashQwen3Attention 用全局 "
+                 "TP）；embed_tokens/lm_head 直接替换为 target 同一模块对象"
+                 "（词表行切，零额外驻留）；fc=ReplicatedLinear 全宽复制",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/v1/worker/gpu/spec_decode/dflash/utils.py:"
+                        "load_dflash_model L16-70（maybe_share_target_embed +"
+                        " dflash_model.lm_head = target_lm_head）、"
+                        "eagle/utils.py:_should_share/maybe_share_target_embed、"
+                        "models/qwen3_dflash.py:DFlashQwen3Attention L191-204",
+        branch_predicate="draft 无 has_own_lm_head/has_own_embed_tokens 且与 "
+                         "target 权重相等 → 共享对象；否则草稿自持副本",
+        input_domain="z-lab/Qwen3.6-35B-A3B-DFlash（vocab=target 248320）",
+        both_sides_covered=True,
+        uncovered_domain=["TP1 草稿挂 TP>1 组的服务栈配方未见（拒绝不支持）",
+                          "workspace/graph/NCCL 池尺寸未 pin（峰值缺口）"],
+        note="R02a：colocated 账本草稿 embed/lm_head 零字节引用 + consumer "
+             "登记；修复前幻影副本 ~1GB 与去重键失配双重计费"),
 ]
 
 
 def source_map_json() -> dict:
     return {"schema_version": "0.2",
-            "pins": {"vllm": VLLM_PIN, "hf_transformers": HF_TF_PIN,
-                     "dflash": DFLASH_PIN},
+            "pins": {"vllm": VLLM_PIN, "vllm_parallel": VLLM_PARALLEL_PIN,
+                     "hf_transformers": HF_TF_PIN, "dflash": DFLASH_PIN},
             "entries": [e.to_json() for e in ENTRIES]}

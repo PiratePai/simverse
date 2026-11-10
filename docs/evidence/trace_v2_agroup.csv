@@ -1,0 +1,6 @@
+event_id,round_id,role,stage,t_ms,start_ms,depends_on,label
+r0.draft_block,r0,draft,draft_block,0.030129384773733153,0.0,[],草稿单次前向（ctx K/V + 块噪声 → 并行候选；用目标 lm_head）
+r0.d2t,r0,link,d2t,0.0,0.030129384773733153,['r0.draft_block'],候选 ids(+q) D→T
+r0.verify_block,r0,target,verify_block,112.58749753217234,0.030129384773733153,['r0.d2t'],目标块验证前向（块内因果）
+r0.commit_rewind,r0,target,commit_rewind,0.0,112.61762691694607,['r0.verify_block'],逐位拒绝→提交 A+1；KV crop 回退（浪费 verify_size−produced 行）
+r0.hidden_extract,r0,target,hidden_extract,0.0,112.61762691694607,['r0.commit_rewind'],target_hidden 取 produced 前缀（8 层拼接，offset+1）
