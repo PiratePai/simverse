@@ -281,12 +281,14 @@ def test_collective_recipe_by_layer():
     cols = model_collectives(m, p1, 2048, 1.0, 1, LINK, moe_top_k=8)
     kinds = [c.kind for c in cols]
     assert kinds.count("allreduce") == 80          # 40 层 × 2
+    assert kinds.count("logits_gather") == 1       # lm_head 词表分片 gather（层外）
     p8 = validate_parallel(m, 8, 8)
     cols8 = model_collectives(m, p8, 2048, 1.0, 1, LINK, moe_top_k=8)
     kinds8 = [c.kind for c in cols8]
     assert kinds8.count("allreduce") == 40         # 仅 attn 段
     assert kinds8.count("ep_dispatch") == 40
     assert kinds8.count("ep_combine") == 40
+    assert kinds8.count("logits_gather") == 1
     # EP dispatch 期望字节独立复算：E[ranks]=8·(1−(1−1/8)^8)≈6.14；
     # per-rank = T·E[ranks]·msg/8
     exp_ranks = 8 * (1 - (1 - 1 / 8) ** 8)
@@ -295,6 +297,53 @@ def test_collective_recipe_by_layer():
     # tp1 无通信
     assert model_collectives(m, validate_parallel(m, 1, 1), 2048, 1.0, 1,
                              LINK) == []
+
+
+def test_logits_gather_hand_oracle():
+    """lm_head logits gather 独立手算（vLLM logits_processor.py pin
+    L185-198：lm_head.tp_size>1 → 每次 lm_head 调用 gather 一次）。
+
+    每 rank 线上字节上界 = (tp−1)/tp × T×V×act；TP1 无此通信。
+    2026-11-10 二轮审计补漏：此前 draft.py 注释声称"另计"但未实现。
+    """
+    from simverse.lowering import logits_gather
+    m = _qwen36()
+    p8 = validate_parallel(m, 8, 1)
+    cols = model_collectives(m, p8, 2048, 1.0, 16, LINK, moe_top_k=8,
+                             lm_head_tokens=15)
+    g = next(c for c in cols if c.kind == "logits_gather")
+    assert g.bytes_on_wire == int(7 / 8 * 15 * m.vocab * 1.0)
+    # 默认 lm_head_tokens = tokens（decode/verify 全行经 lm_head）
+    cols_def = model_collectives(m, p8, 2048, 1.0, 16, LINK, moe_top_k=8)
+    g_def = next(c for c in cols_def if c.kind == "logits_gather")
+    assert g_def.bytes_on_wire == int(7 / 8 * 16 * m.vocab * 1.0)
+    # TP1：词表分片即全量，无 gather
+    assert logits_gather(15, m.vocab, 1, 1.0, LINK).bytes_on_wire == 0
+    # 时间模型：单向环 (tp−1) 段延迟 + 传输
+    one = logits_gather(15, m.vocab, 8, 1.0, LINK)
+    assert one.t_ms == pytest.approx(
+        int(7 / 8 * 15 * m.vocab) / LINK.bw * 1e3 + 7 * LINK.fixed_ms)
+
+
+def test_draft_second_read_traffic():
+    """草稿二次读流量独立手算（dflash model.py L260/L384-387 pin）：
+
+    draft_lm_head：共享对象但每轮独立 GEMM → weight_read = h×(V/tp)×b_w
+    （修复前 0）；ctx_kv_proj：ctx 行第二次过 k/v_proj → weight_read =
+    2×h×kvh_rank×d×b_w（修复前 0）。
+    """
+    from simverse.count.draft import dflash_round_rows
+    m = _qwen36()
+    draft = _draft()
+    rows = dflash_round_rows("draft_block", draft, m.vocab, 3.0, 512, Q8,
+                             1.0, tp=8, batch=1, ctx_kv_path="fused_raw")
+    lm = next(r for r in rows if r.op == "draft_lm_head")
+    assert lm.weight_read == 2048 * (m.vocab // 8) * 1
+    assert lm.weight_capacity == 0        # 容量归 target 物理对象（账本去重）
+    ctx = [r for r in rows if r.op == "ctx_kv_proj"]
+    assert len(ctx) == 6
+    for r in ctx:
+        assert r.weight_read == 2 * 2048 * (8 // 8) * 128 * 1
 
 
 def test_plan_recipe_dispatch():

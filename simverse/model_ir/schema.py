@@ -209,6 +209,7 @@ class DraftIR:
     block_size: int
     mask_token_id: Optional[int]
     source: SourceIdentity
+    dtype_hint: str = ""                # config 声明 dtype（默认精度线索，非 recipe）
     attention_family: str = "gqa"
     coverage: Dict[str, Dict[str, str]] = field(default_factory=dict)
     gaps: List[str] = field(default_factory=list)
@@ -239,6 +240,7 @@ class DraftIR:
             "fc_in": self.fc_in, "block_size": self.block_size,
             "mask_token_id": self.mask_token_id,
             "source": self.source.to_json(),
+            "dtype_hint": self.dtype_hint,
             "coverage": self.coverage, "gaps": list(self.gaps),
             "evidence": self.evidence.to_json(),
             "evidence_refs": list(self.evidence_refs),

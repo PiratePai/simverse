@@ -596,10 +596,21 @@ def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id:
             moe=None, dense_inter=config.get("intermediate_size")))
     coverage, gaps = _coverage("dflash", config, full_config=full_config,
                                 text_prefix=text_prefix)
+    # dtype 仍是元数据（不进层图/结构计数），但 k_norm stack 的容量要用它：
+    # RMSNorm 参数在模型初始化 dtype 下创建（pinned layernorm/base_loader），
+    # 与 draft_quant.dense_w 分离。这里显式登记消费方，避免“metadata-only”
+    # 被误读成完全无人消费。
+    for key in ("dtype", "torch_dtype"):
+        if key in coverage:
+            coverage[key] = {
+                "status": "metadata-only", "consumer": "identity+memory",
+                "note": "模型参数 dtype 线索；DFlash k_norm stack 容量使用"
+                        "（不进结构计数，不冒充已执行/已部署）"}
     return DraftIR(
         id=model_id, label=label, layers=layers, hidden=h, vocab=v,
         uses_target_embeddings=True, uses_target_lm_head=True,
         target_layer_ids=target_layer_ids, fc_in=len(target_layer_ids) * h,
         block_size=int(fc.get("block_size", 16)),
         mask_token_id=fc.get("mask_token_id"), source=source,
+        dtype_hint=str(config.get("dtype") or config.get("torch_dtype") or ""),
         coverage=coverage, gaps=gaps)

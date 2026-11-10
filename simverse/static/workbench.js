@@ -133,6 +133,9 @@
       // 独立核对，不匹配即回退并披露原因——不把“profile 需要 BF16”转成输入。
       quant: QUANT_PRESETS[$('sel-prec') ? $('sel-prec').value : 'w8a8_fp4e'],
       draft_quant: { dense_w: 8, expert_w: 8, act: 8, kv: 8, state: 32 },
+      // 显式实现路径（活跃草稿无 quantization_config → raw 融合副本）；
+      // dense_w 只是计价位宽，不决定该分支。
+      draft_ctx_kv_path: 'fused_raw',
       cost_profile: ($('sel-profile') && $('sel-profile').value) || null,
       seed: 0
     };

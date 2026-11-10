@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
 from .contracts import RngScheme, digest
+from .draft_quant import FUSED_RAW, UNKNOWN, normalize_ctx_kv_path
 
 DEPLOY_MODES = ("baseline", "colocated", "dt_serial", "dt_pipeline_sim")
 
@@ -116,6 +117,11 @@ class ScenarioV2:
     draft_quant: Dict[str, int] = field(
         default_factory=lambda: {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
                                  "state": 32})
+    # DFlash ctx-KV 的执行路径（显式配方；dense_w 只是计价位宽，不决定分支）。
+    # 默认 fused_raw 对应本仓活跃草稿 config 无 quantization_config + GPU
+    # UnquantizedLinearMethod（pinned qwen3_dflash.py L108-113），不是从
+    # dense_w=8 推出来的；量化/回退场景必须显式覆盖。
+    draft_ctx_kv_path: str = FUSED_RAW
     cost_profile: Optional[str] = None   # profile 集 id（如 h200-qwen3-30b-a3b-tiny-op-v1）
     seed: int = 0
     notes: str = ""
@@ -154,6 +160,22 @@ class ScenarioV2:
         for key, bits in {**self.quant, **self.draft_quant}.items():
             if key != "state" and bits not in (4, 8, 16):
                 raise ValueError(f"精度 {key}={bits} 不在 4/8/16")
+        path = normalize_ctx_kv_path(self.draft_ctx_kv_path)
+        if path == UNKNOWN:
+            raise ValueError(
+                "draft_ctx_kv_path=unknown：ctx-KV 实现路径必须有证据，"
+                "不能由 dense_w 推断；请显式指定 fused_raw/"
+                "mxfp8_context_proj/per_layer_fallback")
+        # 一致性护栏（不是用位宽选分支）：raw 融合副本要求未量化权重；
+        # 4bit 计价档与 fused_raw 矛盾，必须显式改为 per_layer_fallback。
+        if path == FUSED_RAW and (self.draft_quant or {}).get("dense_w", 16) < 8:
+            raise ValueError(
+                f"draft_ctx_kv_path=fused_raw 与 draft_quant.dense_w="
+                f"{(self.draft_quant or {}).get('dense_w')} 矛盾：raw 路径要求 "
+                "UnquantizedLinearMethod；量化回退请显式设置 "
+                "draft_ctx_kv_path=per_layer_fallback（或 MXFP8 用 "
+                "mxfp8_context_proj）")
+        self.draft_ctx_kv_path = path
         return self
 
     def rng(self) -> RngScheme:

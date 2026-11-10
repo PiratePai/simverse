@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from .. import formula_registry as FR
+from ..draft_quant import (MXFP8_CONTEXT_PROJ, PER_LAYER_FALLBACK,
+                           path_note, require_ctx_kv_path)
 from ..model_ir.schema import DraftIR, ModelIR
 from .work import (OpRow, _norm_row, _rope_row, build_model_work, causal_pairs,
                    totals)
@@ -18,7 +20,7 @@ from .work import (OpRow, _norm_row, _rope_row, build_model_work, causal_pairs,
 def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                       e_produced: float, start_ctx: int, quant: dict,
                       target_quant_act: float, tp: int = 1,
-                      batch: int = 1) -> List[OpRow]:
+                      batch: int = 1, ctx_kv_path: str = "unknown") -> List[OpRow]:
     """DFlash 每轮草稿前向账本（**per-rank、整批口径**）。
 
     e_produced：**每序列**上轮提交 token 数期望；batch=B 时所有 token 维
@@ -27,7 +29,10 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
     tp：草稿与 target 同 TP 组运行（vLLM load_dflash_model pin，见
     lowering/parallel.py）；q/o 投影与 MLP 按 tp 切分，k/v 按 KV 头规则
     切分或复制，lm_head 读 target 的 V/tp 分片（logits 由集合通信聚合）。
+    ctx_kv_path：ctx 行 K/V 的**实现路径**（draft_quant.py 枚举）；必须是
+    显式配方，dense_w 仅是计价位宽，不据此选分支。
     """
+    path = require_ctx_kv_path(ctx_kv_path)
     B = batch
     produced = B * e_produced
     h = draft.hidden
@@ -99,16 +104,45 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
             formula=FR.F_ATTN_CORE if not win else FR.F_SWA_PAIRS,
             shape=f"B={B} pairs={pairs} rows={read_rows} win={win} "
                   f"heads(卡上)={heads_c}"))
-        # ctx K/V（target_hidden 投影，每轮 produced 行；权重与草稿 k/v_proj
-        # 同一分片对象，无额外驻留）
+        # ctx K/V（target_hidden 投影，每轮 produced 行；与草稿块 token 的
+        # qkv 投影是**两次独立 GEMM**）。vLLM pinned 三分支（qwen3_dflash.py
+        # L679-697）的执行口径不同，必须由显式 ctx_kv_path 选择：
+        #   fused_raw      → 全层 K/V 行融合副本，一次 GEMM 只读 K/V 行；
+        #   mxfp8_context  → 独立 ReplicatedLinear 只装 K/V 行（量化打包）；
+        #   per_layer_fallback → 逐层执行**完整** qkv_proj（含 Q）再切 Q，
+        #                        故每层 FLOPs/权重读都含 Q 行。
+        # 2026-11-10 二轮审计补漏：原 weight_read=0；本轮修正回退路径只计
+        # K/V 的错误（dense_w 不能决定分支）。
+        q_size = heads_c * d
+        kv_size = kvh * d
+        if path == PER_LAYER_FALLBACK:
+            proj_out = q_size + 2 * kv_size
+            ctx_flops = int(2 * produced * h * proj_out)
+            ctx_weight = int(proj_out * h * b_w)
+            ctx_note = (f"逐层完整 qkv_proj 输出 {proj_out}=Q{q_size}+2×KV"
+                        f"{kv_size} 后切 Q；权重读含 Q 行")
+        elif path == MXFP8_CONTEXT_PROJ:
+            proj_out = 2 * kv_size
+            ctx_flops = int(2 * produced * h * proj_out)
+            # 独立 MXFP8 投影只执行 K/V 行；打包权重按 1B/elem 下界计，
+            # block-scale 字节无 pin 证据 → 由 memory/能力层传播 unknown。
+            ctx_weight = int(proj_out * h * 1.0)
+            ctx_note = ("MXFP8 独立 _context_kv_proj 仅 K/V 行；"
+                        "权重读=packed 8bit 下界（block-scale 未入 pin）")
+        else:  # FUSED_RAW
+            proj_out = 2 * kv_size
+            ctx_flops = int(2 * produced * h * proj_out)
+            ctx_weight = int(proj_out * h * b_w)
+            ctx_note = "全层 _fused_kv_weight 融合 GEMM，仅 K/V 行"
         rows.append(OpRow(stage, li, "ctx_kv_proj",
-                          flops=int(2 * produced * h * 2 * kvh * d),
-                          weight_read=0, statistic="expectation",
+                          flops=ctx_flops,
+                          weight_read=ctx_weight,
+                          statistic="expectation",
                           act_read=int(produced * h * b_a),
                           kv_write=int(produced * kv_elems * b_kv),
                           formula=FR.F_GEMM,
                           shape=f"B={B}×produced={produced:.2f} 行 "
-                                "k/v_ctx = k/v_proj(target_hidden)"))
+                                f"path={path}（{path_note(path)}）；{ctx_note}"))
         rows.append(OpRow(stage, li, "o_proj", flops=2 * T * (heads_c * d) * h,
                           weight_read=int(heads_c * d * h * b_w),
                           act_read=int(T * heads_c * d * b_a),
@@ -155,17 +189,23 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                       act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
                       shape=f"B={B}×blk={blk} 行，width={h}（draft final，replicated）"))
     # 3) 目标 lm_head 读出 blk−1 个候选：草稿与 target 共享同一词表行切
-    #    lm_head（V/tp），logits 跨 rank 聚合（集合通信在 lowering 计）
+    #    lm_head（V/tp）。容量归 target 物理对象（账本去重，见 memory），
+    #    但**读流量按每次 GEMM 计**：草稿每轮对同一分片独立前向读一遍
+    #    （dflash model.py L260 compute_logits → L599-601 output_head(hidden)；
+    #    vLLM qwen3_dflash.py L920-935 走同一 LogitsProcessor）。
+    #    2026-11-10 二轮审计补漏：原 weight_read=0 低估草稿侧读流量。
+    #    logits 词表聚合通信（TP>1）在 lowering/sharding.logits_gather 计。
     cand = B * (blk - 1)
     rows.append(OpRow(
         stage, -1, "draft_lm_head",
         flops=2 * cand * h * (target_vocab // tp),
-        weight_read=0,                    # 权重属目标（同对象共享；读流量另计）
+        weight_read=int(h * (target_vocab // tp) * b_w),
         act_read=int(cand * h * b_a),
         act_write=int(cand * (target_vocab // tp) * b_a),
         formula=FR.F_LM_HEAD,
         shape=f"B={B}×(blk−1)={cand}×{h}×{target_vocab}/tp{tp}"
-              f"（目标 lm_head 分片共享；logits 聚合通信另计）"))
+              f"（目标 lm_head 分片共享，读流量入草稿；容量归目标对象；"
+              f"logits 聚合通信在 lowering 计）"))
     # 4) 噪声/首位 embedding 查表（用目标 embedding 分片对象）
     rows.append(OpRow(stage, -1, "noise_embed", act_read=int(T * h * b_a),
                       act_write=int(T * h * b_a), formula=FR.F_EMBED,

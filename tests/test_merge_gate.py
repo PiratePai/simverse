@@ -357,8 +357,10 @@ def test_g13_draft_batch_counts_scale_once_not_weights():
     cat = build_catalog()
     m, d = cat["models"]["qwen36_35b_a3b"], cat["drafts"]["dflash_qwen36_35b_a3b"]
     Q8 = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8, "state": 32}
-    r1 = dflash_round_rows("d", d, m.vocab, 3.0, 512, Q8, 1.0, tp=8, batch=1)
-    r2 = dflash_round_rows("d", d, m.vocab, 3.0, 512, Q8, 1.0, tp=8, batch=2)
+    r1 = dflash_round_rows("d", d, m.vocab, 3.0, 512, Q8, 1.0, tp=8, batch=1,
+                           ctx_kv_path="fused_raw")
+    r2 = dflash_round_rows("d", d, m.vocab, 3.0, 512, Q8, 1.0, tp=8, batch=2,
+                           ctx_kv_path="fused_raw")
     t1, t2 = totals(r1), totals(r2)
     assert t2["flops"] == 2 * t1["flops"]
     assert t2["act_read"] == 2 * t1["act_read"]
