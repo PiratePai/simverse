@@ -101,9 +101,9 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   [两模型审查记录](validation/two-model-forward-merge-gate-20261110.md)；
   ctx-KV 路径修正见 [A 组二轮审计 §6](validation/agroup-lmhead-ctxkv-audit-20261110.md)。
 - **合入门禁**：G1–G17；`.github/workflows/merge-gate.yml` 覆盖
-  PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 只读查询：
-  main branch protection 已要求 `pytest (Windows, Python 3.12)`、1 位
-  approving review，且 `enforce_admins=true`；本候选必须经 PR 门禁合入。
+  PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 复核：
+  main branch protection 要求经 PR 合入及 `pytest (Windows, Python 3.12)`
+  必需检查（strict），审批数为 0，且 `enforce_admins=true`。
 - **未完成**：V4.1 Engram/CSA2/MoE 源码与执行、Qwen3.6 MTP 原生 forward、
   两款主模型 CPU/GPU 实测、DFlash 服务端集成与运行时池尺寸、真实可分配预算。
 
@@ -375,11 +375,13 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 6. **历史归档**：30B/235B/Next/V3 与 tiny fixture 只可显式注入归档目录；
    `h200_calib_*` 场景标 archived。Qwen3.8 本地身份仍 PENDING_ASSET。
 7. pi-viewer 适配器（V09b）：未建；数据通道经蒸馏已通（无需写旧仓）。
-8. 远端 required check/PR review：2026-11-11 已配置。历史事实：私有仓库时期（2026-11-10
+8. 远端 required check/PR：2026-11-11 已配置。历史事实：私有仓库时期（2026-11-10
    修复前）只读查询 main branch protection 与 rulesets 均返回 HTTP 403
    （需 GitHub Pro 或转为公开）。仓库现已公开；同日复查询返回 404
-   `Branch not protected`、rulesets 为空，当时强制检查尚未启用。现在 main
-   branch protection 要求 Windows pytest 和 1 位 approving review，并对管理员生效。
+   `Branch not protected`、rulesets 为空，当时强制检查尚未启用。此后 main
+   branch protection 曾要求 Windows pytest 和 1 位 approving review。
+   2026-11-11 按仓库所有者决定调整为单人仓规则：保留 PR、Windows pytest
+   required check（strict）和管理员保护；required approving reviews 为 0。
 9. 移动端像素观感：截图存证但本会话通道无法目检；`tmp_path` 用例在本机
    DSH 沙箱目录权限下未能完成（setup PermissionError）。历史事实：hermetic
    修复前外层本地 `196 passed` 因复用 ignored `outputs/run_v41.json`，不代表
