@@ -90,7 +90,8 @@ provenance 如实标注这一点，不补造命令。
 ### 3.3 未改动的部分
 
 - 没有修改 `simverse/` 生产代码、CLI/导出实现、工作流文件或分支保护。
-- 没有删除、跳过、xfail 或放宽上述验收；测试总数仍为 196。
+- 没有删除、跳过、xfail 或放宽上述验收；该轮测试总数仍为 196（后续 §6
+  新增编码回归用例后为 197）。
 - 没有提交、推送、合入，也没有触发远端 CI。
 
 ## 4. 验证记录
@@ -135,3 +136,110 @@ provenance 如实标注这一点，不补造命令。
   runner 的 tmp_path/子进程/编码行为。
 - 若未来固定场景文件变更，先复核快照 provenance 并显式重建 fixture；
   不得用现场 `run()` 输出自动覆盖期望值。
+
+## 6. 后续：CLI 导出编码失败（run 42805472945 / 42805463611）
+
+### 6.1 远端证据
+
+hermetic 修复推送后，GitHub Actions 仍失败；两次 run 的 pytest job 均为
+`1 failed, 195 passed in 6.06s`，job exit 1：
+
+| run | 触发 | 结果 |
+|---|---|---|
+| `42805472945` | PR #1 | `1 failed, 195 passed`，job exit 1 |
+| `42805463611` | push `codex/forward-merge-gate` | 同左 |
+
+`gh run view 42805472945 --repo PiratePai/simverse --log-failed` 的唯一失败：
+
+```text
+tests/test_consistency.py::test_csv_export_matches_runresult
+File "D:\a\simverse\simverse\simverse\cli.py", line 162, in cmd_export
+    print(f"已写 {p}")
+File "C:\hostedtoolcache\windows\Python\3.12.10\x64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 0-1: character maps to <undefined>
+assert 1 == 0
+1 failed, 195 passed in 6.06s
+```
+
+CSV 已写出，失败发生在随后的成功提示；测试在 `assert proc.returncode == 0`
+处中断，尚未进入逐列断言。
+
+### 6.2 输入环境与根因
+
+| 项 | 远端观测/依据 |
+|---|---|
+| runner / Python | GitHub Actions `windows-latest`；`C:\hostedtoolcache\windows\Python\3.12.10\x64`，3.12.10 |
+| pytest 命令 | `python -m pytest tests -q`（工作流同款） |
+| stdio 形态 | 测试用 `subprocess.run(..., capture_output=True)`；子进程 stdout/stderr 是管道，不是控制台 |
+| 子进程启动环境 | 未设 `PYTHONIOENCODING` / `PYTHONUTF8`；管道按系统 locale ANSI 代码页编码，traceback 显示实际为 `cp1252` |
+| 测试侧 `encoding="utf-8"` | 只决定父进程如何**解码**捕获到的字节，不改变子进程的**编码** |
+| 触发点 | `cmd_export` 写 CSV 成功后 `print(f"已写 {p}")`；中文无法用 cp1252 编码 |
+| 为什么只有 export | `run`/`sweep`/`list` 等此前各自在打印前 reconfigure 到 UTF-8；`cmd_export` 漏了 |
+
+官方 Python 文档 [sys.stdout][win-stdio] 明确：Windows 控制台使用 UTF-8；
+磁盘文件、管道等非字符设备使用系统 locale 编码（ANSI codepage），可用
+`PYTHONIOENCODING` 或 `-X utf8` / `PYTHONUTF8` 覆盖。因此同一段中文提示在
+开发者本机（常为 UTF-8 环境）可打印，在 runner 的 cp1252 管道上直接抛异常。
+这是 CLI 输出编码/结构问题，不是 CSV 序列化或逐列验收口径问题。
+
+本地等价复现（本机默认 stdio 为 UTF-8，需显式压到 cp1252）：
+
+```powershell
+$env:PYTHONIOENCODING='cp1252'; Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
+py -3.12 -m simverse.cli export .tmp/manual-verify-20261110/cli/run.json --csv .tmp/repro-export.csv
+# 修复前：同样的 UnicodeEncodeError，exit 1
+# 修复后：打印“已写 ...”，exit 0，CSV 347,416 B
+```
+
+### 6.3 处置
+
+1. `simverse/cli.py` 新增 `_configure_stdio()`，在 `main()` 入口统一对
+   stdout/stderr 执行 `reconfigure(encoding="utf-8", errors="backslashreplace")`，
+   覆盖所有现有子命令和未来新增子命令；仅当流不支持 reconfigure 时静默跳过，
+   不影响计算/导出。
+2. 删除 `_dump`/`_summary`/`cmd_sweep`/`_summary_v2`/`cmd_sweep_v2`/`cmd_list`
+   中六处分散的 reconfigure，消除“新命令漏配”的结构性来源。
+3. `tests/test_consistency.py`：
+   - `_cli_env()` 给子进程显式 `PYTHONIOENCODING=utf-8` 并移除 `PYTHONUTF8`，
+     父进程按 UTF-8 严格解码，测试不再依赖 runner locale；
+   - `_assert_ops_csv()` 保留表头、行数、逐行逐列对照 `RunResult.ops` 的验收，
+     没有降级为“文件存在”；
+   - 新增 `test_export_survives_non_utf8_stdout`：把子进程 stdio 强制为
+     `cp1252`（并移除 `PYTHONUTF8`），要求 export exit 0 且 CSV 仍逐列忠实。
+     这是对本次根因的直接回归，不是 skip/xfail。
+4. 收集数 196→197；`docs/IMPLEMENTATION_STATUS.md` 的当前收集数同步为 197。
+
+### 6.4 验证记录
+
+| 命令 | 实际结果 | 说明 |
+|---|---|---|
+| `py -3.12 -m py_compile simverse/cli.py tests/test_consistency.py` | exit 0 | 语法检查 |
+| `PYTHONIOENCODING=cp1252 py -3.12 -m simverse.cli export ...` | exit 0，打印“已写 ...” | 修复后本地等价复现；CSV 347,416 B |
+| `py -3.12 -m pytest tests/test_consistency.py tests/test_merge_gate.py::test_g6_status_doc_test_count_matches_reality -q -p pytest_harness_plugin -p no:cacheprovider`（`PYTHONPATH=.tmp`，文档更新后） | `6 passed`，exit 0 | 5 项 consistency（含新增 cp1252 用例）+ G6 |
+| 同一命令（文档更新前） | `1 failed, 5 passed`，exit 1 | G6 如实报告 196≠197，促使同步状态文档 |
+| `py -3.12 -m pytest tests/test_merge_gate.py -q -p pytest_harness_plugin -p no:cacheprovider` | `25 passed`，exit 0 | 全部 G1–G17 门禁 |
+| `py -3.12 -m pytest tests/test_ui_v12.py tests/test_calibration_h200.py -q -p pytest_harness_plugin -p no:cacheprovider` | `17 passed`，exit 0 | 相邻 CLI/校准测试 |
+| `py -3.12 -m pytest --collect-only -q tests` | `197 tests collected`，exit 0 | 未预跑全量 |
+| `node --check simverse/static/workbench.js` | exit 0 | 工作流同款静态检查 |
+| `py -3.12 -m compileall -q simverse` | exit 0 | 字节码编译 |
+| `git diff --check` | exit 0 | 无 whitespace error（仅 Git 的 LF→CRLF 提示） |
+
+本地默认 `pytest tmp_path` 在 DSH 沙箱仍可能 `PermissionError`，以上 pytest
+结果使用 `.tmp/pytest_harness_plugin.py` 把 tmp_path 定向到工作区可写目录；
+这是本机 harness 限制，不是产品失败。远端 runner 使用正常 tmp_path。
+
+### 6.5 仍未覆盖 / 不能声称
+
+- 未提交、未推送、未重跑 GitHub Actions；远端最新记录仍是上述两次失败，
+  不能写成“远端已通过”。
+- 本卡未运行全量 `pytest tests -q`；外层 Codex 是唯一全量 owner，需在推送后
+  重跑全量并复核 197 项。
+- 只验证了“管道 stdio 为 cp1252”的等价复现，未在真实 `PYTHONLEGACYWINDOWSSTDIO`
+  旧式控制台或非 Windows 终端上目检中文渲染；修复保证不崩溃且输出 UTF-8
+  字节，字形显示取决于终端能力。
+- runner 的实际 ANSI codepage 由 traceback（`cp1252.py`）与官方文档推断；
+  本次日志未单独打印 `locale`/`chcp` 值。
+- 新增用例使收集数从 196 变为 197；G6 已同步，但全量通过仍待外层验收。
+
+[win-stdio]: https://docs.python.org/3/library/sys.html#sys.stdout

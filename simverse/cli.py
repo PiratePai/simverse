@@ -27,6 +27,21 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCENARIO = ROOT / "assets" / "scenarios" / "v41_flash_dt_verification.json"
 
 
+def _configure_stdio():
+    """让 CLI 状态文本在非 UTF-8 的管道/终端上也不会中断已完成的命令。
+
+    Windows 上非控制台 stdio（管道、重定向文件）默认使用系统 ANSI 代码页
+    （如 cp1252），而本 CLI 的提示含中文；不显式覆盖时，``print`` 会在文件
+    已经写成功后抛 UnicodeEncodeError，把成功命令变成 exit 1。UTF-8 是跨
+    平台稳定的输出编码；``backslashreplace`` 再兜底代理对等极端字符。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def _dump(obj, path: Path | None):
     text = json.dumps(obj, ensure_ascii=False, indent=1)
     if path:
@@ -34,10 +49,6 @@ def _dump(obj, path: Path | None):
         path.write_text(text, encoding="utf-8")
         print(f"已写 {path}")
     else:
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
         print(text)
 
 
@@ -65,10 +76,6 @@ def _events_csv(result: dict) -> str:
 
 
 def _summary(result: dict):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     print(f"status={result['status']} digests={result['digests']}")
     if result["status"].startswith("unsupported"):
         print(result["status_detail"])
@@ -114,10 +121,6 @@ def cmd_sweep(args):
     scenario = ScenarioSpec.from_json(json.loads(src.read_text(encoding="utf-8")))
     _require_active_v01(scenario)
     data = sweep_suite(scenario)
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     print("boundaries:", json.dumps(data["boundaries"], ensure_ascii=False))
     out = Path(args.out) if args.out else ROOT / "outputs" / "sweep.json"
     _dump(data, out)
@@ -268,10 +271,6 @@ def cmd_run_v2(args):
 
 
 def _summary_v2(bundle: dict):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     man = bundle["manifest"]
     print(f"status={man['status']} run_id={man['run_id'][:19]}... "
           f"code={man['code_revision'][:10]}")
@@ -308,10 +307,6 @@ def cmd_sweep_v2(args):
     out = Path(args.out) if args.out else ROOT / "outputs" / "sweep_v2.json"
     _dump(data, out)
     import json as _json
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     print("breakevens:", _json.dumps(data["breakevens"], ensure_ascii=False))
 
 
@@ -330,10 +325,6 @@ def cmd_export_v2(args):
 
 
 def cmd_list(args):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     if args.what == "formulas":
         from .formulas import formulas_json
         print(json.dumps(formulas_json(), ensure_ascii=False, indent=1))
@@ -354,6 +345,7 @@ def cmd_list(args):
 
 
 def main(argv=None):
+    _configure_stdio()
     ap = argparse.ArgumentParser(prog="simverse")
     ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd", required=True)

@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import math
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,13 +30,35 @@ OPS_CSV_COLUMNS = (
 )
 
 
+def _cli_env(io_encoding="utf-8"):
+    """显式设定子进程启动时的 stdio 编码，不继承 runner 的 locale 默认。"""
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = io_encoding
+    env.pop("PYTHONUTF8", None)  # 避免 UTF-8 mode 掩盖非 UTF-8 stdio 条件
+    return env
+
+
+def _assert_ops_csv(csv_path, ops):
+    """CSV 表头/行数/逐列值必须等于 RunResult.ops 的忠实序列化。"""
+    with Path(csv_path).open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert tuple(rows[0]) == OPS_CSV_COLUMNS
+    data_rows = rows[1:]
+    assert len(data_rows) == len(ops)
+    for index, (op, row) in enumerate(zip(ops, data_rows)):
+        for column, cell in zip(OPS_CSV_COLUMNS, row):
+            expected = str(op.get(column, "")).replace(",", ";").replace("\n", " ")
+            assert cell == expected, (index, column, cell, expected)
+
+
 @pytest.fixture(scope="module")
 def cli_run(tmp_path_factory):
     """一次 CLI run 的落盘结果：后续导出测试复用同一份 RunResult。"""
     out = tmp_path_factory.mktemp("cli") / "run.json"
     proc = subprocess.run(
         [sys.executable, "-m", "simverse.cli", "run", str(FIXED), "-o", str(out)],
-        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8")
+        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
+        env=_cli_env())
     assert proc.returncode == 0, proc.stderr
     return {"path": out, "result": json.loads(out.read_text(encoding="utf-8"))}
 
@@ -87,23 +110,33 @@ def test_csv_export_matches_runresult(cli_run, tmp_path):
 
     输入是本次 `run` 新落盘的 RunResult（tmp_path），不是被 Git 忽略的
     outputs/ 存档；逐列对照 RunResult.ops，而不是用导出器自证导出器。
+    子进程 stdio 显式 UTF-8，父进程按同一编码解码，不依赖 runner locale。
     """
     csv_path = tmp_path / "ops.csv"
     proc = subprocess.run(
         [sys.executable, "-m", "simverse.cli", "export",
          str(cli_run["path"]), "--csv", str(csv_path)],
-        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8")
+        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
+        env=_cli_env())
     assert proc.returncode == 0, proc.stderr
-    with csv_path.open("r", encoding="utf-8", newline="") as fh:
-        rows = list(csv.reader(fh))
-    assert tuple(rows[0]) == OPS_CSV_COLUMNS
-    data_rows = rows[1:]
-    ops = cli_run["result"]["ops"]
-    assert len(data_rows) == len(ops)
-    for index, (op, row) in enumerate(zip(ops, data_rows)):
-        for column, cell in zip(OPS_CSV_COLUMNS, row):
-            expected = str(op.get(column, "")).replace(",", ";").replace("\n", " ")
-            assert cell == expected, (index, column, cell, expected)
+    _assert_ops_csv(csv_path, cli_run["result"]["ops"])
+
+
+def test_export_survives_non_utf8_stdout(cli_run, tmp_path):
+    """非 UTF-8 子进程 stdio 下，export 写文件后不得因状态文本崩溃。
+
+    远端 Windows runner 的管道 stdio 使用系统 ANSI 代码页（失败 run 中为
+    cp1252），而 CLI 成功提示含中文。此处显式把子进程 stdio 固定为 cp1252
+    （并移除 PYTHONUTF8），要求 export 仍 exit 0，且 CSV 仍逐列忠实。
+    """
+    csv_path = tmp_path / "ops_cp1252.csv"
+    proc = subprocess.run(
+        [sys.executable, "-m", "simverse.cli", "export",
+         str(cli_run["path"]), "--csv", str(csv_path)],
+        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
+        errors="replace", env=_cli_env("cp1252"))
+    assert proc.returncode == 0, proc.stderr
+    _assert_ops_csv(csv_path, cli_run["result"]["ops"])
 
 
 def test_fixed_scenario_replay_digest_stable():

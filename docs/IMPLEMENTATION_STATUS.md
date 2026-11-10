@@ -2,8 +2,8 @@
 
 更新：2026-11-10（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（分支 `codex/forward-merge-gate`；远端公开仓库 `PiratePai/simverse`，候选分支已推送、PR [#1](https://github.com/PiratePai/simverse/pull/1) 已建；main 保护规则未配置）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（全量由外层 Codex 唯一执行；2026-11-10 hermetic 修复后本地全量 exit 0：196 passed，5.04s，1 条既有 Windows 子进程 UTF-8 解码警告；不代表远端已通过）。
-**pytest 收集数：196**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-10；最终全量结果见本轮审查记录）。
+运行：`py -3.12 -m pytest tests -q`（全量由外层 Codex 唯一执行；2026-11-10 hermetic 修复后本地全量 exit 0：196 passed，5.04s，1 条既有 Windows 子进程 UTF-8 解码警告；本轮 CLI 导出编码修复新增 1 项回归用例，当前收集 197，全量待外层重跑；不代表远端已通过）。
+**pytest 收集数：197**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-10；196→197 为本轮新增“非 UTF-8 stdio 导出”回归用例；最终全量结果见本轮审查记录）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -13,7 +13,15 @@ RunResult；固定场景重放改用纳入版本库、带 provenance 的历史�
 `tests/fixtures/v41_flash_dt_verification_expected.json`。远端 run `42803015653`
 的 `2 failed, 194 passed` 是 clean checkout 缺文件；此前本地 `196 passed` 属环境
 假阳性。详见 [Windows CI hermetic 修复](validation/windows-ci-hermetic-fix-20261110.md)。
-测试总数仍为 196。
+该轮测试总数仍为 196（后续编码修复新增 1 项后为 197）。
+
+**CLI 导出编码修复（2026-11-10 后续）**：远端 run `42805472945`（PR）与
+`42805463611`（push）的唯一失败是 `test_csv_export_matches_runresult`：
+Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写文件
+成功后 `print("已写 ...")` 抛 `UnicodeEncodeError`，进程 exit 1。CLI 现在在
+`main()` 统一把 stdout/stderr 设为 UTF-8 + `backslashreplace`；测试显式固定
+子进程 stdio 编码，并新增 cp1252 回归用例。收集数 196→197，详见
+[Windows CI hermetic 修复 §6](validation/windows-ci-hermetic-fix-20261110.md)。
 
 **外层本地验收（2026-11-10，hermetic 修复后）**：外层 Codex 唯一一次全量
 `py -3.12 -m pytest tests -q` 实际 exit 0：`196 passed, 1 warning in 5.04s`；
