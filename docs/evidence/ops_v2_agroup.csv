@@ -1,0 +1,574 @@
+stage,layer,op,flops,weight_read,weight_read_expected,act_read,act_write,kv_read,kv_write,state_read,state_write,weight_capacity,statistic,formula,shape
+target_decode,0,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,0,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,0,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,0,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,0,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,0,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,0,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,0,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,0,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,0,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,0,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,0,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,0,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,0,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,1,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,1,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,1,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,1,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,1,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,1,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,1,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,1,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,1,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,1,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,1,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,1,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,1,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,1,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,2,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,2,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,2,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,2,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,2,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,2,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,2,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,2,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,2,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,2,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,2,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,2,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,2,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,2,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,3,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,3,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,3,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,3,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,3,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,3,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,3,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,3,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,3,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,3,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,3,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,3,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,3,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,3,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,3,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,4,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,4,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,4,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,4,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,4,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,4,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,4,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,4,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,4,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,4,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,4,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,4,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,4,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,4,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,5,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,5,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,5,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,5,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,5,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,5,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,5,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,5,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,5,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,5,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,5,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,5,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,5,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,5,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,6,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,6,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,6,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,6,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,6,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,6,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,6,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,6,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,6,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,6,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,6,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,6,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,6,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,6,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,7,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,7,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,7,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,7,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,7,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,7,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,7,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,7,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,7,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,7,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,7,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,7,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,7,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,7,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,7,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,8,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,8,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,8,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,8,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,8,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,8,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,8,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,8,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,8,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,8,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,8,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,8,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,8,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,8,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,9,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,9,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,9,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,9,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,9,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,9,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,9,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,9,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,9,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,9,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,9,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,9,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,9,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,9,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,10,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,10,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,10,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,10,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,10,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,10,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,10,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,10,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,10,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,10,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,10,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,10,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,10,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,10,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,11,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,11,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,11,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,11,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,11,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,11,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,11,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,11,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,11,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,11,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,11,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,11,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,11,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,11,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,11,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,12,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,12,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,12,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,12,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,12,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,12,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,12,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,12,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,12,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,12,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,12,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,12,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,12,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,12,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,13,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,13,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,13,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,13,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,13,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,13,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,13,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,13,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,13,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,13,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,13,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,13,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,13,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,13,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,14,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,14,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,14,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,14,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,14,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,14,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,14,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,14,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,14,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,14,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,14,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,14,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,14,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,14,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,15,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,15,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,15,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,15,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,15,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,15,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,15,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,15,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,15,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,15,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,15,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,15,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,15,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,15,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,15,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,16,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,16,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,16,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,16,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,16,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,16,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,16,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,16,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,16,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,16,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,16,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,16,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,16,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,16,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,17,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,17,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,17,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,17,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,17,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,17,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,17,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,17,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,17,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,17,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,17,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,17,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,17,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,17,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,18,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,18,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,18,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,18,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,18,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,18,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,18,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,18,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,18,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,18,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,18,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,18,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,18,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,18,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,19,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,19,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,19,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,19,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,19,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,19,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,19,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,19,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,19,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,19,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,19,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,19,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,19,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,19,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,19,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,20,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,20,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,20,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,20,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,20,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,20,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,20,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,20,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,20,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,20,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,20,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,20,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,20,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,20,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,21,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,21,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,21,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,21,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,21,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,21,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,21,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,21,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,21,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,21,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,21,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,21,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,21,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,21,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,22,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,22,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,22,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,22,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,22,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,22,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,22,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,22,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,22,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,22,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,22,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,22,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,22,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,22,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,23,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,23,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,23,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,23,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,23,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,23,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,23,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,23,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,23,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,23,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,23,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,23,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,23,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,23,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,23,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,24,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,24,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,24,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,24,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,24,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,24,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,24,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,24,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,24,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,24,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,24,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,24,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,24,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,24,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,25,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,25,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,25,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,25,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,25,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,25,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,25,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,25,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,25,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,25,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,25,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,25,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,25,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,25,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,26,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,26,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,26,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,26,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,26,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,26,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,26,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,26,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,26,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,26,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,26,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,26,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,26,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,26,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,27,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,27,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,27,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,27,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,27,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,27,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,27,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,27,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,27,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,27,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,27,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,27,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,27,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,27,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,27,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,28,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,28,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,28,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,28,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,28,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,28,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,28,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,28,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,28,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,28,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,28,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,28,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,28,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,28,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,29,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,29,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,29,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,29,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,29,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,29,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,29,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,29,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,29,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,29,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,29,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,29,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,29,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,29,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,30,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,30,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,30,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,30,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,30,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,30,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,30,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,30,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,30,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,30,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,30,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,30,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,30,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,30,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,31,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,31,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,31,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,31,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,31,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,31,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,31,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,31,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,31,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,31,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,31,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,31,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,31,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,31,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,31,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,32,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,32,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,32,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,32,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,32,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,32,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,32,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,32,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,32,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,32,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,32,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,32,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,32,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,32,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,33,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,33,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,33,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,33,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,33,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,33,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,33,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,33,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,33,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,33,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,33,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,33,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,33,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,33,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,34,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,34,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,34,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,34,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,34,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,34,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,34,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,34,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,34,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,34,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,34,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,34,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,34,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,34,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,35,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,35,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,35,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,35,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,35,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,35,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,35,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,35,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,35,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,35,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,35,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,35,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,35,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,35,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,35,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,36,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,36,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,36,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,36,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,36,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,36,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,36,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,36,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,36,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,36,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,36,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,36,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,36,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,36,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,37,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,37,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,37,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,37,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,37,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,37,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,37,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,37,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,37,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,37,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,37,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,37,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,37,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,37,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,38,in_proj_qkv,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,38,in_proj_z,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]
+target_decode,38,in_proj_ba,32768,16384,,2048,8,0,0,0,0,16384,exact,v2.gemm,[1;2048]@[2048;8]
+target_decode,38,causal_conv1d,8192,0,,4096,1024,0,0,0,0,0,exact,v2.gdn_step,depthwise k=4 over 1024(卡上)
+target_decode,38,gdn_recurrence,262144,0,,0,0,0,0,262144,262144,0,approximated,v2.gdn_step,N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）
+target_decode,38,v_norm_gated,2056,256,,512,512,0,0,0,0,0,exact,v2.rmsnorm,4 头(卡上) × d_v=128
+target_decode,38,out_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,38,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,38,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,38,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,38,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,38,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,38,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,38,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,39,q_proj,4194304,2097152,,2048,1024,0,0,0,0,2097152,exact,v2.gemm,[1;2048]@[2048;1024]
+target_decode,39,k_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,39,v_proj,2097152,1048576,,2048,512,0,0,0,0,1048576,exact,v2.gemm,[1;2048]@[2048;512]（KV 头复制）
+target_decode,39,attention_core,67438602,0,,512,512,33554432,1024,0,0,0,exact,v2.attn_core,pairs=32769 heads(card)=2 kv(card)=2（复制） v2.causal_pairs
+target_decode,39,o_proj,2097152,1048576,,512,2048,0,0,0,0,1048576,exact,v2.gemm,[1;512]@[512;2048]
+target_decode,39,q_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,39,k_norm,2052,512,,512,512,0,0,0,0,0,exact,v2.rmsnorm,2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）
+target_decode,39,rope,384,0,,576,512,0,0,0,0,0,exact,v2.rope,rotary=64
+target_decode,39,moe_router,1048576,524288,,2048,256,0,0,0,0,524288,exact,v2.moe_router,[1;2048]@[2048;256] replicated（不随 tp 缩放）
+target_decode,39,moe_routed,6291456,0,1572864.0,19456,16384,0,0,0,0,50331648,expectation,v2.moe_union,E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）
+target_decode,39,moe_shared,786432,393216,,2432,2048,0,0,0,0,393216,exact,v2.gemm,shared inter=512/tp8=64
+target_decode,39,attn_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,39,mlp_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048
+target_decode,39,attn_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,39,mlp_add,2048,0,,4096,2048,0,0,0,0,0,exact,v2.residual,残差逐元素加法（E09：不消失）
+target_decode,-1,final_norm,8194,4096,,2048,2048,0,0,0,0,0,exact,v2.rmsnorm,width=2048（final，replicated）
+target_decode,-1,lm_head,127139840,63569920,,2048,31040,0,0,0,0,63569920,exact,v2.lm_head,h×V/tp（列切分）
+target_decode,-1,embed_lookup,0,0,,2048,2048,0,0,0,0,63569920,exact,v2.embed,查表 1 行/token；容量 h×V/tp（词表行切）

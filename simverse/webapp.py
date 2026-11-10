@@ -24,9 +24,13 @@ app = Flask(__name__, static_folder=str(Path(__file__).parent / "static"),
 
 
 def _scenarios_index():
+    """只列活跃场景；历史模型/标记 archived 的场景保留文件但不进选择。"""
+    from .model_ir.catalog import PRODUCT_MODELS
     out = {}
     for p in sorted(SCENARIO_DIR.glob("*.json")):
         data = json.loads(p.read_text(encoding="utf-8"))
+        if data.get("archived") or data.get("model_id") not in PRODUCT_MODELS:
+            continue
         out[p.stem] = {"name": data.get("name", p.stem), "notes": data.get("notes", ""),
                        "scenario": data}
     return out
@@ -54,16 +58,20 @@ def api_v2_catalog():
     from .methods.plans import UNSUPPORTED
     from .validation import registry_json
     from .importers import source_map_json
-    from .cost.profile_store import PROFILE_SETS
+    from .cost.profile_store import (PRODUCT_PROFILE_SETS, archived_profiles_json,
+                                     profile_model_id)
     return jsonify(js_safe({
         "schema_version": "0.2",
         "catalog": catalog_json(),
         "devices": {k: d.to_json() for k, d in DEVICES.items()},
         "links": {k: dict(v.__dict__) for k, v in LINKS.items()},
-        "methods": {"supported": ["baseline", "dflash_v1", "chain_draft", "mtp",
-                                  "chain_moe_proxy"],
+        "methods": {"supported": ["baseline", "dflash_v1"],
+                    "research": ["mtp"],
                     "unsupported": UNSUPPORTED},
-        "profile_sets": sorted(PROFILE_SETS),
+        "profile_sets": sorted(PRODUCT_PROFILE_SETS),
+        "archived_profiles": archived_profiles_json(),
+        "profile_bindings": {sid: profile_model_id(sid)
+                             for sid in sorted(PRODUCT_PROFILE_SETS)},
         "evidence": registry_json(),
         "source_map": source_map_json(),
     }))
@@ -110,9 +118,15 @@ def api_v2_export(fmt):
 @app.get("/api/registry")
 def api_registry():
     from .devices import DEVICES, LINKS
+    from .model_ir.catalog import PRODUCT_MODELS
+    reg = registry_json()
+    reg["models"] = {k: v for k, v in reg["models"].items()
+                     if k in PRODUCT_MODELS}
+    reg["drafts"] = {k: v for k, v in reg["drafts"].items()
+                     if k in PRODUCT_MODELS or k == "dspark"}
     return jsonify({
         "schema_version": "0.1",
-        "registry": registry_json(),
+        "registry": reg,
         "devices": {k: d.to_json() for k, v in DEVICES.items()},
         "links": {k: dict(v.__dict__) for k, v in LINKS.items()},
         "formulas": formulas_json()["formulas"],
@@ -133,6 +147,10 @@ def api_run():
             scenario = ScenarioSpec.from_json(json.loads(path.read_text(encoding="utf-8")))
         else:
             scenario = ScenarioSpec.from_json(body)
+        from .model_ir.catalog import PRODUCT_MODELS
+        if scenario.model_id not in PRODUCT_MODELS:
+            return jsonify({"error": f"历史/合成模型 {scenario.model_id} 不在"
+                                     "活跃 API 目录；仅作离线归档"}), 400
         result = run(scenario).to_json()
         return jsonify(result)
     except ValueError as exc:
@@ -147,4 +165,8 @@ def api_sweep():
         scenario = ScenarioSpec.from_json(body)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    from .model_ir.catalog import PRODUCT_MODELS
+    if scenario.model_id not in PRODUCT_MODELS:
+        return jsonify({"error": f"历史/合成模型 {scenario.model_id} 不在"
+                                 "活跃 API 目录；仅作离线归档"}), 400
     return jsonify(sweep_suite(scenario))

@@ -1,0 +1,24 @@
+{
+ "repo": "vllm-project/vllm",
+ "sha": "dc74b8cbbbe3dbb9399fe369757d63defd614cc2",
+ "fetched_at": "2026-11-10",
+ "fetch_method": "GitHub raw（main 分支固定 commit；先 API 取 main SHA 再按 SHA 取文件）",
+ "files": {
+  "dflash_speculator.py": "f3f93c761deec253d4bb1edc6ae8368f683c7d211f79100da8acb0407c9ae075",
+  "dflash_utils.py": "f0584417149c0a6fa67e700b2a725e40a41f4546a806b26e6cc64b64c59cfd66",
+  "expert_map_manager.py": "c00b240b4ff48894f653a24c3a24c14cb72ed45b6292c1e975077fa4c02de382",
+  "fused_moe_config.py": "8fc17a443a86fb9d80022f8a6bb0a46532841c213fded0e9316a0589d655278f",
+  "fused_moe_layer.py": "95b94b8696577ee7bf4a05fa6f05d113b1c0eabdb12536119db4fe9e4b1341e0",
+  "fused_moe_method_base.py": "f8defdd0f8aa1f7a4cb68aca64f9d8e737eb9c65f00fa2d66571704aa1532916",
+  "gate_linear.py": "7e3a98fed45bc1fa404a08199b4f071d01e6cbfac323a047511bfb968f62c8f2",
+  "linear.py": "1e28939de3073651453540bd73ac53e2f98c893cc535f62baa5f2eb089edd4a5",
+  "mamba_utils.py": "8727ffb5a921dfe8cbc7b35ddf0f1f592297d195ac35d78ffd9a4eec2203760a",
+  "qwen3_5.py": "3e8987847515cf00e879f444ed0cd09aae95e25280b307ecc66c05d1222baf1a",
+  "qwen3_dflash.py": "02d12fbfe653a84e84a2ef7b9ad115ca7e9b92bfbc8928b5e1ca5d74e18ff4f5",
+  "qwen3_moe.py": "4710723deacd3c00e1fcd5e8b1a70474e6860d18dea9aeda2700c115795f4b40",
+  "qwen3_next.py": "7b9a1fd0e159e02fc0f88bc22870f04d763c8736b917bca650cd6a19afebdec5",
+  "qwen_gdn_linear_attn.py": "511093051d2ad41206add6b905d999f0c75e193672e6553056581e2a3753078a",
+  "routed_experts.py": "9fe678c296551f9da2afc4855d0fa9dee2afaefc141c6692ae560b7b01b4fc38"
+ },
+ "purpose": "R01 TP/EP 并行分片配方 pin（qwen3_5_moe/Qwen3.6 + DFlash 集成 + GDN/MoE/attention 分片）"
+}

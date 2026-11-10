@@ -9,6 +9,9 @@
 - [x] Qwen3.6+DFlash 解析实验、DT 串行及初步微批流水。
 - [x] V4.1 部分结构及 mHC 边界计数；Engram 仍不完整。
 - [x] 历史 H200 部分算子校准、来源与覆盖域门禁；不代表重点模型实测。
+- [x] A 组（2026-11-10）：TP/EP per-rank 统一配方、同卡对象身份账本、
+  生命周期峰值分列、预算契约与可部署性四态判定链路（见 A 组表；真实
+  预算与运行时池证据仍缺，默认场景保持 unknown）。
 
 ## 组织方式：独立交付，必要处联合验收
 
@@ -18,15 +21,29 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 
 ## A 组：Qwen 分片与同卡可部署性（P0，最终判定耦合）
 
-| ID | 独立交付物与验收标准 | 硬依赖／联合验收点 |
-|---|---|---|
-| R01 | MoE per-rank TP/EP 配方：工作量、容量、通信统一；跨 rank 守恒和独立 oracle；旧数值差异归因 | 固定实现源码；无其他 roadmap 前置项 |
-| R02a | 同卡对象身份：共享 embedding/lm_head 去重、草稿 batch、KV 对象归属测试 | 对象测试可独立；分片后的容量验收接 R01 |
-| R02b | verify/workspace/graph 生命周期与峰值，静态常驻与动态临时对象分列 | 对象接口来自 R02a；完整 per-rank 峰值接 R01 |
-| R03a | 预算输入契约：nominal/allocatable/额外开销与来源分列；UI/CLI 一致；缺省 unknown | 可独立，不必等容量模型或实测数据 |
-| R03b | 可部署性判定：unknown/oom/feasible 负例；预算和开销不重复扣除 | R01 + R02a/b + R03a；实际预算证据。假设预算仅产生条件结论 |
+状态更新 2026-11-10：五项工程实现全部落地（R01–R03b），详见
+[A 组验证报告](docs/validation/agroup-tp-ep-colocated-20261110.md)。
+**联合验收只解除到"判定链路完整"**：默认场景同卡可部署性仍为 unknown
+（可分配预算未提供 G-D7 + workspace/graph/NCCL 池无尺寸证据），不得
+表述为已确认可部署或已确认 OOM。
 
-本组必须联合验收才能解除“同卡可部署性未知”；不能仅凭 R03a 输入一个预算就标记为真实可部署。
+| ID | 状态 | 交付与证据 |
+|---|---|---|
+| R01 | ✅ 完成 | per-rank TP/EP 统一配方（vLLM @dc74b8cb pin，`simverse/lowering/parallel.py` ParallelPlan；count/memory/lowering 三处共用）；跨 rank 守恒 + 独立手算 oracle + 非法组合拒绝（tests/test_parallel_sharding.py 19 项）；默认场景前后差异逐项归因（验证报告 §3） |
+| R02a | ✅ 完成 | 同卡对象身份：共享 embed/lm_head 单一物理对象 + consumer 引用（零字节），废除草稿幻影副本与失配去重键；草稿批=target 批；per-rank 账本含 EP 余数差异与最坏 rank（tests/test_colocated_memory.py 11 项） |
+| R02b | ✅ 完成（结构化部分） | 生命周期分列：常驻/每请求/跨轮/阶段临时（draft/verify 串行取 max）；workspace/CUDA graph/NCCL 池作为 unknown_components 缺口传播（不填 0，峰值不完整 → 判定 unknown）。**限制**：临时缓冲只含 pinned 形状可推导项；运行时池尺寸无证据，完整运行时峰值未验证 |
+| R03a | ✅ 完成 | 预算输入契约（nominal/allocatable(kind: measured/hypothesis)/额外开销分列、gross 语义防重复扣除、缺省 unknown 不套标称）；场景身份包含 EP/budget；CLI/API/UI/导出一致（测试 + 浏览器实测） |
+| R03b | ✅ 完成（判定链路） | 四态判定 unknown/oom/feasible/feasible-conditional + 已知下界超标称即 OOM；假设预算仅条件结论且不进实际部署排名（compare 资格排除）；负例全覆盖（tests/test_budget_feasibility.py 14 项）。**实际可部署结论仍阻塞于真实预算证据（G-D7）与峰值完整性** |
+
+| ID | 硬依赖／联合验收点 |
+|---|---|
+| R01 | 固定实现源码；无其他 roadmap 前置项 |
+| R02a | 对象测试可独立；分片后的容量验收接 R01 |
+| R02b | 对象接口来自 R02a；完整 per-rank 峰值接 R01 |
+| R03a | 可独立，不必等容量模型或实测数据 |
+| R03b | R01 + R02a/b + R03a；实际预算证据。假设预算仅产生条件结论 |
+
+本组必须联合验收才能解除“同卡可部署性未知”；不能仅凭 R03a 输入一个预算就标记为真实可部署。当前判定链路已贯通：给定 measured 预算 + 完整峰值即可给出 feasible/OOM；两缺口（G-D7 预算、运行时池尺寸证据）解除前默认场景保持 unknown。
 
 ## B 组：V4.1 结构补齐（P0，分模块独立）
 

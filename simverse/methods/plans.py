@@ -118,8 +118,8 @@ def plan_chain(method_id: str, label: str, draft_note: str, k: int,
         approx.append(f"微头按 config {mtp_layers} 层结构与主干共享驻留")
     return MethodPlan(
         method_id=method_id, version="0.2", label=label,
-        source_pin="internal:chain" if method_id == "chain_draft"
-        else "config:num_nextn_predict_layers/mtp_num_hidden_layers",
+        source_pin=("config:num_nextn_predict_layers/mtp_num_hidden_layers"
+                    if method_id == "mtp" else f"internal:{method_id}"),
         steps=steps, messages=msgs,
         en_formula=FR.F_EN_CHAIN, k_effective=k,
         cache_policy={

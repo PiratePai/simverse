@@ -11,8 +11,16 @@ import pytest
 
 from simverse.cost.profile_store import (PROFILE_SETS, ProfileIntegrityError,
                                          load_profile_set)
+from simverse.model_ir import build_catalog
 from simverse.pipeline import run_v2
 from simverse.scenario import ScenarioV2
+
+_ARCHIVE_CAT = build_catalog(include_internal=True)
+
+
+def _run_archive(sc, **kw):
+    return run_v2(sc, catalog=_ARCHIVE_CAT, **kw)
+
 
 ROOT = Path(__file__).resolve().parent.parent
 SET_ID = "h200-qwen3-235b-a22b-op-v1"
@@ -50,7 +58,9 @@ def test_manifest_identity_and_admission():
     assert ident["revision"].startswith("8efa6172")
     adm = man["admission"]
     assert "moe.csv:TP8/EP1" in adm["defer"]
-    assert "V04" in adm["defer"]["moe.csv:TP8/EP1"]      # 混尺理由显式
+    # 2026-11-10 A组 R01（G-C11）解除后：defer 理由改为数据准入（G-D2），
+    # 分片账本混尺（V04）不再是阻塞项
+    assert "G-D2" in adm["defer"]["moe.csv:TP8/EP1"]
     assert man["tp_invariant_groups"] == ["emb", "input_layernorm",
                                           "post_attention_layernorm"]
     assert man["domain"]["tensor_parallel"] == [2, 8]
@@ -106,7 +116,7 @@ def test_domain_reject_tp1_with_reason():
     sc = _scenario(deployment={"mode": "baseline", "target_device": "h200_sxm",
                                "target_tp": 1, "draft_device": "l40",
                                "draft_tp": 1, "link": "pcie5"})
-    b = run_v2(sc).to_json()
+    b = _run_archive(sc).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("TP" in r for r in cal["reasons"])
@@ -116,7 +126,7 @@ def test_domain_reject_tp1_with_reason():
 def test_domain_reject_precision():
     sc = _scenario(quant={"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
                           "state": 32})
-    b = run_v2(sc).to_json()
+    b = _run_archive(sc).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("精度" in r for r in cal["reasons"])
@@ -129,7 +139,7 @@ def test_domain_reject_precision():
 def _stage_cal(tp=8):
     dep = {"mode": "baseline", "target_device": "h200_sxm", "target_tp": tp,
            "draft_device": "l40", "draft_tp": 1, "link": "pcie5"}
-    b = run_v2(_scenario(deployment=dep)).to_json()
+    b = _run_archive(_scenario(deployment=dep)).to_json()
     return b, b["cost"]["calibration"]["stages"]["target_decode"]
 
 
@@ -160,8 +170,12 @@ def test_stage_composition_tp8():
     # MoE 按准入裁决回退（defer），不产生 measured 组
     group_names = {g["group"] for g in cal["groups"]}
     assert not any("moe" in g for g in group_names)
-    assert cal["fallback_ms"] > cal["measured_ms"] * 0.9   # MoE 占主导
-    assert 0 < cal["coverage_time_frac"] < 0.5             # MoE 在域外
+    # R01（2026-11-10）后 MoE 解析行为 per-rank 口径（TP8 inter/tp 切分，
+    # flops/字节 ≈ 整模型/8）：fallback 从 38.30ms 降至 ~4.85ms，不再
+    # "占主导"（旧断言 fallback>0.9×measured 编码的是整模型口径高估）。
+    assert cal["fallback_ms"] > 0
+    assert cal["fallback_ms"] < cal["measured_ms"]          # per-rank 口径
+    assert 0.5 < cal["coverage_time_frac"] < 1.0            # MoE 仍在域外
 
 
 def test_tp2_also_in_domain():
@@ -174,8 +188,8 @@ def test_tp2_also_in_domain():
 
 def test_count_ledger_unchanged_with_without_profile():
     """G7 同型：开/关 cost_profile，work 账本逐字段不变（校准只改成本）。"""
-    a = run_v2(_scenario()).to_json()
-    b = run_v2(_scenario(cost_profile=None)).to_json()
+    a = _run_archive(_scenario()).to_json()
+    b = _run_archive(_scenario(cost_profile=None)).to_json()
     ra = a["work"]["target_decode"]["rows"]
     rb = b["work"]["target_decode"]["rows"]
     assert len(ra) == len(rb)

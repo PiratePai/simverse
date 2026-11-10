@@ -125,7 +125,7 @@ def test_v41_structure_gap_blocks_ranking():
                     draft_id=None, k=4, deployment={"mode": "colocated",
                                                     "target_tp": 8},
                     acceptance={"kind": "geometric", "alpha": 0.75})
-    b = run_v2(sc)
+    b = run_v2(sc, allow_internal_methods=True)
     assert b.manifest.status == "completed"
     assert b.capability["checks"]["model_structure_complete"]["status"] == "unsupported"
     m02 = b.metrics["M02_speedup_vs_baseline"]
@@ -146,7 +146,10 @@ def test_tp_validation_rejects_illegal():
     sc = _dflash_sc(deployment={"target_tp": 5})   # 不整除 16 头
     b = run_v2(sc)
     assert b.manifest.status == "failed"
-    assert "TP/EP5" in b.capability["checks"]["tp_valid"]["reason"]
+    # R01：检查项更名 parallel_valid（TP+EP 统一配方判定）
+    chk = b.capability["checks"]["parallel_valid"]
+    assert chk["status"] == "invalid"
+    assert "不整除 Q 头数" in chk["reason"] or "TP5" in chk["reason"]
 
 
 def test_collectives_included_at_tp8_absent_at_tp1():
@@ -198,6 +201,73 @@ def test_comparison_keeps_values_when_ineligible():
     row = out["rows"][0]
     assert row["eligible"] is False                # 容量 unknown（标称口径）
     assert row["objectives"]["M01_tpot_analytical"]["candidate"] > 0
+
+
+def test_research_method_proxies_cannot_enter_deployment_ranking():
+    base = run_v2(ScenarioV2(method_id="baseline", draft_id=None,
+                             deployment={"mode": "baseline"}))
+    for method, k in (("mtp", 1), ("chain_draft", 4),
+                      ("chain_moe_proxy", 4)):
+        candidate = run_v2(ScenarioV2(method_id=method, k=k),
+                           allow_internal_methods=True)
+        row = compare_runs(base, [candidate])["rows"][0]
+        assert row["eligible"] is False
+        assert row["ineligible_reason"]
+        assert row["objectives"]["M01_tpot_analytical"]["candidate"] > 0
+
+
+def test_speculative_verify_includes_target_tp_collectives():
+    for method, k in (("mtp", 1), ("chain_draft", 4),
+                      ("chain_moe_proxy", 4)):
+        bundle = run_v2(ScenarioV2(method_id=method, k=k),
+                        allow_internal_methods=True)
+        verify = bundle.cost["verify"]
+        collective = verify["collectives"]["total_t_ms"]
+        assert collective > 0
+        assert verify["t_ms"] >= collective
+        assert bundle.metrics["M04_stage_breakdown_ms"]["verify"].value == pytest.approx(
+            verify["t_ms"])
+        assert "method_recipe_ready" in bundle.capability["checks"]
+        reason = bundle.metrics["M02_speedup_vs_baseline"].reason
+        assert ("MTP" if method == "mtp" else "tiny_gqa") in reason
+
+
+def test_dflash_draft_tp_collectives_and_pipeline_memory_gate():
+    from simverse.scenario import BudgetInput, DeploymentSpec
+
+    colocated = run_v2(ScenarioV2(method_id="dflash_v1"))
+    draft_collectives = colocated.cost["draft_block"]["collectives"]
+    assert draft_collectives["total_t_ms"] > 0
+    assert draft_collectives["counts_by_kind"]["allreduce"] == 12
+
+    measured = BudgetInput(allocatable_bytes=70 * 1024**3,
+                           allocatable_kind="measured", allocatable_source="fixture")
+    pipeline = run_v2(ScenarioV2(deployment=DeploymentSpec(
+        mode="dt_pipeline_sim", target_tp=8, draft_tp=1,
+        budget=measured,
+        draft_budget=BudgetInput(allocatable_bytes=40 * 1024**3,
+                                 allocatable_kind="measured",
+                                 allocatable_source="fixture"))))
+    assert pipeline.cost["draft_block"]["collectives"]["total_t_ms"] == 0
+    assert "draft_r0" in pipeline.cost["memory"]
+    assert pipeline.cost["memory"]["draft_r0"]["peak_complete"] is False
+    assert pipeline.metrics["M02_speedup_vs_baseline"].reason
+    base = run_v2(ScenarioV2(method_id="baseline", draft_id=None,
+                             deployment={"mode": "baseline"}))
+    assert compare_runs(base, [pipeline])["rows"][0]["eligible"] is False
+
+
+def test_missing_stage_cost_rejected_and_unpinned_mtp_fails_cleanly():
+    from simverse.execute.serial import build_serial_round
+    from simverse.methods import build_method_plan
+
+    plan = build_method_plan("baseline", {}, 1)
+    with pytest.raises(ValueError, match="decode"):
+        build_serial_round(plan, {}, 1.0)
+    bundle = run_v2(ScenarioV2(model_id="deepseek_v41_flash",
+                               method_id="mtp", k=3))
+    assert bundle.manifest.status == "failed"
+    assert "MTP" in bundle.metrics["error"].reason
 
 
 # ---------------------------------------------------------------------------

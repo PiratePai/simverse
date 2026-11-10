@@ -22,7 +22,7 @@ from simverse.model_ir.catalog import build_catalog  # noqa: E402
 
 Q16 = {"dense_w": 16, "expert_w": 16, "act": 16, "kv": 16, "state": 32}
 
-_CAT = build_catalog()
+_CAT = build_catalog(include_internal=True)
 
 
 def _model():
@@ -138,6 +138,68 @@ def test_hc_weights_replicated_under_tp():
     assert hc_bytes(1) == hc_bytes(8)
     # 手算：mix=24, hc_dim=20480 → 2×(24·20480·4 + 24·4 + 3·4) = 3,932,376 B
     assert hc_bytes(1) == 2 * (24 * 20480 * 4 + 24 * 4 + 3 * 4)
+
+
+def test_v41_tp_must_divide_o_groups():
+    from simverse.lowering import validate_parallel
+    m = _model()
+    assert validate_parallel(m, 8, 1).valid
+    bad = validate_parallel(m, 16, 1)
+    assert not bad.valid and any("o_groups" in e for e in bad.errors)
+
+
+def test_v41_oa_proj_group_count_absolute_oracle_tp1_2_4_8():
+    """F2 独立绝对值 oracle：o_a 每 rank ng=o_groups/tp 组，不许只算一组。
+
+    逐 TP 手算：2·T·(heads·d/groups)·orank·ng FLOPs；
+    权重/容量 = (heads·d/groups)·orank·ng·2B；激活读/写同样乘 ng。
+    """
+    m = _model()
+    h, heads, d, groups, orank = 5120, 64, 512, 8, 1024
+    group_in = heads * d // groups          # 4096
+    b = 2                                  # Q16
+    T = 1
+    for tp in (1, 2, 4, 8):
+        ng = groups // tp
+        rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp)
+                if r.op == "o_a_proj"]
+        assert len(rows) == 40
+        for r in rows:
+            assert r.flops == 2 * T * group_in * orank * ng
+            assert r.weight_read == group_in * orank * ng * b
+            assert r.act_read == T * group_in * ng * b
+            assert r.act_write == T * orank * ng * b
+            assert r.weight_capacity == group_in * orank * ng * b
+        # 每层一组值；TP1 是 TP8 的 8 倍（同一层、同一 token）
+        assert sum(r.flops for r in rows) == 40 * 2 * T * group_in * orank * ng
+
+
+def test_v41_oa_proj_memory_absolute_oracle_tp1_2_4_8():
+    """memory 与 work 同步乘 ng：独立复算每层 dense 权重字节。"""
+    m = _model()
+    kvs = m.extras["kv_spec"]
+    h, heads, d, groups, orank = 5120, 64, 512, 8, 1024
+    qrank, di, ih = 1280, 128, 32
+    for tp in (1, 2, 4, 8):
+        ng = groups // tp
+        heads_tp = heads // tp
+        expect = 0
+        for layer in m.layers:
+            a = layer.csa2
+            mlt = 2 if a.ratio == 2 else 1
+            terms = (h * qrank + h * d + qrank * heads_tp * d
+                     + (heads * d // groups) * orank * ng
+                     + ng * orank * h)
+            if a.produces_kv:
+                terms += h * d * mlt + d * di
+            if a.produces_index:
+                terms += h * ih + qrank * ih * di
+            expect += terms * 2          # Q16 dense
+        got = sum(a.bytes for a in target_weight_allocations(m, Q16, tp)
+                  if "-w-dense-L" in a.alloc_id)
+        assert got == expect, (tp, got, expect)
+        # 如果 o_a 漏乘 ng，恰好少这一段；TP8 无差异
+        assert got - expect == 0
 
 
 def test_v41_attention_weight_conservation_count_vs_memory():

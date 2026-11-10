@@ -11,8 +11,16 @@ import pytest
 
 from simverse.cost.profile_store import (PROFILE_SETS, ProfileIntegrityError,
                                          load_profile_set)
+from simverse.model_ir import build_catalog
 from simverse.pipeline import run_v2
 from simverse.scenario import ScenarioV2
+
+# 历史校准闭环只允许显式注入归档目录；生产入口默认看不到这些模型。
+_ARCHIVE_CAT = build_catalog(include_internal=True)
+
+
+def _run_archive(sc, **kw):
+    return run_v2(sc, catalog=_ARCHIVE_CAT, **kw)
 
 ROOT = Path(__file__).resolve().parent.parent
 SET_ID = "h200-qwen3-30b-a3b-tiny-op-v1"
@@ -93,7 +101,7 @@ def test_exact_grid_lookup_matches_distill():
 # ---------------------------------------------------------------------------
 
 def test_stage_composition_arithmetic():
-    b = run_v2(_scenario()).to_json()
+    b = _run_archive(_scenario()).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] and cal["reasons"] == []
 
@@ -133,7 +141,7 @@ def test_stage_composition_arithmetic():
 
 def test_gap_policy_no_double_billing():
     """间隙基数必须是计时区间数，不得按全部 kernel 数计（重复计费回归负例）。"""
-    b = run_v2(_scenario()).to_json()
+    b = _run_archive(_scenario()).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["kernels"] > cal["gap_regions"]  # kernel 数 > 区间数（多 kernel op）
     man = json.loads((ASSET / "manifest.json").read_text(encoding="utf-8"))
@@ -144,7 +152,7 @@ def test_gap_policy_no_double_billing():
 
 
 def test_metrics_disclosure_and_result_kind():
-    b = run_v2(_scenario()).to_json()
+    b = _run_archive(_scenario()).to_json()
     m = b["metrics"]["M01_tpot_profile_calibrated"]
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert m["value"] == pytest.approx(
@@ -169,7 +177,7 @@ def test_domain_reject_tp8_all_fallback_with_reason():
     sc = _scenario(deployment={"mode": "baseline", "target_device": "h200_sxm",
                                "target_tp": 8, "draft_device": "l40",
                                "draft_tp": 1, "link": "pcie5"})
-    b = run_v2(sc).to_json()
+    b = _run_archive(sc).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("TP" in r for r in cal["reasons"])
@@ -184,19 +192,18 @@ def test_domain_reject_tp8_all_fallback_with_reason():
 def test_domain_reject_precision_mismatch():
     sc = _scenario(quant={"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
                           "state": 32})
-    b = run_v2(sc).to_json()
+    b = _run_archive(sc).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("精度" in r for r in cal["reasons"])
 
 
-def test_domain_reject_wrong_model_shape():
+def test_cross_model_profile_rejected_before_shape_gate():
+    """历史 profile 绑定 30B；即使 hidden 相同也不得套到 Qwen3.6 上。"""
     data = _scenario().to_json()
-    data["model_id"] = "qwen36_35b_a3b"   # hidden 相同但头布局/GDN 不同
-    b = run_v2(ScenarioV2.from_json(data)).to_json()
-    cal = b["cost"]["calibration"]["stages"]["target_decode"]
-    assert cal["domain_ok"] is False
-    assert any("形状" in r or "heads" in r for r in cal["reasons"])
+    data["model_id"] = "qwen36_35b_a3b"
+    with pytest.raises(ValueError, match="禁止用于 qwen36_35b_a3b"):
+        _run_archive(ScenarioV2.from_json(data))
 
 
 def test_shape_gate_operator_composition_semantics():
@@ -230,7 +237,7 @@ def test_shape_gate_operator_composition_semantics():
 
 def test_unknown_profile_set_rejected():
     with pytest.raises(ValueError):
-        run_v2(_scenario(cost_profile="not-a-profile-set"))
+        _run_archive(_scenario(cost_profile="not-a-profile-set"))
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +250,7 @@ def test_chain_draft_verify_mixed_coverage():
         deployment={"mode": "colocated", "target_device": "h200_sxm",
                     "target_tp": 1, "draft_device": "h200_sxm", "draft_tp": 1,
                     "link": "pcie5"})
-    b = run_v2(sc).to_json()
+    b = _run_archive(sc, allow_internal_methods=True).to_json()
     stages = b["cost"]["calibration"]["stages"]
     assert "verify" in stages
     v = stages["verify"]
@@ -289,9 +296,9 @@ BF16_UI_SCENARIO = {   # workbench.js QUANT_PRESETS.bf16 档拼出的场景等�
     "cost_profile": SET_ID, "seed": 0}
 
 
-def test_ui_bf16_preset_enters_calibration_domain():
-    # 通道 1：进程内
-    inproc = run_v2(ScenarioV2.from_json(BF16_UI_SCENARIO)).to_json()
+def test_archive_bf16_calibration_still_verified_offline():
+    """离线归档通道：保留校准数值验证；不得经 API/CLI 产品入口运行。"""
+    inproc = _run_archive(ScenarioV2.from_json(BF16_UI_SCENARIO)).to_json()
     m = inproc["metrics"].get("M01_tpot_profile_calibrated")
     assert m is not None and m["value"] > 0
     assert inproc["capability"]["checks"]["cost_profile_domain"]["status"] == \
@@ -299,17 +306,16 @@ def test_ui_bf16_preset_enters_calibration_domain():
     cal = inproc["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] and cal["coverage_time_frac"] > 0.7
 
-    # 通道 2：/api/v2/run（UI 实际通道）——同 run_id 同值
+    # 产品 API 不得运行已归档模型，也不得暴露历史 profile
     from simverse.webapp import app
-    from simverse.contracts import js_restore
     client = app.test_client()
     r = client.post("/api/v2/run", json=BF16_UI_SCENARIO)
-    assert r.status_code == 200, r.data
-    web = js_restore(r.get_json())
-    assert web["manifest"]["run_id"] == inproc["manifest"]["run_id"]
-    assert web["metrics"]["M01_tpot_profile_calibrated"]["value"] == m["value"]
+    assert r.status_code == 400, r.data
+    cat = client.get("/api/v2/catalog").get_json()
+    assert cat["profile_sets"] == []
+    assert all(p["status"] == "archived" for p in cat["archived_profiles"])
 
-    # 通道 3：CLI 场景文件读同一 JSON
+    # CLI 只校验场景解析；产品 run-v2 同样拒绝归档模型。
     from simverse.cli import _v2_scenario
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
@@ -318,8 +324,6 @@ def test_ui_bf16_preset_enters_calibration_domain():
         path = f.name
     sc = _v2_scenario(path)
     assert sc.quant["dense_w"] == 16 and sc.cost_profile == SET_ID
-    cli_b = run_v2(sc).to_json()
-    assert cli_b["manifest"]["run_id"] == inproc["manifest"]["run_id"]
 
 
 def test_ui_static_precision_selector_wired():

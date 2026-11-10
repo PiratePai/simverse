@@ -1,12 +1,69 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-10（校准闭环复审修复 + 235B 第二闭环 + V4.1 hc 建模轮）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（本地，无远端——Q3 私有远端信息待补）；包版本 0.2.0（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（当前 132 passed，无警告输出）；
-工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /，v0.1 简表 /legacy）。
-合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G7 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+更新：2026-11-10（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（分支 `codex/forward-merge-gate`；远端公开仓库 `PiratePai/simverse`，候选分支已推送、PR [#1](https://github.com/PiratePai/simverse/pull/1) 已建；main 保护规则未配置）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（全量由外层 Codex 唯一执行；2026-11-10 hermetic 修复后本地全量 exit 0：196 passed，5.04s，1 条既有 Windows 子进程 UTF-8 解码警告；本轮 CLI 导出编码修复新增 1 项回归用例，当前收集 197，全量待外层重跑；不代表远端已通过）。
+**pytest 收集数：197**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-10；196→197 为本轮新增“非 UTF-8 stdio 导出”回归用例；最终全量结果见本轮审查记录）。
+工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
+合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
-## 0. 必读上下文
+**CI hermetic 修复（2026-11-10）**：`tests/test_consistency.py` 两项验收不再读取
+被 `.gitignore` 忽略的 `outputs/run_v41.json`。CSV 导出改为复核本次 `run` 新落盘的
+RunResult；固定场景重放改用纳入版本库、带 provenance 的历史快照
+`tests/fixtures/v41_flash_dt_verification_expected.json`。远端 run `42803015653`
+的 `2 failed, 194 passed` 是 clean checkout 缺文件；此前本地 `196 passed` 属环境
+假阳性。详见 [Windows CI hermetic 修复](validation/windows-ci-hermetic-fix-20261110.md)。
+该轮测试总数仍为 196（后续编码修复新增 1 项后为 197）。
+
+**CLI 导出编码修复（2026-11-10 后续）**：远端 run `42805472945`（PR）与
+`42805463611`（push）的唯一失败是 `test_csv_export_matches_runresult`：
+Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写文件
+成功后 `print("已写 ...")` 抛 `UnicodeEncodeError`，进程 exit 1。CLI 现在在
+`main()` 统一把 stdout/stderr 设为 UTF-8 + `backslashreplace`；测试显式固定
+子进程 stdio 编码，并新增 cp1252 回归用例。收集数 196→197，详见
+[Windows CI hermetic 修复 §6](validation/windows-ci-hermetic-fix-20261110.md)。
+
+**外层本地验收（2026-11-10，hermetic 修复后）**：外层 Codex 唯一一次全量
+`py -3.12 -m pytest tests -q` 实际 exit 0：`196 passed, 1 warning in 5.04s`；
+警告为既有的 Windows 子进程 UTF-8 解码线程（`test_csv_export_matches_runresult`）。
+该结果只证明本地工作区（含尚未提交的修复）通过，不是 clean checkout 或远端 CI
+通过证据。修复文件尚未提交/推送；PR #1 现有检查仍是修复前失败记录，远端重跑
+由外层执行。
+
+## 0. 当前有效状态（2026-11-10 两模型门禁轮）
+
+- **活跃目录恰两款**：`deepseek_v41_flash`、`qwen36_35b_a3b`，加绑定 Qwen3.6 的
+  `dflash_qwen36_35b_a3b` DraftIR。`qwen3_30b_a3b`、`qwen3_235b_a22b`、
+  `qwen3_next_80b_a3b`、`deepseek_v3` 移出运行时注册；tiny 只作内部测试 fixture。
+  历史模型/场景/profile 保留为离线归档，API/CLI/工作台不可选择。
+- **证据分栏**：`ModelIR.evidence` 记录 forward 源码、CPU 执行、GPU 实测三栏；
+  `config_coverage_complete`、`forward_evidence_complete`、`structure_complete`
+  分开。完整 config（含嵌套叶键）逐项登记，未知键不得默认 ignored。
+  - Qwen3.6：config 覆盖完整；GDN/full-attn gate/MoE router+shared gate/TP-EP
+    分片 source-checked；MTP 只有 config+目标首层模板 → **unverified**；
+    forward 仍不完整，不能参与部署排名。
+  - V4.1：Engram 8 键、CSA2/MoE、candidate、swiglu、quantization_config 仍为
+    缺口；mHC 仅 source-checked；CPU/GPU 均未执行。
+  - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成未核、拒绝采样/KV
+    回退/hidden 提取仍 0 占位；CPU/GPU 未执行。
+- **本轮修复**：V4.1 `o_a_proj` 分组在 work/memory 同步乘 `ng`，并补 V4.1
+  attention memory 的 `b_dense` 单位（BF16 曾少 2×）；Qwen3.6 shared gate 在
+  IR/work/memory 计入；DFlash/MTP/chain 草稿 B>1 token 维乘一次；证据引用按
+  model/draft/profile 生成；source_map 行号/未核状态校正。
+- **当前数值**：默认 Qwen3.6+DFlash 稳态
+  2,827,505,088 B（shared gate +81,920 B），known_peak 2,828,236,096 B，仍不完整；
+  V4.1 o_a TP1 每层 67,108,864 FLOPs/容量 B，40 层约 +2.35 GFLOP/token
+  +2.52 GB(BF16)。详细归因/来源见
+  [两模型审查记录](validation/two-model-forward-merge-gate-20261110.md)。
+- **合入门禁**：G1–G17；`.github/workflows/merge-gate.yml` 覆盖
+  PR/push/merge_group，Windows + Node 20 + Python 3.12。required check/PR review
+  仍需仓库 ruleset 启用；2026-11-10 只读查询：仓库已公开（`isPrivate=false`），
+  main branch protection 返回 404 `Branch not protected`，rulesets 为空，
+  保护规则尚未配置。
+- **未完成**：V4.1 Engram/CSA2/MoE 源码与执行、Qwen3.6 MTP 原生 forward、
+  两款主模型 CPU/GPU 实测、DFlash 服务端集成与运行时池尺寸、真实可分配预算。
+
+## 0.1 必读上下文
 
 - 计划包：`docs/rebuild-20261106/`（EXECUTION_PROMPT.md 为本任务指令；
   questions.md Q1–Q12 已答；plan/principles/ui-data-contract 为验收依据）。
@@ -17,6 +74,11 @@
   M5 退役 v0.1。
 
 ## 1. 里程碑状态
+
+> 以下 M0–M5 段落保留历史日期与事实；其中“结构完备/90B/235B 活跃/180 passed”
+> 等表述已被 §0 的两模型轮取代。当前合入判断以 §0、MERGE_CRITERIA 与门禁测试为准。
+
+
 
 ### M0 证据冻结与红灯 — 完成
 - git init + 基线提交（5913cc5 起）；.gitignore 排除嵌套仓 references/model-verse-source。
@@ -83,9 +145,9 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   每点独立 run_id、breakeven 无交点返回 null 不造数；
   ComparisonPolicy（Q4 双资源政策、Q11 多目标并列、资格谓词、资源 delta 披露）。
 - 测试 tests/test_pipeline_v02.py：18 项。
-- 必需场景数字（Qwen3.6+DFlash colocated 8×H100 B1 ctx32k α0.72 blk16）：
-  基线 TPOT 3.4704ms、投机 1.6874ms、加速比 2.0567（容量标称口径→不排名标注）、
-  E[N]=3.5528、T_round=5.995ms（draft 0.163+verify 5.832）。
+- M2 初版历史数字（Qwen3.6+DFlash colocated 8×H100 B1 ctx32k α0.72 blk16）：
+  基线 TPOT 3.4704ms、投机 1.6874ms、加速比 2.0567。后续 A 组修复了逐层 TP 通信，
+  本轮再补 DFlash 草稿通信；**当前值见下方投机耗时复核**，此处不得作当前性能结论。
 
 ### UI（M1/M2 区域）— 完成（生产工作台）
 - simverse/static/workbench.html+js：复用 v3 DOM/CSS 骨架（场景栏/7 KPI/矩阵/
@@ -171,9 +233,47 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 - 远端：Q3 平台/账号/地址待补；未创建/推送任何远端。
 - v0.1 模块退役：待 M5 三方对账后。
 
+### 2026-11-10 A 组轮：Qwen3.6+DFlash TP/EP 分片与同卡可部署性（R01–R03b）
+
+报告入口：[docs/validation/agroup-tp-ep-colocated-20261110.md]
+(validation/agroup-tp-ep-colocated-20261110.md)（前后重放归因/支持矩阵/限制）。
+
+- **R01 统一配方**：新增 `simverse/lowering/parallel.py`（ParallelPlan；
+  vLLM @dc74b8cb pin 入册 assets/identity/vllm_qwen35_pin/，16 文件逐
+  SHA256，证据 ev-vllm-parallel-recipe）。count/moe、count/work（GQA/GDN/
+  head per-rank）、count/draft（同 TP 组草稿+补 q/k norm/rope/hidden_norm/
+  final norm 缺行）、lowering/memory、lowering/sharding（按层通信：EP MoE
+  层 dispatch/combine 替代 mlp allreduce）、pipeline 六处消费同一 plan。
+  TP 集合通信漏计修复（整模型 2 次 → 每层 2 次）。场景字段 target_ep
+  （∈{1,tp}，其余拒绝）入运行身份。source_map 新增 3 条（sm-vllm-*）。
+- **R02a/b 同卡账本**：物理 allocation 身份 + shared_identity + consumer
+  引用；草稿共享 target 词表行切 embed/lm_head（零字节引用，修复前幻影
+  副本≈1.017GB+去重失配）；GDN/草稿 KV/attention 权重 per-rank（补乘输入
+  宽 h）；草稿批=目标批；生命周期分列（resident/per-request/cross-round/
+  phase:draft|verify 串行取 max）+ unknown_components（workspace/graph/
+  NCCL 池，不填 0）→ peak_complete 标志；per-rank r0..r{tp-1} + 最坏 rank
+  报告（EP 余数 rank 差异显式）。
+- **R03a/b 预算与判定**：DeploymentSpec.target_ep/budget(BudgetInput:
+  allocatable_bytes/kind(measured|hypothesis)/source/extra_overhead，
+  gross 语义) ；DeviceBudget 分层；RankMemory.peak_vs_budget 四态
+  （unknown/oom/feasible/feasible-conditional；已知下界>标称即 OOM）；
+  compare/_eligibility 排除 conditional；M06 携带 known_peak/steady/完整性。
+- **UI**：工作台 EP 选择 + 预算输入（hypothesis）；浏览器实测（EP 生效
+  T_round 64.6↔112.6ms 可区分；预算进链路以原因文本证实；截图
+  docs/evidence/workbench_ep_budget_run.png）。
+- **数值归因**（默认场景前后）：TPOT 1.6874→31.70 / 基线 3.4704→112.21
+  （集合通信按层计费修复主导，pcie5 假设延迟 1.4ms×80 次；NVLink 规格
+  属 G-D8 未虚构）；显存 5,680,423,680（口径混乱单值）→ per-rank steady
+  2,827,423,168 + 临时峰值 2,135,746（明细见报告 §3）。235B TP8 校准
+  fallback 38.30→4.85ms（MoE per-rank 口径，断言随归因更新；defer 理由
+  改指 G-D2）。
+- 测试 132→176（parallel_sharding 19 + colocated_memory 11 +
+  budget_feasibility 14 + UI/场景接线 2；既有全保，tiny oracle 补 final
+  norm 项、tp 校验断言随检查项更名——均逐项归因）。
+
 ### 2026-11-09 数值可信度轮
 - [AGENTS.md](../AGENTS.md)（合入入口）+ [docs/MERGE_CRITERIA.md](MERGE_CRITERIA.md)
-  （准则规范）+ G1–G7 自动门禁（tests/test_merge_gate.py）。
+  （准则规范）+ G1–G17 自动门禁（tests/test_merge_gate.py）。
 - devices 口径修正 + h200_sxm；profile 校准分支修复；pipeline 接线实测 profile；
   H200 第一条算子级闭环（见 M4 节）。
 - 缺口清单分立：[docs/gaps/data-gaps.md](gaps/data-gaps.md)（数据采集 G-D1–G-D9）、
@@ -202,9 +302,9 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 | 验证 | 状态 | 证据 |
 |---|---|---|
 | V01 身份与协议 | 通过 | test_negative_v02（digest 全长/大整数/NaN/null+reason）|
-| V02 结构与 forward | 部分 | 层序/覆盖/源码 pin+分支映射（source_map）；小尺寸 CPU 执行 trace 未做（无 torch 环境，登记缺口）|
+| V02 结构与 forward | 部分 | 层序/覆盖/源码 pin+分支映射（source_map）；Qwen 固定源码两层随机权重 CPU shape probe 已做，真实 checkpoint/完整 forward 仍缺 |
 | V03 独立数学 oracle | 通过 | golden/oracles_v02 + test_model_ir/test_negative |
-| V04 lowering 与守恒 | 部分 | TP 校验/collectives 入账/容量对象；TP/EP 分片总量守恒断言未做全 |
+| V04 lowering 与守恒 | 大部分 | per-rank 统一配方（A组 R01）+ 跨 rank 守恒/复制对象不求和断言（test_parallel_sharding）；EP all2all/按层通信配方 |
 | V05 方法、协议与状态 | 部分 | 接受律/端点/未知传播/DFlash 计划绑定；事件级 transition trace 未做（M3）|
 | V06 显存生命周期 | 部分 | 静态+每请求对象、同卡去重；生命周期交错峰值未做（M3）|
 | V07 事件因果与资源 | 大部分 | 验证器六类检查+负例；资源调度核+两微批流水已接；单请求超前未做 |
@@ -216,21 +316,33 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 
 ## 3. 已知缺口与外部依赖（不虚构补齐；完整清单见 docs/gaps/）
 
-1. Qwen3.8 本地模型身份：待用户提供本地路径/revision（PENDING_ASSET 注册）。
-2. V4.1 Engram（8 键）：hc 三键已建模（2026-11-10）；Engram forward 源
-   （common/engram.py）未入评审包 → 仍 structure_complete=False。G-C1。
-3. DFlash 服务端集成（SGLang DFLASH/vLLM PR#40898）未逐行核对 → 部署矩阵
-   不显示”已部署验证”。G-C3。
-4. 设备可分配预算/价格：无来源 → feasible=unknown、成本 null+reason。G-D7/G-D9。
-   真实 profile：H200 两闭环（30B-tiny TP1 / 235B TP2-8）；MoE/verify/prefill/
-   E2E/kernel-only 见 G-D2/G-D4/G-D5/G-D6。
-5. 小尺寸 CPU forward 数值执行：本机无 torch 环境 → V02 数值语义分栏为
-   source-checked（如实，不冒充执行）。
-6. pi-viewer 适配器（V09b）：未建；数据通道经蒸馏已通（无需写旧仓）。
-7. 远端平台/账号（Q3）：待补。
-8. 移动端像素观感：截图存证但本会话通道无法目检。
-9. 子进程输出编码：当前全量测试无编码警告（2026-11-10 复核）；CLI 输出检查按
-   plan §6 保持为稳定验收项。
+1. **V4.1**：Engram（8 键，`common/engram.py` 未 pin）、CSA2/MoE
+   scoring/top-k/分组路由、candidate block、swiglu clamp、quantization_config
+   均为显式缺口；mHC 仅 source-checked、tilelang kernel 未执行。G-C1。
+2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
+   丢弃 `mtp.` → method status=unverified，不进入部署排名。
+3. **DFlash**：服务端集成（SGLang DFLASH/vLLM PR#40898）未逐行核对；拒绝采样/
+   KV 回退/hidden 提取仍 0 占位；workspace/graph/NCCL 池尺寸未知。G-C3。
+4. **设备可分配预算/价格**：无来源 → feasible=unknown、成本 null+reason。
+   H200 两闭环绑定已归档的 30B-tiny/235B，不能跨模型使用。G-D7/G-D9。
+5. **CPU/GPU 执行**：Qwen 固定 HF 源码两层随机权重 CPU shape probe 已执行；
+   两款真实主模型仍无完整 forward 或 GPU/部署实测。V02 数值语义保持
+   source-checked/未执行，不冒充模型级 shape/numeric-checked。
+6. **历史归档**：30B/235B/Next/V3 与 tiny fixture 只可显式注入归档目录；
+   `h200_calib_*` 场景标 archived。Qwen3.8 本地身份仍 PENDING_ASSET。
+7. pi-viewer 适配器（V09b）：未建；数据通道经蒸馏已通（无需写旧仓）。
+8. 远端 required check/PR review：未配置。历史事实：私有仓库时期（2026-11-10
+   修复前）只读查询 main branch protection 与 rulesets 均返回 HTTP 403
+   （需 GitHub Pro 或转为公开）。仓库现已公开；同日复查询返回 404
+   `Branch not protected`、rulesets 为空，故强制检查仍未启用。PR #1 已建，
+   其现有检查是修复前失败记录；工作流文件仅提供自动检查，不能强制阻止合入。
+9. 移动端像素观感：截图存证但本会话通道无法目检；`tmp_path` 用例在本机
+   DSH 沙箱目录权限下未能完成（setup PermissionError）。历史事实：hermetic
+   修复前外层本地 `196 passed` 因复用 ignored `outputs/run_v41.json`，不代表
+   clean checkout；远端 run `42803015653` 的 2 项失败即该文件缺失。两项验收
+   已按 hermetic 方式修复，外层 Codex 于 2026-11-10 验收本地全量 exit 0：
+   `196 passed, 1 warning in 5.04s`。修复文件尚未提交/推送，远端重跑待外层执行
+   （见 [Windows CI hermetic 修复](validation/windows-ci-hermetic-fix-20261110.md)）。
 
 ## 4. 恢复入口
 
@@ -242,15 +354,22 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 - v0.1 存档重放：`py -3.12 -m simverse.cli run`（legacy）
 - 证据产物（已入册 docs/evidence/）：workbench_desktop_run.png、
   workbench_mobile_run.png、run_v2_qwen36_dflash.json、ops_v2.csv、
-  trace_v2.csv、report_v2.html。
-- 下一工作项：G-C11 per-rank MoE 分片账本（→ G-D2 首选路径 235B moe 准入）；
-  G-C1 Engram 源 pin（等上游评审包）；G-D4/G-C2 prefill/verify 形状域；
-  G-D6/G-C5 KERNEL_ONLY 双口径；G-D1/G-C3 DFlash 实测与集成核对；
-  G-C4 单请求超前事件 → M17；V09b 三方对账。
+  trace_v2.csv、report_v2.html（历史轮）；A 组轮：
+  run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
+  trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
+- 下一工作项：V4.1 Engram/CSA2/MoE 源 pin 与执行；Qwen3.6 MTP 原生 forward；
+  两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/运行时池尺寸；
+  可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；G-C4 单请求超前 → M17；
+  V09b 三方对账。历史 235B MoE 蒸馏仅作归档研究，不再是产品优先项。
 
 
 ## 2026-11-10 产品范围收敛
 
-产品目录仅展示 Qwen3.6-35B-A3B 和 DeepSeek-V4.1-Flash。历史模型保留为内部回归/校准资产，不再作为产品扩展优先项。用户已确认 Qwen3.5 为笔误，沿用 Qwen3.6-35B-A3B 及其 DFlash 配对。
-默认 Qwen3.6+DFlash 结构检查通过；不排名的直接原因是可分配显存未知，非已确认 OOM。现在输出实际检查原因。DFlash checkpoint 禁止用于未经核对的其他主模型。
-本轮详细功能状态见 [FOCUS_STATUS.md](FOCUS_STATUS.md)。
+产品目录仅展示 Qwen3.6-35B-A3B 和 DeepSeek-V4.1-Flash。历史模型已移出运行时
+catalog，只作离线归档回归/校准资产；tiny 只作测试 fixture。用户已确认 Qwen3.5
+为笔误，沿用 Qwen3.6-35B-A3B 及其 DFlash 配对。
+默认 Qwen3.6+DFlash 不排名同时受限于：forward 证据未完备（MTP 未核）、
+真实主模型 CPU/GPU 未完整执行、可分配显存未知——不能简化成单一“OOM”或“结构通过”。DFlash
+checkpoint 禁止用于未经核对的其他主模型；历史 profile 跨模型直接拒绝。
+本轮详细功能状态见 [FOCUS_STATUS.md](FOCUS_STATUS.md) 与
+[两模型审查记录](validation/two-model-forward-merge-gate-20261110.md)。

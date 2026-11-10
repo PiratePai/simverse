@@ -80,19 +80,23 @@ def gqa_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
     attn = layer.attn
     b_w, b_a, b_kv = quant["dense_w"] / 8, quant["act"] / 8, quant["kv"] / 8
     heads_c = attn.heads // tp
-    kv_heads_c = max(1, attn.kv_heads // tp) if tp <= attn.kv_heads else attn.kv_heads
+    # KV 头 per-rank（vLLM QKVParallelLinear：kvh≥tp → kvh/tp；kvh<tp → 复制）
+    kv_heads_c = attn.kv_heads // tp if attn.kv_heads >= tp else attn.kv_heads
+    kv_replicated = attn.kv_heads < tp
     T = B * Q
     win = attn.sliding_window
     rows: List[OpRow] = []
-    gemm = lambda op, ic, oc: OpRow(
+    gemm = lambda op, ic, oc, note="": OpRow(
         stage, li, op, flops=2 * T * ic * oc, weight_read=int(ic * oc * b_w),
         act_read=int(T * ic * b_a), act_write=int(T * oc * b_a),
         weight_capacity=int(ic * oc * b_w), formula=FR.F_GEMM,
-        shape=f"[{T},{ic}]@[{ic},{oc}]")
-    # q_proj（output_gated: 输出 2×，gate 与 query 同投影）
+        shape=f"[{T},{ic}]@[{ic},{oc}]{note}")
+    # q_proj（output_gated: 输出 2×，gate 与 query 同投影）；列切 /tp
     rows.append(gemm("q_proj", h, attn.q_out // tp))
-    rows.append(gemm("k_proj", h, attn.kv_out))
-    rows.append(gemm("v_proj", h, attn.kv_out))
+    # k/v_proj：kvh≥tp 列切 kvh/tp；kvh<tp 复制全量（每 rank 同字节）
+    kv_note = "（KV 头复制）" if kv_replicated else ""
+    rows.append(gemm("k_proj", h, kv_heads_c * attn.head_dim, kv_note))
+    rows.append(gemm("v_proj", h, kv_heads_c * attn.head_dim, kv_note))
     # 因果（滑窗）可见对数
     if layer.kind == SLIDING and win:
         end, start = S + Q, S
@@ -103,7 +107,7 @@ def gqa_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
         pairs = B * (S * Q + Q * (Q + 1) // 2)
         read_rows = S
         f_id = FR.F_CAUSAL_PAIRS
-    kv_elems = 2 * attn.kv_heads * attn.head_dim
+    kv_elems = 2 * kv_heads_c * attn.head_dim   # per-rank KV 元素
     rows.append(OpRow(
         stage, li, "attention_core",
         flops=pairs * heads_c * (4 * attn.head_dim + 5),
@@ -111,15 +115,19 @@ def gqa_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
         act_write=int(T * heads_c * attn.head_dim * b_a),
         kv_read=int(B * read_rows * kv_elems * b_kv),
         kv_write=int(T * kv_elems * b_kv),
-        formula=FR.F_ATTN_CORE, shape=f"pairs={pairs} heads(card)={heads_c} {f_id}"))
+        formula=FR.F_ATTN_CORE,
+        shape=f"pairs={pairs} heads(card)={heads_c} kv(card)={kv_heads_c}"
+              f"{'（复制）' if kv_replicated else ''} {f_id}"))
     rows.append(gemm("o_proj", attn.heads * attn.head_dim // tp, h))
     # q/k head-norm + RoPE
     if attn.qk_head_norm:
-        for name, hd in (("q_norm", attn.heads), ("k_norm", attn.kv_heads)):
+        for name, hd in (("q_norm", heads_c), ("k_norm", kv_heads_c)):
             ops, w, ar, aw = _norm_row(T, attn.head_dim, b_a)
             rows.append(OpRow(stage, li, name, flops=ops * hd, weight_read=w,
-                              act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
-                              shape=f"{hd} 头 × d={attn.head_dim}"))
+                              act_read=ar * hd, act_write=aw * hd,
+                              formula=FR.F_RMSNORM,
+                              shape=f"{hd} 头(卡上) × d={attn.head_dim}"
+                                  f"（act 按 ×hd 计，2026-11-10 修正漏乘）"))
     ops, _w, ar, aw = _rope_row(T, heads_c, attn.head_dim, attn.rotary_dim, b_a)
     rows.append(OpRow(stage, li, "rope", flops=ops, act_read=ar, act_write=aw,
                       formula=FR.F_ROPE, shape=f"rotary={attn.rotary_dim}"))
@@ -138,38 +146,46 @@ def gdn_layer_rows(stage: str, li: int, layer: LayerIR, B: int, Q: int, h: int,
     b_a = quant["act"] / 8
     b_state = quant.get("state", 32) / 8     # mamba_ssm_dtype 默认 fp32
     T = B * Q
+    # per-rank 几何（vLLM in_proj_qkvz/ba 列切 + out_proj 行切 + 状态切分）
+    nv = g.num_v_heads // tp
+    key_dim_r = g.head_k_dim * (g.num_k_heads // tp)
+    value_dim_r = g.head_v_dim * nv
+    qkv_out_r = g.qkv_out // tp
+    state_elems_r = nv * g.head_k_dim * g.head_v_dim
     rows: List[OpRow] = []
     gemm = lambda op, ic, oc: OpRow(
         stage, li, op, flops=2 * T * ic * oc, weight_read=int(ic * oc * b_w),
         act_read=int(T * ic * b_a), act_write=int(T * oc * b_a),
         weight_capacity=int(ic * oc * b_w), formula=FR.F_GEMM,
         shape=f"[{T},{ic}]@[{ic},{oc}]")
-    rows.append(gemm("in_proj_qkv", h, g.qkv_out))
-    rows.append(gemm("in_proj_z", h, g.value_dim))
-    rows.append(gemm("in_proj_ba", h, 2 * g.num_v_heads))
-    # depthwise 因果卷积：每 token conv_dim×kernel 乘加（近似逐元素）
+    # in_proj_qkv + in_proj_z（vLLM 融合为 in_proj_qkvz，列切 /tp）
+    rows.append(gemm("in_proj_qkv", h, (2 * key_dim_r + value_dim_r)))
+    rows.append(gemm("in_proj_z", h, value_dim_r))
+    rows.append(gemm("in_proj_ba", h, 2 * nv))
+    # depthwise 因果卷积：每 token conv_dim(卡上)×kernel 乘加（近似逐元素）
     rows.append(OpRow(
-        stage, li, "causal_conv1d", flops=2 * T * g.qkv_out * g.conv_kernel,
-        act_read=int(T * g.qkv_out * g.conv_kernel * b_a),
-        act_write=int(T * g.qkv_out * b_a),
+        stage, li, "causal_conv1d", flops=2 * T * qkv_out_r * g.conv_kernel,
+        act_read=int(T * qkv_out_r * g.conv_kernel * b_a),
+        act_write=int(T * qkv_out_r * b_a),
         formula=FR.F_GDN_STEP, statistic="exact",
-        shape=f"depthwise k={g.conv_kernel} over {g.qkv_out}"))
-    # 递推：每 token 4·state_elems OP；state 读+写（prefill 全序列逐步同样递推）
+        shape=f"depthwise k={g.conv_kernel} over {qkv_out_r}(卡上)"))
+    # 递推：每 token 4·state_elems(卡上) OP；state 读+写（prefill 同样逐步递推）
     rows.append(OpRow(
-        stage, li, "gdn_recurrence", flops=4 * T * g.state_elems,
-        state_read=int(T * g.state_elems * b_state),
-        state_write=int(T * g.state_elems * b_state),
-        state_capacity=int(g.state_elems * b_state + g.conv_state_elems * b_a),
+        stage, li, "gdn_recurrence", flops=4 * T * state_elems_r,
+        state_read=int(T * state_elems_r * b_state),
+        state_write=int(T * state_elems_r * b_state),
+        state_capacity=int(state_elems_r * b_state
+                           + qkv_out_r * (g.conv_kernel - 1) * b_a),
         formula=FR.F_GDN_STEP, statistic="approximated",
-        shape=f"N_v={g.num_v_heads} d_k={g.head_k_dim} d_v={g.head_v_dim} "
-              f"state={g.state_elems} elem（每请求常数）"))
-    # RMSNormGated(v) + out_proj
+        shape=f"N_v={nv}(卡上) d_k={g.head_k_dim} d_v={g.head_v_dim} "
+              f"state={state_elems_r} elem（每请求常数，per-rank）"))
+    # RMSNormGated(v) + out_proj（行切：value_dim(卡上)→h）
     ops, w, ar, aw = _norm_row(T, g.head_v_dim, b_a)
-    rows.append(OpRow(stage, li, "v_norm_gated", flops=ops * g.num_v_heads,
-                      weight_read=w, act_read=ar * g.num_v_heads,
-                      act_write=aw * g.num_v_heads, formula=FR.F_RMSNORM,
-                      shape=f"{g.num_v_heads} 头 × d_v={g.head_v_dim}"))
-    rows.append(gemm("out_proj", g.value_dim, h))
+    rows.append(OpRow(stage, li, "v_norm_gated", flops=ops * nv,
+                      weight_read=w, act_read=ar * nv,
+                      act_write=aw * nv, formula=FR.F_RMSNORM,
+                      shape=f"{nv} 头(卡上) × d_v={g.head_v_dim}"))
+    rows.append(gemm("out_proj", value_dim_r, h))
     return rows
 
 
@@ -241,11 +257,15 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
     start, length = (0, S + Q) if prefill else (S, Q)
     end = start + length
     rows: List[OpRow] = []
-    gemm = lambda op, ic, oc, wmult=1.0: OpRow(
-        stage, li, op, flops=2 * T * ic * oc, weight_read=int(ic * oc * wmult),
-        act_read=int(T * ic * b_a), act_write=int(T * oc * b_a),
-        weight_capacity=int(ic * oc * wmult), formula=FR.F_GEMM,
-        shape=f"[{T},{ic}]@[{ic},{oc}]")
+    def gemm(op, ic, oc, reps: int = 1):
+        """reps>1：分组投影（V4.1 o_a 每 rank ng 组，每组独立权重/激活）。"""
+        return OpRow(
+            stage, li, op, flops=2 * T * ic * oc * reps,
+            weight_read=int(ic * oc * reps * b_w),
+            act_read=int(T * ic * reps * b_a), act_write=int(T * oc * reps * b_a),
+            weight_capacity=int(ic * oc * reps * b_w), formula=FR.F_GEMM,
+            shape=f"{reps}×[{T},{ic}]@[{ic},{oc}]" if reps > 1
+            else f"[{T},{ic}]@[{ic},{oc}]")
     rows.append(gemm("q_a_proj", h, qrank))
     rows.append(gemm("kv_proj", h, d))
     for name, width in (("q_norm", qrank), ("k_norm", d)):
@@ -336,8 +356,11 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
     ops, _w, ar, aw = _rope_row(T, heads, d, rd, b_a)
     rows.append(OpRow(stage, li, "o_rope", flops=ops, act_read=ar, act_write=aw,
                       formula=FR.F_ROPE, shape=f"rotary={rd}"))
-    rows.append(gemm("o_a_proj", heads_full * d // groups, orank))
-    rows[-1].shape = f"分组 {ng}×[{heads_full * d // groups},{orank}]"
+    # o_a_proj：每 rank 持有 ng=groups/tp 组，每组输入 heads_full·d/groups、
+    # 输出 orank；count 必须乘 ng（2026-11-10 审计 F2：旧式只算一组，TP1 少 8×）
+    rows.append(gemm("o_a_proj", heads_full * d // groups, orank, reps=ng))
+    rows[-1].shape = (f"分组 {ng}×[{heads_full * d // groups},{orank}]"
+                      f"（reps={ng}；TP{tp}）")
     rows.append(gemm("o_b_proj", ng * orank, h))
     return rows
 
@@ -348,11 +371,13 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
 
 
 def ffn_or_moe_rows(stage: str, li: int, layer: LayerIR, T: int, h: int,
-                    quant: dict) -> List[OpRow]:
+                    quant: dict, tp: int = 1, ep: int = 1,
+                    local_experts: Optional[int] = None) -> List[OpRow]:
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
     rows: List[OpRow] = []
     if layer.moe is not None and layer.moe.experts:
-        for r in moe_rows(layer.moe, T, h, quant):
+        for r in moe_rows(layer.moe, T, h, quant, tp=tp, ep=ep,
+                          local_experts=local_experts):
             rows.append(OpRow(stage, li, r["layer_op"], flops=r["flops"],
                               weight_read=r["weight_read"],
                               weight_read_expected=r.get("weight_read_expected"),
@@ -361,7 +386,7 @@ def ffn_or_moe_rows(stage: str, li: int, layer: LayerIR, T: int, h: int,
                               formula=r["formula"], statistic=r["statistic"],
                               shape=r["shape"]))
     elif layer.dense_inter:
-        inter = layer.dense_inter
+        inter = layer.dense_inter // tp       # dense MLP 列切（同 shared expert）
         for name, ic, oc in (("gate_up_proj", h, 2 * inter), ("down_proj", inter, h)):
             rows.append(OpRow(stage, li, name, flops=2 * T * ic * oc,
                               weight_read=int(ic * oc * b_w),
@@ -445,26 +470,38 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
 def head_rows(stage: str, model: ModelIR, T: int, quant: dict, tp: int) -> List[OpRow]:
     h, v = model.hidden, model.vocab
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
-    rows = [OpRow(stage, -1, "lm_head", flops=2 * T * h * (v // tp),
-                  weight_read=int(h * (v // tp) * b_w),
-                  act_read=int(T * h * b_a), act_write=int(T * (v // tp) * b_a),
-                  weight_capacity=int(h * (v // tp) * b_w),
-                  formula=FR.F_LM_HEAD, shape=f"h×V/tp（列切分）")]
+    rows: List[OpRow] = []
+    # final norm（model.norm，每 rank 复制；2026-11-10 补齐——HF/vLLM forward
+    # 均有 final RMSNorm，此前缺行）
+    ops, w, ar, aw = _norm_row(T, h, b_a)
+    rows.append(OpRow(stage, -1, "final_norm", flops=ops, weight_read=w,
+                      act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
+                      shape=f"width={h}（final，replicated）"))
+    rows.append(OpRow(stage, -1, "lm_head", flops=2 * T * h * (v // tp),
+                      weight_read=int(h * (v // tp) * b_w),
+                      act_read=int(T * h * b_a), act_write=int(T * (v // tp) * b_a),
+                      weight_capacity=int(h * (v // tp) * b_w),
+                      formula=FR.F_LM_HEAD, shape=f"h×V/tp（列切分）"))
     if not model.tie_embeddings:
         rows.append(OpRow(stage, -1, "embed_lookup",
                           act_read=int(T * h * b_a), act_write=int(T * h * b_a),
-                          weight_capacity=int(h * v * b_w),
-                          formula=FR.F_EMBED, shape="查表 1 行/token；容量 h×V"))
+                          weight_capacity=int(h * (v // tp) * b_w),
+                          formula=FR.F_EMBED,
+                          shape=f"查表 1 行/token；容量 h×V/tp（词表行切）"))
     return rows
 
 
 def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                      quant: dict, tp: int = 1, prefill: bool = False,
-                     role: str = "target") -> List[OpRow]:
-    """整模型一个阶段的逻辑账本。
+                     role: str = "target", ep: int = 1, rank: int = 0,
+                     plan=None) -> List[OpRow]:
+    """整模型一个阶段的逻辑账本（**per-rank 口径**，rank=0 均匀假设）。
 
     decode/verify：ctx=查询前缓存长度 S；queries=新查询数 Q。
     prefill：S=0、queries=ctx（Q=整段）。
+    ep/rank：EP 开时 MoE 行按该 rank 的本地专家数（余数 rank +1）；
+    plan：可传入 lowering/parallel.ParallelPlan 校验一致性（缺省按
+    (tp, ep) 直接求值，合法性与 plan 相同规则）。
     """
     h = model.hidden
     S, Q = (0, ctx) if prefill else (ctx, queries)
@@ -472,6 +509,17 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     kvs = (model.extras or {}).get("kv_spec", {})
     hc_spec = (model.extras or {}).get("hc")
     first_layer_index = model.layers[0].index if model.layers else None
+
+    def _local_experts(layer):
+        if plan is not None:
+            return plan.moe_local_experts(layer, rank) or None
+        if layer.moe is None or not layer.moe.experts:
+            return None
+        if ep == 1:
+            return layer.moe.experts
+        base, rem = divmod(layer.moe.experts, ep)
+        return base + (1 if rank < rem else 0)
+
     for layer in model.layers:
         li = layer.index
         if layer.kind in (FULL, SLIDING) and layer.attn:
@@ -484,7 +532,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
             rows += v41_layer_rows(stage, li, layer, B, S, Q, h, kvs, quant,
                                    prefill, tp)
         T = B * Q
-        rows += ffn_or_moe_rows(stage, li, layer, T, h, quant)
+        rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
+                                local_experts=_local_experts(layer))
         if layer.kind == MLA_CSA2 and hc_spec:
             # mHC 边界核融合 norm+残差（F_MHC_POST_PRE）：不再另计通用 norm/add 行
             rows += hc_boundary_rows(stage, li, T, h, hc_spec, quant,

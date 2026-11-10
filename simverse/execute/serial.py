@@ -48,13 +48,15 @@ def build_serial_round(plan, stage_costs: Dict[str, float], e_n: Optional[float]
                        reason: Optional[str] = None) -> SerialRound:
     """把 MethodPlan 步骤 + 各阶段计价串成一条因果链。
 
-    stage_costs: step_id → ms（由 pipeline 计价提供；缺失步骤计 0 并记录）。
+    stage_costs: step_id → ms（由 pipeline 计价提供；显式 0 允许，缺失拒绝）。
     """
     events: List[RoundEvent] = []
     t_acc = 0.0
     prev_id: Optional[str] = None
     for step in plan.steps:
-        t = float(stage_costs.get(step.step_id, 0.0))
+        if step.step_id not in stage_costs:
+            raise ValueError(f"缺少阶段成本：{step.step_id}")
+        t = float(stage_costs[step.step_id])
         ev = RoundEvent(
             event_id=f"r0.{step.step_id}", round_id="r0", role=step.role,
             stage=step.step_id, label=step.desc, t_ms=t,

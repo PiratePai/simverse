@@ -162,8 +162,9 @@ def test_g5_no_global_multiplier_in_profile_module():
 
 def test_g6_status_doc_test_count_matches_reality():
     text = STATUS_DOC.read_text(encoding="utf-8")
-    m = re.search(r"(\d+)\s*passed", text)
-    assert m, "IMPLEMENTATION_STATUS.md 必须写明当前 'N passed' 测试数"
+    # 只认“当前收集数”标记；历史段落的 passed 数字不参与核对。
+    m = re.search(r"pytest 收集数[：:]\s*(\d+)", text)
+    assert m, "IMPLEMENTATION_STATUS.md 必须写明当前 'pytest 收集数：N'"
     claimed = int(m.group(1))
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests"],
@@ -177,7 +178,7 @@ def test_g6_status_doc_test_count_matches_reality():
         n = len(lines)
     assert n is not None and n > 0, f"pytest 收集失败：{out.stderr[-300:]}"
     assert claimed == n, \
-        f"状态文档声称 {claimed} passed，实际收集 {n} 项——文档与实现不一致（G6）"
+        f"状态文档声称收集 {claimed} 项，实际收集 {n} 项——文档与实现不一致（G6）"
 
 
 # ---------------------------------------------------------------------------
@@ -185,13 +186,16 @@ def test_g6_status_doc_test_count_matches_reality():
 # ---------------------------------------------------------------------------
 
 def test_g7_calibration_leaves_ledgers_untouched():
+    from simverse.model_ir import build_catalog
     from simverse.pipeline import run_v2
     from simverse.scenario import ScenarioV2
     scenario_path = ROOT / "assets" / "scenarios" / "h200_calib_loop1.json"
     data = json.loads(scenario_path.read_text(encoding="utf-8"))
+    archive = build_catalog(include_internal=True)
 
-    with_prof = run_v2(ScenarioV2.from_json(data)).to_json()
-    no_prof = run_v2(ScenarioV2.from_json({**data, "cost_profile": None})).to_json()
+    with_prof = run_v2(ScenarioV2.from_json(data), catalog=archive).to_json()
+    no_prof = run_v2(ScenarioV2.from_json({**data, "cost_profile": None}),
+                     catalog=archive).to_json()
 
     # 原始账本逐字段一致
     assert with_prof["work"] == no_prof["work"], "Work 账本被校准改变（G7 违规）"
@@ -204,3 +208,296 @@ def test_g7_calibration_leaves_ledgers_untouched():
     # 校准只在 cost 侧新增披露
     assert "calibration" in with_prof["cost"]
     assert "calibration" not in no_prof["cost"]
+
+
+# ---------------------------------------------------------------------------
+# G8 活跃目录恰两款主模型 + DFlash；历史/合成不进运行时选择
+# ---------------------------------------------------------------------------
+
+def test_g8_active_catalog_exactly_two_models_and_bound_draft():
+    from simverse.model_ir import build_catalog, catalog_json
+    cat = build_catalog()
+    assert set(cat["models"]) == {"qwen36_35b_a3b", "deepseek_v41_flash"}
+    assert set(cat["drafts"]) == {"dflash_qwen36_35b_a3b"}
+    assert not any(k.startswith("tiny_") for k in cat["models"])
+    assert set(catalog_json()["models"]) == {"qwen36_35b_a3b",
+                                             "deepseek_v41_flash"}
+    # CLI/API 不能运行被移除模型
+    from simverse.pipeline import run_v2
+    from simverse.scenario import ScenarioV2
+    for mid in ("qwen3_30b_a3b", "qwen3_235b_a22b",
+                "qwen3_next_80b_a3b", "deepseek_v3", "tiny_gqa"):
+        with pytest.raises(ValueError, match="未知模型"):
+            run_v2(ScenarioV2(model_id=mid))
+    # 合成草稿 chain 方法默认拒绝（仅测试可显式 allow_internal_methods）
+    b = run_v2(ScenarioV2(method_id="chain_draft", draft_id=None, k=4))
+    assert b.manifest.status == "failed"
+    assert "internal_research_method" in str(b.to_json())
+
+
+def test_g8_api_catalog_hides_archive_and_synthetic_choices():
+    from simverse.webapp import app
+    client = app.test_client()
+    data = client.get("/api/v2/catalog").get_json()
+    assert set(data["catalog"]["models"]) == {"qwen36_35b_a3b",
+                                              "deepseek_v41_flash"}
+    assert set(data["catalog"]["drafts"]) == {"dflash_qwen36_35b_a3b"}
+    assert data["profile_sets"] == []
+    assert data["methods"]["supported"] == ["baseline", "dflash_v1"]
+    assert "chain_draft" not in data["methods"]["supported"] + \
+        data["methods"].get("research", [])
+    assert all(p["status"] == "archived"
+               for p in data["archived_profiles"])
+
+
+# ---------------------------------------------------------------------------
+# G9 完整 config 逐键覆盖；未知键不默认 ignored
+# ---------------------------------------------------------------------------
+
+def test_g9_complete_config_leaves_registered_no_default_ignore():
+    from simverse.model_ir import build_catalog
+    from simverse.model_ir.families import flatten_config, _coverage
+    cat = build_catalog()
+    pairs = [
+        ("qwen36_35b_a3b_main__config.json", "qwen36_35b_a3b", "text_config"),
+        ("deepseek_v41_config.json", "deepseek_v41_flash", "text_config"),
+        ("qwen36_35b_a3b_dflash__config.json", "dflash_qwen36_35b_a3b", ""),
+    ]
+    for fname, mid, prefix in pairs:
+        raw = json.loads((ROOT / "assets" / "config" / fname)
+                         .read_text(encoding="utf-8"))
+        item = (cat["models"].get(mid) or cat["drafts"].get(mid))
+        leaves = {k for k, v in flatten_config(raw).items()
+                  if not isinstance(v, dict)}
+        assert leaves <= set(item.coverage), (mid, leaves - set(item.coverage))
+        assert not any("默认不影响文本推理结构" in e.get("note", "")
+                       for e in item.coverage.values()), mid
+    # 未知键必须 unsupported + gap，不能默认 ignored
+    cov, gaps = _coverage("qwen3_5_moe", {"num_experts": 1},
+                          full_config={"num_experts": 1,
+                                       "future_unknown_key": 1})
+    assert cov["future_unknown_key"]["status"] == "unsupported-semantic"
+    assert any("future_unknown_key" in g for g in gaps)
+    # V4.1 的 Engram/量化/candidate/swiglu/尾部 ratio 是显式缺口
+    m = cat["models"]["deepseek_v41_flash"]
+    gap_keys = {g.split(":")[0] for g in m.gaps}
+    assert {"engram_vocab_size", "quantization_config", "candidate_block_size",
+            "swiglu_limit"} <= gap_keys
+    assert any("compress_ratios[40:43]" in g for g in m.gaps)
+
+
+# ---------------------------------------------------------------------------
+# G10 证据分栏：config / forward 源码 / CPU 执行 / GPU 实测
+# ---------------------------------------------------------------------------
+
+def test_g10_evidence_levels_separated_and_not_overclaimed():
+    from simverse.model_ir import build_catalog
+    cat = build_catalog()
+    q = cat["models"]["qwen36_35b_a3b"]
+    v = cat["models"]["deepseek_v41_flash"]
+    d = cat["drafts"]["dflash_qwen36_35b_a3b"]
+    assert q.config_coverage_complete and not q.forward_evidence_complete
+    assert not q.structure_complete
+    assert q.evidence.forward_source == "partial-source"
+    assert q.evidence.cpu_forward == "not-run"
+    assert q.evidence.gpu_measurement == "none"
+    assert q.evidence.method_status["mtp"] == "unverified"
+    assert "sm-qwen35-gdn-decode-branch" in q.evidence.checked_paths
+    assert not v.config_coverage_complete and not v.forward_evidence_complete
+    assert any("engram_forward" in p for p in v.evidence.unverified_paths)
+    assert any("csa2_moe_routing" in p for p in v.evidence.unverified_paths)
+    assert d.config_coverage_complete
+    assert d.evidence.cpu_forward == "not-run"
+    assert d.evidence.gpu_measurement == "none"
+    assert any("serving_integration" in p for p in d.evidence.unverified_paths)
+    # 未执行/未实测不得被写成 executed/measured
+    for item in (q, v, d):
+        assert item.evidence.cpu_forward != "cpu-executed"
+        assert item.evidence.gpu_measurement == "none"
+
+
+# ---------------------------------------------------------------------------
+# G11 数值绝对 oracle（V4.1 o_a 分组 / Qwen3.6 shared gate）
+# ---------------------------------------------------------------------------
+
+def test_g11_v41_oa_group_flops_absolute_tp1_2_4_8():
+    from simverse.count import build_model_work
+    from simverse.model_ir import build_catalog
+    m = build_catalog()["models"]["deepseek_v41_flash"]
+    Q16 = {"dense_w": 16, "expert_w": 16, "act": 16, "kv": 16, "state": 32}
+    for tp in (1, 2, 4, 8):
+        ng = 8 // tp
+        rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp)
+                if r.op == "o_a_proj"]
+        assert len(rows) == 40
+        for r in rows:
+            assert r.flops == 2 * 1 * 4096 * 1024 * ng
+            assert r.weight_capacity == 4096 * 1024 * ng * 2
+
+
+def test_g12_qwen36_shared_gate_row_every_moe_layer():
+    from simverse.count import build_model_work
+    from simverse.model_ir import build_catalog
+    m = build_catalog()["models"]["qwen36_35b_a3b"]
+    Q8 = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8, "state": 32}
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, 1)
+    gate = [r for r in rows if r.op == "shared_gate"]
+    assert len(gate) == 40
+    assert all(r.weight_capacity == 2048 for r in gate)
+
+
+# ---------------------------------------------------------------------------
+# G13 草稿 B>1：token 维乘一次；权重/通信不重复乘
+# ---------------------------------------------------------------------------
+
+def test_g13_draft_batch_counts_scale_once_not_weights():
+    from simverse.count import totals
+    from simverse.count.draft import dflash_round_rows, mtp_step_rows
+    from simverse.model_ir import build_catalog
+    cat = build_catalog()
+    m, d = cat["models"]["qwen36_35b_a3b"], cat["drafts"]["dflash_qwen36_35b_a3b"]
+    Q8 = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8, "state": 32}
+    r1 = dflash_round_rows("d", d, m.vocab, 3.0, 512, Q8, 1.0, tp=8, batch=1)
+    r2 = dflash_round_rows("d", d, m.vocab, 3.0, 512, Q8, 1.0, tp=8, batch=2)
+    t1, t2 = totals(r1), totals(r2)
+    assert t2["flops"] == 2 * t1["flops"]
+    assert t2["act_read"] == 2 * t1["act_read"]
+    assert t2["act_write"] == 2 * t1["act_write"]
+    assert t2["kv_read"] == 2 * t1["kv_read"]
+    assert t2["kv_write"] == 2 * t1["kv_write"]
+    # 权重驻留/读取不随 B 变化
+    assert t2["weight_read"] == t1["weight_read"]
+    assert sum(r.weight_capacity for r in r1) == \
+        sum(r.weight_capacity for r in r2)
+    # fc/lm_head 的 token 维只乘一次（不出现 B²）
+    for op in ("dflash_fc", "draft_lm_head", "noise_embed"):
+        a = next(r for r in r1 if r.op == op)
+        b = next(r for r in r2 if r.op == op)
+        assert b.flops == 2 * a.flops, op
+    # MTP 同样：batch 乘一次，权重不变
+    u1 = mtp_step_rows("s", m, 1, 512, Q8, 1, batch=1)
+    u2 = mtp_step_rows("s", m, 1, 512, Q8, 1, batch=2)
+    v1, v2 = totals(u1), totals(u2)
+    assert v2["flops"] == 2 * v1["flops"]
+    assert v2["weight_read"] == v1["weight_read"]
+    # 通信消息同样只乘一次 B（DFlash/MTP）
+    from simverse.pipeline import run_v2
+    from simverse.scenario import ScenarioV2
+    for method, draft_id in (("dflash_v1", "dflash_qwen36_35b_a3b"),
+                             ("mtp", None)):
+        def bundle(batch):
+            return run_v2(ScenarioV2(
+                method_id=method, draft_id=draft_id, k=1,
+                deployment={"mode": "dt_serial", "target_tp": 8,
+                            "draft_tp": 1},
+                workload={"batch": batch, "ctx_tokens": 512})).to_json()
+        a, b = bundle(1), bundle(2)
+        assert b["cost"]["link"]["bytes"]["d2t"] == \
+            2 * a["cost"]["link"]["bytes"]["d2t"], method
+        assert b["cost"]["link"]["bytes"]["t2d"] == \
+            2 * a["cost"]["link"]["bytes"]["t2d"], method
+
+
+# ---------------------------------------------------------------------------
+# G14 证据引用按实际 model/draft/profile；不跨模型硬编码
+# ---------------------------------------------------------------------------
+
+def test_g14_evidence_refs_are_model_specific_and_registered():
+    from simverse.model_ir import build_catalog
+    from simverse.pipeline import run_v2
+    from simverse.scenario import ScenarioV2
+    from simverse.validation.registry import build_registry
+    known = set(build_registry())
+    cat = build_catalog()
+    q = run_v2(ScenarioV2()).to_json()
+    v = run_v2(ScenarioV2(model_id="deepseek_v41_flash",
+                          method_id="baseline", draft_id=None,
+                          deployment={"mode": "baseline",
+                                      "target_tp": 8})).to_json()
+    assert set(q["evidence_refs"]) <= known
+    assert "ev-qwen36-main-config" in q["evidence_refs"]
+    assert "ev-qwen36-dflash-config" in q["evidence_refs"]
+    assert not any("v41" in r for r in q["evidence_refs"])
+    assert set(v["evidence_refs"]) <= known
+    assert "ev-v41-config" in v["evidence_refs"]
+    assert not any("qwen36" in r or "dflash" in r for r in v["evidence_refs"])
+    # 归档 profile 的证据只按实际 profile 加入（离线归档目录）
+    from simverse.scenario import ScenarioV2 as S
+    data = json.loads((ROOT / "assets" / "scenarios" /
+                       "h200_calib_loop1.json").read_text(encoding="utf-8"))
+    a = run_v2(S.from_json(data), catalog=build_catalog(include_internal=True)).to_json()
+    assert "ev-h200-tiny-distill" in a["evidence_refs"]
+    assert "ev-qwen3-30b-config" in a["evidence_refs"]
+
+
+# ---------------------------------------------------------------------------
+# G15 部署排名缺 forward/CPU/GPU/预算证据 → 阻断
+# ---------------------------------------------------------------------------
+
+def test_g15_deployment_ranking_blocked_without_forward_and_gpu_evidence():
+    from simverse.experiments.compare import compare_runs, default_policy
+    from simverse.pipeline import run_v2
+    from simverse.scenario import ScenarioV2
+    base = run_v2(ScenarioV2(method_id="baseline", draft_id=None,
+                             deployment={"mode": "baseline", "target_tp": 8}))
+    cand = run_v2(ScenarioV2())
+    for b in (base, cand):
+        m02 = b.metrics["M02_speedup_vs_baseline"]
+        assert m02.reason and "不参与排名" in m02.reason
+        assert "forward" in m02.reason or "CPU" in m02.reason
+        checks = b.capability["checks"]
+        assert checks["deployment_ranking_evidence"]["status"] != "supported"
+        assert checks["model_gpu_measurement"]["status"] != "supported"
+    row = compare_runs(base, [cand], default_policy())["rows"][0]
+    assert row["eligible"] is False and row["ineligible_reason"]
+
+
+def test_g15_forward_gap_alone_blocks_eligibility():
+    """容量等其他条件都放行时，partial forward 仍必须单独拦住排名。"""
+    from simverse.contracts.evidence import CapabilityReport
+    from simverse.pipeline import _eligibility, _eligibility_issues
+
+    cap = CapabilityReport()
+    cap.add("model_forward_evidence", "approximated",
+            "MTP forward 未核")
+    assert _eligibility(cap) is False
+    assert _eligibility_issues(cap) == ["MTP forward 未核"]
+
+
+# ---------------------------------------------------------------------------
+# G16 source_map 行号/状态修正，未核路径显式登记
+# ---------------------------------------------------------------------------
+
+def test_g16_source_map_line_and_status_corrections():
+    from simverse.importers import source_map_json
+    sm = {e["entry_id"]: e for e in source_map_json()["entries"]}
+    gate = sm["sm-qwen35-attn-output-gate"]
+    assert "731-805" in gate["source_location"] and "802" in gate["source_location"]
+    shared = sm["sm-qwen35-moe-shared-gate"]
+    assert shared["both_sides_covered"] is True
+    assert "shared_gate=True" in shared["note"] or "修复" in shared["note"]
+    mtp = sm["sm-qwen36-mtp-unverified"]
+    assert mtp["both_sides_covered"] is False and mtp["uncovered_domain"]
+    assert "Unverified" in mtp["entry_id"] or "unverified" in mtp["entry_id"]
+    v41 = sm["sm-v41-csa2-moe-unverified"]
+    assert "candidate_publish" in " ".join(v41["uncovered_domain"])
+
+
+# ---------------------------------------------------------------------------
+# G17 CI 工作流：三事件、不按路径过滤、Windows/Node/Python 3.12 明确
+# ---------------------------------------------------------------------------
+
+def test_g17_ci_workflow_triggers_and_toolchain_explicit():
+    wf = (ROOT / ".github" / "workflows" / "merge-gate.yml").read_text(
+        encoding="utf-8")
+    for trigger in ("pull_request:", "push:", "merge_group:"):
+        assert trigger in wf
+    assert "paths:" not in wf and "paths-ignore:" not in wf
+    assert "windows-latest" in wf
+    assert 'python-version: "3.12"' in wf
+    assert "actions/setup-node@v4" in wf and 'node-version: "20"' in wf
+    assert "node --check simverse/static/workbench.js" in wf
+    assert "python -m pytest tests -q" in wf
+    criteria = (ROOT / "docs" / "MERGE_CRITERIA.md").read_text(encoding="utf-8")
+    assert "required status check" in criteria or "required check" in criteria
+    assert "pull request" in criteria.lower() or "PR review" in criteria

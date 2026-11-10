@@ -25,6 +25,34 @@ PROFILE_SETS = {
     "h200-qwen3-235b-a22b-op-v1": "h200_qwen3_235b_a22b",
 }
 
+# 历史校准资产绑定（2026-11-10 审查）：profile 只对其采集模型有效，跨模型
+# 直接拒绝，不靠“形状碰巧不一致”兜底。两款活跃主模型目前没有匹配 profile。
+PROFILE_MODEL_BINDINGS = {
+    "h200-qwen3-30b-a3b-tiny-op-v1": "qwen3_30b_a3b",
+    "h200-qwen3-235b-a22b-op-v1": "qwen3_235b_a22b",
+}
+PROFILE_SET_STATUS = {
+    "h200-qwen3-30b-a3b-tiny-op-v1": "archived",
+    "h200-qwen3-235b-a22b-op-v1": "archived",
+}
+PRODUCT_PROFILE_SETS = frozenset(
+    sid for sid, status in PROFILE_SET_STATUS.items() if status == "active")
+
+
+def profile_model_id(set_id: str) -> str:
+    if set_id not in PROFILE_MODEL_BINDINGS:
+        raise ValueError(f"profile {set_id} 未登记模型绑定；禁止在无绑定情况下使用")
+    return PROFILE_MODEL_BINDINGS[set_id]
+
+
+def archived_profiles_json() -> list:
+    """只读归档清单（UI/API 不可选择；用于明确旧资产边界）。"""
+    return [{
+        "id": sid, "model_id": PROFILE_MODEL_BINDINGS[sid],
+        "status": "archived",
+        "reason": "历史模型校准资产；模型已移出活跃 catalog；禁止跨模型使用",
+    } for sid in sorted(PROFILE_SETS)]
+
 DECODE_BLOCK_OPS = ("attn_input_reshape", "attn_kv_cache_save", "attn_decode",
                     "attn_output_reshape")
 

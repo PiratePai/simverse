@@ -21,7 +21,11 @@
   analytical-estimate；mean-only 输入→E[N] unknown 不排名。
 - **优先级**：P0（必需场景结论上限被它钉死）。依赖：G-C3（服务端集成核对）。
 
-## G-D2 真模型 MoE 实测接入（首选路径已明确：235B TP8/EP1 数据在册）⭐P0
+## G-D2 真模型 MoE 实测接入（历史 235B 路径已归档；两主模型需新采集）⭐P0
+
+> **2026-11-10 归档更新**：Qwen3-30B-A3B/235B-A22B 已移出活跃 catalog；下列
+> 30B/235B 数据只作历史校准归档，不能用于 Qwen3.6/V4.1。两款主模型的 MoE
+> 实测仍未采集。
 
 - **影响**：两条校准闭环的覆盖上限——MoE/router/lm_head 全部解析回退；
   30B B8 时间口径覆盖 71.8%、235B B8 42.5%。
@@ -30,8 +34,9 @@
     CSV 无环境元数据列（gpu/driver/torch/cuda），违反准则 §3.2（G4 同型）；
     补环境记录后可复审。
   - H200 235B moe.csv TP8/EP1（真 128E vllm_fused，451 token 网格）**defer 为
-    首选增量路径**：数据合格且环境齐备，但需先完成 G-C11（per-rank MoE 分片
-    账本统一）才能不与整模型解析混尺。
+    首选增量路径**：数据合格且环境齐备；G-C11（per-rank 分片账本统一）已于
+    2026-11-10 A组 R01 解除，moe.csv 采集配方（TP8/EP1 inter/tp 切分）与
+    新账本同口径——剩余为 G-D2 自身的蒸馏+留出验收。
   - TP1/EP4 行为 DP4 部署口径，与单卡场景不符（不采）。
 - **需要**：G-C11 工程落地（先行）→ 235B moe 蒸馏准入；或对真 30B-A3B 在 H200
   补测 moe（tokens 1..32768、EP1、TP1/8、BF16+FP8，字段沿用 pi-viewer 契约，
@@ -41,12 +46,12 @@
   cost.calibration.groups 无 moe 项，fallback_ms 披露。
 - **优先级**：P0。依赖：G-C11（工程）或新采集。
 
-## G-D3 ~~Qwen3-235B-A22B 官方身份~~ → 已解除（2026-11-10）
+## G-D3 ~~Qwen3-235B-A22B 官方身份~~ → 已解除（2026-11-10；同轮归档）
 
 - 官方身份已入册：HF main @`8efa6172…`，config SHA256 `0ecd5d6f…`（网络获取，
-  与 pi-viewer 二手副本逐字段核对一致）；catalog 注册 `qwen3_235b_a22b`。
-- TP2/8 linear+attention 闭环已通（[h200-loop2-235b.md](../calibration/h200-loop2-235b.md)）；
-  其 MoE 部分并入 G-D2（依赖 G-C11）。
+  与 pi-viewer 二手副本逐字段核对一致）。
+- **该模型已移出活跃 catalog，只作历史归档**；TP2/8 闭环报告保留日期事实，
+  不得用于两款主模型（profile 绑定 235B，跨模型直接拒绝）。
 
 ## G-D4 prefill/混合批注意力 + verify（多 query）形状数据
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 VLLM_PIN = "vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5"
+VLLM_PARALLEL_PIN = "vllm@dc74b8cbbbe3dbb9399fe369757d63defd614cc2"
 HF_TF_PIN = "huggingface/transformers@b6401d6605d16620e0f95b54fb2906f92de7e33f"
 DFLASH_PIN = "z-lab/dflash@07ebd93db9f472af339b644bb70221ad8428328a"
 
@@ -56,21 +57,54 @@ ENTRIES: List[SourceMapEntry] = [
         model_or_method="qwen3_5_moe full attention",
         semantic="q_proj 输出 2×（query+gate chunk）；gate 经 ACT2FN 后乘输出",
         source_pin=HF_TF_PIN,
-        source_location="modeling_qwen3_5_moe.py:747-772 (Qwen3_5MoeAttention)",
+        source_location="modeling_qwen3_5_moe.py:731-805 (Qwen3_5MoeAttention；"
+                        "q_proj 2× at 743-745，chunk at 771-773，gate 乘 at 802)",
         branch_predicate="q_proj 输出 view(..., head_dim*2) 后 chunk(2)",
         input_domain="全部 full attention 层（attn_output_gate 家族默认）",
         both_sides_covered=True,
-        note="ModelIR AttentionIR.output_gated=True → q_out=2·heads·d（已进计数）"),
+        note="ModelIR AttentionIR.output_gated=True → q_out=2·heads·d（已进计数）；"
+             "原 source_map 747-772 未覆盖 L802 gate 乘，2026-11-10 修正"),
+    SourceMapEntry(
+        entry_id="sm-qwen35-moe-router",
+        model_or_method="qwen3_5_moe MoE",
+        semantic="router 线性 h→E，softmax(fp32)，top-k，top-k 权重按和重归一",
+        source_pin=HF_TF_PIN,
+        source_location="modeling_qwen3_5_moe.py:864-881 "
+                        "(Qwen3_5MoeTopKRouter)",
+        branch_predicate="topk(router_probs, num_experts_per_tok)；"
+                         "router_top_value /= sum(top-k)",
+        input_domain="Qwen3.6-35B-A3B（256E top-8，norm_topk_prob 语义）",
+        both_sides_covered=True,
+        note="router 行按 2·T·h·E 精确计；routed 专家并集用无放回期望，"
+             "softmax/renorm 的数值未执行"),
     SourceMapEntry(
         entry_id="sm-qwen35-moe-shared-gate",
         model_or_method="qwen3_5_moe MoE",
         semantic="共享专家输出经 sigmoid(shared_expert_gate(x)) 门控后与 routed 相加",
         source_pin=HF_TF_PIN,
-        source_location="modeling_qwen3_5_moe.py:884-901 (Qwen3_5MoeSparseMoeBlock)",
-        branch_predicate="shared_expert_intermediate_size 存在 → shared+gate 常驻",
+        source_location="modeling_qwen3_5_moe.py:884-901 (Qwen3_5MoeSparseMoeBlock；"
+                        "shared_expert at 889，gate at 890，sigmoid 乘 at 899)",
+        branch_predicate="shared_expert_intermediate_size > 0 → shared+gate 常驻"
+                         "（config 无 shared_expert_gate 键）",
         input_domain="Qwen3.6-35B-A3B（shared 512 + gate Linear(h,1)）",
         both_sides_covered=True,
-        note="shared_gate 行已入 moe_rows"),
+        note="2026-11-10 修复：shared_gate=True 由 shared_intermediate>0 推导；"
+             "moe_rows 每 MoE 层计 gate 行，memory 计 h 权重"),
+    SourceMapEntry(
+        entry_id="sm-qwen36-mtp-unverified",
+        model_or_method="qwen3_5_moe MTP",
+        semantic="config 声明 mtp_num_hidden_layers=1；原生 MTP 微头 forward 未 pin",
+        source_pin=HF_TF_PIN,
+        source_location="modeling_qwen3_5_moe.py:994/1807 "
+                        "(_keys_to_ignore_on_load_unexpected=[^mtp.*])；"
+                        "vllm_qwen35_pin/qwen3_next.py:847-848、qwen3_5.py:326/476 "
+                        "（主模型丢弃 mtp.）",
+        branch_predicate="MTP 权重不在主模型加载路径；仅 config 字段存在",
+        input_domain="Qwen3.6-35B-A3B MTP1",
+        both_sides_covered=False,
+        uncovered_domain=["原生 MTP 微头 forward 无 pin",
+                          "MTP 仅按目标首层模板估算，未执行、未实测"],
+        note="2026-11-10 审查：MTP 路径必须标 unverified，不能进入部署排名"),
     SourceMapEntry(
         entry_id="sm-v41-index-short-branch",
         model_or_method="deepseek_v41_flash CSA2",
@@ -108,6 +142,24 @@ ENTRIES: List[SourceMapEntry] = [
         note="hc 三键 mapped（2026-11-10）；Engram 8 键 unsupported → "
              "structure_complete=False 仍阻断完整结论，不冒充"),
     SourceMapEntry(
+        entry_id="sm-v41-csa2-moe-unverified",
+        model_or_method="deepseek_v41_flash CSA2/MoE",
+        semantic="CSA2 注意力/投影为 v0.1 移植；MoE sqrtsoftplus/noaux_tc/"
+                 "分组路由未建模；候选块发布/量化未映射",
+        source_pin=VLLM_PIN,
+        source_location="vllm/models/deepseek_v41/nvidia/model.py:131-200 "
+                        "(DeepseekV4MoE)、204-327（sparse-MLA 选择）、"
+                        "787-800（candidate block buffer）",
+        branch_predicate="config scoring_func=sqrtsoftplus、topk_method=noaux_tc、"
+                         "candidate_topk_blocks=2048",
+        input_domain="V4.1-Flash 全 40 层",
+        both_sides_covered=False,
+        uncovered_domain=["CSA2 注意力/投影未独立逐行核（仅 v0.1 同源对账）",
+                          "MoE scoring/top-k/分组路由未消费",
+                          "candidate_publish 容量/时序未建模",
+                          "quantization_config 未映射到计算精度"],
+        note="2026-11-10 审查：这些路径不能因 config 通过而标完整或参与部署排名"),
+    SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",
         semantic="每轮：1 次草稿前向（并行块提案）→ 1 次目标块验证 → 逐位拒绝 → "
@@ -132,11 +184,73 @@ ENTRIES: List[SourceMapEntry] = [
         input_domain="全部草稿层（5 sliding + 1 full）",
         both_sides_covered=True,
         note="计数按 ctx+q_len 两段 KV；fc 投影 8·h→h 入账"),
+    SourceMapEntry(
+        entry_id="sm-vllm-moe-tp-ep-recipe",
+        model_or_method="qwen3_5_moe/qwen3_moe MoE 并行",
+        semantic="EP 关：routed 专家 inter/tp 切分（每 rank 全 E）；"
+                 "EP 开（ep=tp）：每 rank E//ep(+余数) 整专家；router "
+                 "GateLinear=ReplicatedLinear；shared expert 全局 TP 切分",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/model_executor/layers/fused_moe/config.py:1402 "
+                        "(intermediate_size_per_partition = inter // tp)、"
+                        "config.py:1257-1288 (FusedMoEParallelConfig.make："
+                        "use_ep → tp→1/ep→world)、router/gate_linear.py:66 "
+                        "(GateLinear(ReplicatedLinear))、expert_map_manager.py:"
+                        "62-77（余数 base+1）、qwen3_next.py:139-231 "
+                        "(Qwen3NextSparseMoeBlock)",
+        branch_predicate="enable_expert_parallel 且 world>1 → EP；否则 TP 切 inter",
+        thresholds="ep ∈ {1} 或 ep == tp；inter % tp == 0（EP 关）；"
+                   "shared_inter % tp == 0；tp <= E",
+        input_domain="Qwen3.6-35B-A3B（256E inter512 shared512）TP{1,2,4,8,16}",
+        both_sides_covered=True,
+        uncovered_domain=["量化 Marlin ba_proj disable_tp 分支未入配方（BF16 路径）",
+                          "EPLB 冗余专家（n_redundant_experts）未建模"],
+        note="R01 统一 per-rank 配方：count/moe.py、lowering/memory.py、"
+             "lowering/sharding.py 共用 ParallelPlan（G-C11 解除）"),
+    SourceMapEntry(
+        entry_id="sm-vllm-attn-gdn-shard",
+        model_or_method="qwen3_5_moe attention/GDN 分片",
+        semantic="full attn：heads/tp；kvh>=tp 切 kvh/tp、kvh<tp 复制全量；"
+                 "o_proj 行切。GDN：in_proj_qkvz((2k+2v)/tp)、in_proj_ba"
+                 "(2nv/tp)、conv1d(conv_dim/tp)、out_proj 行切；状态 "
+                 "temporal=nv/tp×hk×hv、conv=conv_dim/tp×(kernel−1)",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/model_executor/models/qwen3_next.py:302-315 "
+                        "(Qwen3NextAttention 头切分/复制断言)、"
+                        "layers/mamba/gdn/qwen_gdn_linear_attn.py:753-838 "
+                        "(MergedColumnParallelLinear/RowParallelLinear)、"
+                        "layers/mamba/mamba_utils.py:280-301 "
+                        "(gated_delta_net_state_shape)",
+        branch_predicate="kvh >= tp → assert kvh % tp == 0 切分；"
+                         "else assert tp % kvh == 0 复制",
+        input_domain="Qwen3.6（heads16/kvh2/GDN 16k32v）TP{1,2,4,8}",
+        both_sides_covered=True,
+        note="KV 复制=每 rank 同字节（不随 tp 缩减）；计数/容量同口径"),
+    SourceMapEntry(
+        entry_id="sm-vllm-dflash-colocated-sharing",
+        model_or_method="dflash v1 同卡共享",
+        semantic="草稿与 target 同 TP 组运行（DFlashQwen3Attention 用全局 "
+                 "TP）；embed_tokens/lm_head 直接替换为 target 同一模块对象"
+                 "（词表行切，零额外驻留）；fc=ReplicatedLinear 全宽复制",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/v1/worker/gpu/spec_decode/dflash/utils.py:"
+                        "load_dflash_model L16-70（maybe_share_target_embed +"
+                        " dflash_model.lm_head = target_lm_head）、"
+                        "eagle/utils.py:_should_share/maybe_share_target_embed、"
+                        "models/qwen3_dflash.py:DFlashQwen3Attention L191-204",
+        branch_predicate="draft 无 has_own_lm_head/has_own_embed_tokens 且与 "
+                         "target 权重相等 → 共享对象；否则草稿自持副本",
+        input_domain="z-lab/Qwen3.6-35B-A3B-DFlash（vocab=target 248320）",
+        both_sides_covered=True,
+        uncovered_domain=["TP1 草稿挂 TP>1 组的服务栈配方未见（拒绝不支持）",
+                          "workspace/graph/NCCL 池尺寸未 pin（峰值缺口）"],
+        note="R02a：colocated 账本草稿 embed/lm_head 零字节引用 + consumer "
+             "登记；修复前幻影副本 ~1GB 与去重键失配双重计费"),
 ]
 
 
 def source_map_json() -> dict:
     return {"schema_version": "0.2",
-            "pins": {"vllm": VLLM_PIN, "hf_transformers": HF_TF_PIN,
-                     "dflash": DFLASH_PIN},
+            "pins": {"vllm": VLLM_PIN, "vllm_parallel": VLLM_PARALLEL_PIN,
+                     "hf_transformers": HF_TF_PIN, "dflash": DFLASH_PIN},
             "entries": [e.to_json() for e in ENTRIES]}

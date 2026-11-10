@@ -22,10 +22,24 @@ from pathlib import Path
 from . import __version__
 from .contracts import ScenarioSpec, canonical_json
 from .engine import run
-from .models import registry_json
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCENARIO = ROOT / "assets" / "scenarios" / "v41_flash_dt_verification.json"
+
+
+def _configure_stdio():
+    """让 CLI 状态文本在非 UTF-8 的管道/终端上也不会中断已完成的命令。
+
+    Windows 上非控制台 stdio（管道、重定向文件）默认使用系统 ANSI 代码页
+    （如 cp1252），而本 CLI 的提示含中文；不显式覆盖时，``print`` 会在文件
+    已经写成功后抛 UnicodeEncodeError，把成功命令变成 exit 1。UTF-8 是跨
+    平台稳定的输出编码；``backslashreplace`` 再兜底代理对等极端字符。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, ValueError, OSError):
+            pass
 
 
 def _dump(obj, path: Path | None):
@@ -35,10 +49,6 @@ def _dump(obj, path: Path | None):
         path.write_text(text, encoding="utf-8")
         print(f"已写 {path}")
     else:
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
         print(text)
 
 
@@ -66,10 +76,6 @@ def _events_csv(result: dict) -> str:
 
 
 def _summary(result: dict):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     print(f"status={result['status']} digests={result['digests']}")
     if result["status"].startswith("unsupported"):
         print(result["status_detail"])
@@ -85,9 +91,18 @@ def _summary(result: dict):
     print("  breakeven α*:", {k: (round(v, 4) if v == v else "none") for k, v in be.items()})
 
 
+def _require_active_v01(scenario):
+    from .model_ir.catalog import PRODUCT_MODELS
+    if scenario.model_id not in PRODUCT_MODELS:
+        raise SystemExit(
+            f"历史/合成模型 {scenario.model_id} 不在活跃 CLI 目录；tiny 仅作测试 "
+            "fixture，请使用 run-v2 的两款主模型")
+
+
 def cmd_run(args):
     src = Path(args.scenario) if args.scenario else DEFAULT_SCENARIO
     scenario = ScenarioSpec.from_json(json.loads(src.read_text(encoding="utf-8")))
+    _require_active_v01(scenario)
     result = run(scenario).to_json()
     result["replay"] = {"scenario_file": str(src)}
     _summary(result)
@@ -104,11 +119,8 @@ def cmd_sweep(args):
     from .chartpng import line_chart
     src = Path(args.scenario) if args.scenario else DEFAULT_SCENARIO
     scenario = ScenarioSpec.from_json(json.loads(src.read_text(encoding="utf-8")))
+    _require_active_v01(scenario)
     data = sweep_suite(scenario)
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     print("boundaries:", json.dumps(data["boundaries"], ensure_ascii=False))
     out = Path(args.out) if args.out else ROOT / "outputs" / "sweep.json"
     _dump(data, out)
@@ -237,7 +249,11 @@ def cmd_run_v2(args):
     scenario = _v2_scenario(args.scenario)
     if getattr(args, "cost_profile", None):
         scenario.cost_profile = args.cost_profile
-    bundle = run_v2(scenario).to_json()
+    try:
+        bundle = run_v2(scenario).to_json()
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        raise SystemExit(2)
     bundle["replay"] = {"scenario_file": str(args.scenario) if args.scenario
                         else "builtin:cli-default"}
     _summary_v2(bundle)
@@ -255,10 +271,6 @@ def cmd_run_v2(args):
 
 
 def _summary_v2(bundle: dict):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     man = bundle["manifest"]
     print(f"status={man['status']} run_id={man['run_id'][:19]}... "
           f"code={man['code_revision'][:10]}")
@@ -272,12 +284,20 @@ def _summary_v2(bundle: dict):
         if x.get("value") is None:
             print(f"  {key:26} 未知 —— {(x.get('reason') or '')[:60]}")
         else:
-            print(f"  {key:26} {x['value']:.4f} {x.get('unit', '')}"
-                  + ("   ! " + x["reason"][:44] if x.get("reason") else ""))
+            note = ("   ! 不参与排名；原因见下方能力检查与导出 JSON"
+                    if key == "M02_speedup_vs_baseline" and x.get("reason")
+                    else ("   ! " + x["reason"] if x.get("reason") else ""))
+            print(f"  {key:26} {x['value']:.4f} {x.get('unit', '')}" + note)
     checks = (bundle.get("capability") or {}).get("checks") or {}
     bad = [k for k, v in checks.items() if v["status"] != "supported"]
     if bad:
-        print("  注意：", ", ".join(bad))
+        for key in bad:
+            check = checks[key]
+            if key.startswith("memory_"):
+                print(f"  注意 {key} [{check['status']}]：已知显存下界仅供核对；"
+                      "缺可分配预算或完整运行时峰值，不能判定可部署（明细见 JSON）")
+            else:
+                print(f"  注意 {key} [{check['status']}]：{check['reason']}")
 
 
 def cmd_sweep_v2(args):
@@ -287,10 +307,6 @@ def cmd_sweep_v2(args):
     out = Path(args.out) if args.out else ROOT / "outputs" / "sweep_v2.json"
     _dump(data, out)
     import json as _json
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     print("breakevens:", _json.dumps(data["breakevens"], ensure_ascii=False))
 
 
@@ -309,16 +325,15 @@ def cmd_export_v2(args):
 
 
 def cmd_list(args):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
     if args.what == "formulas":
         from .formulas import formulas_json
         print(json.dumps(formulas_json(), ensure_ascii=False, indent=1))
         return
     if args.what in ("models", "drafts"):
-        print(json.dumps(registry_json(), ensure_ascii=False, indent=1))
+        from .model_ir import catalog_json
+        cj = catalog_json()
+        payload = cj["models"] if args.what == "models" else cj["drafts"]
+        print(json.dumps(payload, ensure_ascii=False, indent=1))
         return
     if args.what == "devices":
         from .devices import DEVICES, LINKS
@@ -330,6 +345,7 @@ def cmd_list(args):
 
 
 def main(argv=None):
+    _configure_stdio()
     ap = argparse.ArgumentParser(prog="simverse")
     ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -358,7 +374,7 @@ def main(argv=None):
     p_r2.add_argument("--trace", default=None)
     p_r2.add_argument("--html", default=None)
     p_r2.add_argument("--cost-profile", default=None,
-                      help="实测校准 profile 集 id（如 h200-qwen3-30b-a3b-tiny-op-v1）")
+                      help="历史归档 profile 集 id（仅归档模型；跨模型直接拒绝）")
     p_r2.set_defaults(fn=cmd_run_v2)
     p_s2 = sub.add_parser("sweep-v2", help="v0.2 参数扫描（不可变快照）")
     p_s2.add_argument("scenario", nargs="?", default=None)

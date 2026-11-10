@@ -54,15 +54,22 @@
         var m = cat.catalog.models[k];
         var o = document.createElement('option');
         o.value = k;
-        o.textContent = m.label + (m.structure_complete ? '' : ' [结构缺口]');
+        o.textContent = m.label
+          + (m.config_coverage_complete ? '' : ' [配置缺口]')
+          + (m.forward_evidence_complete ? '' : ' [forward未完备]');
         sel.appendChild(o);
       });
       sel.value = models.indexOf('qwen36_35b_a3b') >= 0 ? 'qwen36_35b_a3b' : models[0];
       var ms = $('sel-method');
       ms.innerHTML = '';
-      cat.methods.supported.forEach(function (mid) {
+      cat.methods.supported.concat(cat.methods.research || []).forEach(function (mid) {
         var o = document.createElement('option');
-        o.value = mid; o.textContent = mid;
+        o.value = mid;
+        o.textContent = ({
+          chain_draft: 'chain_draft（合成草稿研究演示）',
+          chain_moe_proxy: 'chain_moe_proxy（假想 MoE 代理）',
+          mtp: 'mtp（未验证：config+目标首层模板）'
+        })[mid] || mid;
         ms.appendChild(o);
       });
       ms.value = 'dflash_v1';
@@ -103,14 +110,17 @@
       model_id: $('sel-model').value,
       method_id: $('sel-method').value,
       draft_id: $('sel-method').value === 'dflash_v1'
-        ? 'dflash_qwen36_35b_a3b'
-        : ($('sel-method').value === 'baseline' ? null : 'dflash_qwen36_35b_a3b'),
-      k: $('sel-method').value === 'dflash_v1' ? 15 : 4,
+        ? 'dflash_qwen36_35b_a3b' : null,
+      k: $('sel-method').value === 'dflash_v1' ? 15
+        : ($('sel-method').value === 'mtp' ? 1 : 4),
       block_size: parseInt($('inp-blk').value, 10),
       deployment: {
         mode: $('sel-method').value === 'baseline' ? 'baseline' : $('sel-deploy').value,
         target_device: $('sel-target-dev').value,
         target_tp: parseInt($('sel-tp').value, 10),
+        // EP：关闭=inter/tp 切分；开启=整专家分置（必须等于 TP，vLLM 配方）
+        target_ep: ($('sel-ep').value === 'tp')
+          ? parseInt($('sel-tp').value, 10) : 1,
         draft_device: $('sel-draft-dev').value, draft_tp: 1
       },
       workload: {
@@ -126,6 +136,17 @@
       cost_profile: ($('sel-profile') && $('sel-profile').value) || null,
       seed: 0
     };
+    // 预算输入（R03a）：数值输入 → hypothesis 假设预算（只产生条件结论）；
+    // 留空 = unknown（不自动套标称容量）
+    var budgetGB = parseFloat($('inp-budget') && $('inp-budget').value);
+    if (isFinite(budgetGB) && budgetGB > 0) {
+      sc.deployment.budget = {
+        allocatable_bytes: Math.round(budgetGB * 1024 * 1024 * 1024),
+        allocatable_kind: 'hypothesis',
+        allocatable_source: '工作台用户输入（假设预算；非实测）',
+        extra_overhead_bytes: 0, overhead_source: ''
+      };
+    }
     if (over) {
       Object.keys(over).forEach(function (k) {
         if (typeof over[k] === 'object' && typeof sc[k] === 'object')
@@ -194,8 +215,10 @@
     var sp = metric(b, 'M02_speedup_vs_baseline');
     $('kpi-speedup').textContent = sp && sp.value !== null
       ? fmt(sp.value, '×', 3) : '未知';
-    $('kpi-speedup-sub').innerHTML = sp && sp.reason
-      ? '⚠ ' + sp.reason : ('基线 ' + fmt(base, 'ms', 3) + '（同 B/ctx）');
+    $('kpi-speedup-sub').textContent = sp && sp.reason
+      ? '不参与排名：见下方「证据 / 能力检查」中的容量与方法原因'
+      : ('基线 ' + fmt(base, 'ms', 3) + '（同 B/ctx）');
+    $('kpi-speedup-sub').title = sp && sp.reason ? sp.reason : '';
     var en = val(b, 'M03_E_N');
     $('kpi-en').textContent = en !== null ? fmt(en, 'tok', 3)
       + ' / K=' + (val(b, 'M03_K') || 0) : '未知';
@@ -218,17 +241,23 @@
     $('kpi-mem').textContent = mem ? fmtBytes(mem.value) : '–';
     $('kpi-mem-sub').textContent = mem
       ? (mem.feasibility === 'oom' ? 'OOM（超预算）'
-        : mem.feasibility === 'unknown' ? 'feasible 判定 unknown（仅标称容量）'
+        : mem.feasibility === 'unknown' ? '可部署性未知：缺可分配预算或运行时峰值证据'
         : '可分配预算内')
       : '–';
     var checks = (b.capability && b.capability.checks) || {};
     var bad = Object.keys(checks).filter(function (k) {
       return checks[k].status !== 'supported';
     });
-    $('kpi-ev').textContent = (b.model_ref.structure_complete ? '结构完备' : '结构缺口')
-      + ' · ' + (bad.length ? bad.length + ' 项注意' : '无阻断');
-    $('kpi-ev-sub').textContent = '解析估算 · 假设 ' +
-      Object.keys(b.assumption_dict || {}).length + ' 条';
+    var mr = b.model_ref || {};
+    var ev = mr.evidence || {};
+    $('kpi-ev').textContent =
+      '配置' + (mr.config_coverage_complete ? '完备' : '缺口')
+      + ' · forward ' + (mr.forward_evidence_complete ? '源码完备'
+        : (ev.forward_source || 'config-only'))
+      + ' · CPU ' + (ev.cpu_forward === 'cpu-executed' ? '已执行' : '未执行')
+      + ' · GPU ' + (ev.gpu_measurement === 'none' ? '无实测' : ev.gpu_measurement);
+    $('kpi-ev-sub').textContent = (bad.length ? bad.length + ' 项注意' : '无阻断')
+      + ' · 假设 ' + Object.keys(b.assumption_dict || {}).length + ' 条';
     renderOps(b);
     renderTimeline(b);
     renderEvidence(b);
@@ -453,7 +482,7 @@
   function renderCatalogDrawer() {
     var cat = state.catalog.catalog;
     var html = '<table class="plain"><tr><th>模型</th><th>家族/层序</th><th>身份</th>' +
-      '<th>覆盖/缺口</th></tr>';
+      '<th>config 覆盖</th><th>forward 源码</th><th>执行/实测</th></tr>';
     Object.keys(cat.models).forEach(function (k) {
       var m = cat.models[k];
       var cov = { mapped: 0, 'metadata-only': 0, 'ignored-with-reason': 0,
@@ -466,23 +495,36 @@
         JSON.stringify(m.kind_counts) + '</td><td style="font-size:11.5px">' +
         (m.source.repo_id || '') + '@' + (m.source.revision || '').slice(0, 10) +
         '<br><code style="font-size:10.5px">' + (m.source.config_sha256 || '').slice(0, 16) +
-        '</code></td><td>' + (m.structure_complete
-          ? '<span class="tag ok">结构完备</span>'
+        '</code></td><td>' + (m.config_coverage_complete
+          ? '<span class="tag ok">完整</span>'
           : '<span class="tag bad">' + m.gaps.length + ' 缺口</span> ' +
-            (m.gaps[0] || '').slice(0, 40)) +
+            (m.gaps[0] || '').slice(0, 36)) +
         '<br><span style="font-size:11px;color:var(--ink3)">mapped ' + (cov.mapped || 0) +
         ' · meta ' + (cov['metadata-only'] || 0) + ' · ignored ' +
         (cov['ignored-with-reason'] || 0) + ' · unsupported ' +
-        (cov['unsupported-semantic'] || 0) + '</span></td></tr>';
+        (cov['unsupported-semantic'] || 0) + '</span></td><td>' +
+        ((m.evidence && m.evidence.forward_source) || 'config-only') +
+        '<br><span style="font-size:11px;color:var(--ink3)">' +
+        (!m.forward_evidence_complete && (m.evidence.unverified_paths || []).length
+          ? (m.evidence.unverified_paths[0] || '').slice(0, 44) : '') +
+        '</span></td><td>CPU ' + (((m.evidence || {}).cpu_forward) || 'not-run') +
+        '<br>GPU ' + (((m.evidence || {}).gpu_measurement) || 'none') +
+        '</td></tr>';
     });
     html += '</table><h4>草稿</h4><table class="plain"><tr><th>id</th><th>结构</th>' +
-      '<th>绑定</th></tr>';
+      '<th>绑定</th><th>证据</th></tr>';
     Object.keys(cat.drafts).forEach(function (k) {
       var d = cat.drafts[k];
+      var de = d.evidence || {};
       html += '<tr><td>' + k + '</td><td>' + d.n_layers + ' 层 [' +
         d.layer_kinds.join(',') + '] blk=' + d.block_size +
         '</td><td style="font-size:11.5px">' + d.source.repo_id + '@' +
-        d.source.revision.slice(0, 10) + '</td></tr>';
+        d.source.revision.slice(0, 10) +
+        '</td><td style="font-size:11.5px">' + (de.forward_source || 'config-only') +
+        ' / CPU ' + (de.cpu_forward || 'not-run') +
+        ' / GPU ' + (de.gpu_measurement || 'none') +
+        '<br>' + ((de.unverified_paths || [])[0] || '').slice(0, 52) +
+        '</td></tr>';
     });
     html += '</table><h4>待核实资产（如实标注）</h4><ul>';
     Object.keys(cat.pending_assets).forEach(function (k) {
@@ -493,7 +535,7 @@
   }
 
   // ---------- matrix（每格独立 run） ----------
-  var METHODS = ['dflash_v1', 'chain_draft', 'mtp', 'chain_moe_proxy'];
+  var METHODS = ['dflash_v1', 'mtp'];
   var DEPLOYS = [
     { key: 'colocated', label: '同卡混部' },
     { key: 'dt_serial', label: 'DT 分离串行' }
@@ -530,8 +572,7 @@
   function cellScenario(deploy, method) {
     return currentScenario({
       method_id: method,
-      draft_id: method === 'dflash_v1' ? 'dflash_qwen36_35b_a3b'
-        : (method === 'baseline' ? null : 'dflash_qwen36_35b_a3b'),
+      draft_id: method === 'dflash_v1' ? 'dflash_qwen36_35b_a3b' : null,
       deployment: { mode: deploy },
       k: method === 'dflash_v1' ? 15 : (method === 'mtp' ? 1 : 4),
       name: 'matrix-' + deploy + '-' + method

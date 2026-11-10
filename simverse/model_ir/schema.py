@@ -18,6 +18,23 @@ SLIDING = "sliding_attention"
 MLA = "mla"
 MLA_CSA2 = "mla_csa2"
 
+_COVERAGE_STATUSES = {"mapped", "metadata-only", "ignored-with-reason",
+                      "unsupported-semantic", "pending-asset"}
+
+
+def _coverage_complete(coverage: Dict[str, Dict[str, str]]) -> bool:
+    """覆盖完备：非空、状态合法、且无 unsupported/pending/未知。"""
+    if not coverage:
+        return False
+    for key, entry in coverage.items():
+        status = (entry or {}).get("status")
+        if status not in _COVERAGE_STATUSES or status in (
+                "unsupported-semantic", "pending-asset"):
+            return False
+        if not entry.get("consumer"):
+            return False
+    return True
+
 
 @dataclass(frozen=True)
 class AttentionIR:
@@ -143,6 +160,36 @@ class SourceIdentity:
 
 
 @dataclass(frozen=True)
+class ModelEvidence:
+    """证据分层（2026-11-10 审查修复）：四类不得相互冒充。
+
+    forward_source：关键 forward 的**源码阅读**覆盖（config-only / partial-source /
+    source-checked）。cpu_forward：小尺寸 CPU 执行（not-run / cpu-executed）。
+    gpu_measurement：GPU/部署实测（none / operator-profile / model-measured）。
+    只有 forward_source=source-checked 且无 unverified_paths/gaps 时，
+    forward_evidence_complete 才为 True；CPU/GPU 执行另有独立布尔字段。
+    """
+    forward_source: str = "config-only"
+    cpu_forward: str = "not-run"
+    gpu_measurement: str = "none"
+    checked_paths: Tuple[str, ...] = ()
+    unverified_paths: Tuple[str, ...] = ()
+    method_status: Dict[str, str] = field(default_factory=dict)
+    note: str = ""
+
+    def to_json(self) -> dict:
+        return {
+            "forward_source": self.forward_source,
+            "cpu_forward": self.cpu_forward,
+            "gpu_measurement": self.gpu_measurement,
+            "checked_paths": list(self.checked_paths),
+            "unverified_paths": list(self.unverified_paths),
+            "method_status": dict(self.method_status),
+            "note": self.note,
+        }
+
+
+@dataclass(frozen=True)
 class DraftIR:
     """草稿模型结构（DFlash v1：6 层 dense GQA + 块扩散绑定参数）。
 
@@ -163,6 +210,42 @@ class DraftIR:
     mask_token_id: Optional[int]
     source: SourceIdentity
     attention_family: str = "gqa"
+    coverage: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    gaps: List[str] = field(default_factory=list)
+    evidence: ModelEvidence = field(default_factory=ModelEvidence)
+    evidence_refs: Tuple[str, ...] = ()
+
+    @property
+    def config_coverage_complete(self) -> bool:
+        return _coverage_complete(self.coverage)
+
+    @property
+    def forward_evidence_complete(self) -> bool:
+        return (self.evidence.forward_source == "source-checked"
+                and not self.gaps and not self.evidence.unverified_paths)
+
+    @property
+    def structure_complete(self) -> bool:
+        return self.config_coverage_complete and self.forward_evidence_complete
+
+    def to_json(self) -> dict:
+        return {
+            "id": self.id, "label": self.label, "hidden": self.hidden,
+            "vocab": self.vocab, "n_layers": len(self.layers),
+            "layer_kinds": [l.kind for l in self.layers],
+            "uses_target_embeddings": self.uses_target_embeddings,
+            "uses_target_lm_head": self.uses_target_lm_head,
+            "target_layer_ids": list(self.target_layer_ids),
+            "fc_in": self.fc_in, "block_size": self.block_size,
+            "mask_token_id": self.mask_token_id,
+            "source": self.source.to_json(),
+            "coverage": self.coverage, "gaps": list(self.gaps),
+            "evidence": self.evidence.to_json(),
+            "evidence_refs": list(self.evidence_refs),
+            "config_coverage_complete": self.config_coverage_complete,
+            "forward_evidence_complete": self.forward_evidence_complete,
+            "structure_complete": self.structure_complete,
+        }
 
 
 @dataclass(frozen=True)
@@ -182,10 +265,32 @@ class ModelIR:
     gaps: List[str] = field(default_factory=list)   # structure_complete=False 的原因
     extras: Dict[str, Any] = field(default_factory=dict)  # 家族私有（kv_spec 等），消费者按 family 读
     mtp_layers: int = 0                 # config 原生 MTP 层数（方法层消费）
+    evidence: ModelEvidence = field(default_factory=ModelEvidence)
+    evidence_refs: Tuple[str, ...] = ()  # 运行时按实际模型生成，禁止跨模型硬编码
+
+    @property
+    def config_coverage_complete(self) -> bool:
+        """完整 config 的每个键都有显式分类（无 unknown/pending/unsupported）。"""
+        return _coverage_complete(self.coverage)
+
+    @property
+    def forward_evidence_complete(self) -> bool:
+        """关键 forward 已源码核过且无未核路径；不等于已执行/已实测。"""
+        return (self.evidence.forward_source == "source-checked"
+                and not self.gaps and not self.evidence.unverified_paths)
 
     @property
     def structure_complete(self) -> bool:
-        return not self.gaps
+        """配置覆盖 + forward 源码证据都完备；CPU/GPU 证据另列，不由此字段冒充。"""
+        return self.config_coverage_complete and self.forward_evidence_complete
+
+    @property
+    def cpu_forward_executed(self) -> bool:
+        return self.evidence.cpu_forward == "cpu-executed"
+
+    @property
+    def gpu_measured(self) -> bool:
+        return self.evidence.gpu_measurement != "none"
 
     def layer_kinds(self) -> List[str]:
         return [l.kind for l in self.layers]
@@ -237,6 +342,12 @@ class ModelIR:
             "gaps": list(self.gaps),
             "extras": self.extras,
             "mtp_layers": self.mtp_layers,
+            "evidence": self.evidence.to_json(),
+            "evidence_refs": list(self.evidence_refs),
+            "config_coverage_complete": self.config_coverage_complete,
+            "forward_evidence_complete": self.forward_evidence_complete,
+            "cpu_forward_executed": self.cpu_forward_executed,
+            "gpu_measured": self.gpu_measured,
             "structure_complete": self.structure_complete,
             "kind_counts": self.kind_counts(),
         }

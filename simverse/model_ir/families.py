@@ -19,37 +19,48 @@ _STRUCT_KEYS = {
             "max_position_embeddings", "tie_word_embeddings", "rope_theta"},
     "qwen3_moe": {"hidden_size", "num_hidden_layers", "num_attention_heads",
                   "num_key_value_heads", "head_dim", "vocab_size", "num_experts",
-                  "num_experts_per_tok", "moe_intermediate_size", "decoder_sparse_step",
+                  "num_experts_per_tok", "moe_intermediate_size",
+                  "intermediate_size", "decoder_sparse_step",
                   "norm_topk_prob", "max_position_embeddings", "tie_word_embeddings",
                   "rope_theta", "mlp_only_layers"},
     "qwen3_5_moe": {"layer_types", "full_attention_interval", "hidden_size",
                     "num_hidden_layers", "num_attention_heads", "num_key_value_heads",
                     "head_dim", "vocab_size", "num_experts", "num_experts_per_tok",
-                    "moe_intermediate_size", "shared_expert_intermediate_size",
+                    "moe_intermediate_size", "intermediate_size",
+                    "shared_expert_intermediate_size",
                     "linear_num_key_heads", "linear_num_value_heads",
                     "linear_key_head_dim", "linear_value_head_dim",
                     "linear_conv_kernel_dim", "partial_rotary_factor",
                     "rope_parameters", "max_position_embeddings",
                     "tie_word_embeddings", "mtp_num_hidden_layers",
+                    "norm_topk_prob", "use_sliding_window",
                     "mtp_use_dedicated_embeddings", "attn_output_gate",
                     "decoder_sparse_step"},
     "qwen3_next": {"layer_types", "full_attention_interval", "hidden_size",
                    "num_hidden_layers", "num_attention_heads", "num_key_value_heads",
                    "head_dim", "vocab_size", "num_experts", "num_experts_per_tok",
-                   "moe_intermediate_size", "shared_expert_intermediate_size",
+                   "moe_intermediate_size", "intermediate_size",
+                   "shared_expert_intermediate_size",
                    "linear_num_key_heads", "linear_num_value_heads",
                    "linear_key_head_dim", "linear_value_head_dim",
                    "linear_conv_kernel_dim", "partial_rotary_factor",
                    "rope_parameters", "max_position_embeddings",
-                   "tie_word_embeddings", "decoder_sparse_step", "mlp_only_layers"},
+                   "tie_word_embeddings", "decoder_sparse_step", "mlp_only_layers",
+                   "norm_topk_prob", "use_sliding_window"},
     "deepseek_v3": {"hidden_size", "num_hidden_layers", "num_attention_heads",
                     "num_key_value_heads", "q_lora_rank", "kv_lora_rank",
                     "qk_rope_head_dim", "qk_nope_head_dim", "v_head_dim",
                     "vocab_size", "n_routed_experts", "n_shared_experts",
                     "num_experts_per_tok", "moe_intermediate_size",
+                    "intermediate_size", "num_nextn_predict_layers",
                     "first_k_dense_replace", "moe_layer_freq", "routed_scaling_factor",
                     "scoring_func", "topk_method", "max_position_embeddings",
                     "tie_word_embeddings", "norm_topk_prob"},
+    "dflash": {"hidden_size", "num_hidden_layers", "num_attention_heads",
+               "num_key_value_heads", "head_dim", "intermediate_size",
+               "vocab_size", "layer_types", "sliding_window", "max_window_layers",
+               "num_target_layers", "use_sliding_window", "max_position_embeddings",
+               "tie_word_embeddings"},
     "v41_csa2": {"hidden_size", "num_hidden_layers", "num_attention_heads",
                  "num_key_value_heads", "head_dim", "q_lora_rank", "o_lora_rank",
                  "o_groups", "qk_rope_head_dim", "index_head_dim", "index_n_heads",
@@ -72,6 +83,7 @@ _META_KEYS = {
     "router_aux_loss_coef", "dtype", "bos_token_id", "eos_token_id",
     "pad_token_id", "auto_map", "architectures", "model_type",
     "transformers_version", "mamba_ssm_dtype", "linear_conv_activation",
+    "torch_dtype",
     "rope_scaling", "logit_scale", "tie_word_embeddings",
 }
 _TRAIN_ONLY_KEYS = {
@@ -115,41 +127,152 @@ def _moe_of(config: Dict[str, Any], shared_inter_key: str = "shared_expert_inter
     shared = config.get(shared_inter_key)
     if v3_style and shared is None:
         shared = (config.get("n_shared_experts") or 0) * config["moe_intermediate_size"]
+    shared_inter = int(shared or 0)
+    # HF/vLLM Qwen3.5/3.6、Qwen3-Next：只要 shared expert 存在就无条件构造
+    # shared_expert_gate = Linear(h,1)。config 中没有 shared_expert_gate 键，
+    # 不能用缺失键推断 False（2026-11-10 审计 F5）。
+    # DeepSeek-V3 的 shared expert 没有 sigmoid gate，保持 False。
+    if v3_style:
+        shared_gate = False
+    elif "shared_expert_gate" in config:
+        shared_gate = bool(config["shared_expert_gate"])
+    else:
+        shared_gate = shared_inter > 0
     return MoeIR(
         experts=experts,
         top_k=config["num_experts_per_tok"],
         intermediate=config["moe_intermediate_size"],
-        shared_intermediate=int(shared or 0),
-        shared_gate=bool(config.get("shared_expert_gate", False)) if not v3_style else False,
+        shared_intermediate=shared_inter,
+        shared_gate=shared_gate,
         routed_scaling=(float(config["routed_scaling_factor"])
                         if config.get("routed_scaling_factor") is not None else None),
         scoring=str(config.get("scoring_func", "softmax")),
     )
 
 
+def flatten_config(config: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
+    """把完整 config（含 text_config/vision_config/quantization_config 等嵌套）
+    展平成 path → leaf 值；容器本身也保留（便于登记容器级状态）。"""
+    out: Dict[str, Any] = {}
+    for key, value in config.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            out[path] = value
+            out.update(flatten_config(value, path))
+        else:
+            out[path] = value
+    return out
+
+
+_CONTAINER_META = {"text_config", "vision_config", "rope_parameters", "rope_scaling",
+                   "auto_map"}
+_CONTAINER_MAPPED = {"dflash_config"}
+_CONTAINER_UNSUPPORTED = {"quantization_config"}
+_OUTER_META = set(_META_KEYS) | {
+    "architectures", "model_type", "transformers_version", "image_token_id",
+    "video_token_id", "vision_start_token_id", "vision_end_token_id",
+}
+
+
 def _coverage(family: str, config: Dict[str, Any], gaps_hint: Dict[str, str] = None,
-              meta_note: str = "") -> Tuple[Dict[str, Dict[str, str]], List[str]]:
-    """逐键覆盖登记。gaps_hint: key → 未建模语义的原因（→ unsupported-semantic）。"""
+              meta_note: str = "", full_config: Dict[str, Any] = None,
+              text_prefix: str = "") -> Tuple[Dict[str, Dict[str, str]], List[str]]:
+    """完整 config 逐字段/嵌套字段覆盖登记（2026-11-10 修复 F7）。
+
+    * 叶键必须显式登记；**未知键 → unsupported-semantic + gap，不默认 ignored**；
+    * 视觉塔不在本仓文本推理 scope → metadata-only（写明领域，不是“无影响”）；
+    * 只有已核不影响计数且原因明确的键才允许 ignored-with-reason。
+    """
     covered: Dict[str, Dict[str, str]] = {}
     gaps: List[str] = []
     struct = _STRUCT_KEYS[family]
-    for key in sorted(config):
-        if key in struct:
-            covered[key] = {"status": "mapped", "consumer": "model_ir",
-                            "note": "进入层图/投影几何"}
-        elif key in (gaps_hint or {}):
-            covered[key] = {"status": "unsupported-semantic", "consumer": "-",
-                            "note": gaps_hint[key]}
-            gaps.append(f"{key}: {gaps_hint[key]}")
-        elif key in _TRAIN_ONLY_KEYS:
-            covered[key] = {"status": "ignored-with-reason", "consumer": "-",
-                            "note": "仅训练期字段，推理结构不受影响"}
-        elif key in _META_KEYS:
-            covered[key] = {"status": "metadata-only", "consumer": "identity",
-                            "note": meta_note or "登记身份/兼容性，不进结构计数"}
+    full = full_config if full_config is not None else config
+    hints = gaps_hint or {}
+    flat = flatten_config(full)
+    for path in sorted(flat):
+        if isinstance(flat[path], dict):
+            # 容器级登记（叶键另行登记）
+            if path in _CONTAINER_MAPPED:
+                covered[path] = {"status": "mapped", "consumer": "model_ir",
+                                 "note": "容器；关键叶字段进入结构"}
+            elif path in _CONTAINER_UNSUPPORTED:
+                covered[path] = {"status": "unsupported-semantic", "consumer": "-",
+                                 "note": "量化配置未映射到本仓计算精度；场景精度为独立输入"}
+                gaps.append(f"{path}: 量化配置未映射（场景精度独立输入，不冒充已消费）")
+            else:
+                covered[path] = {"status": "metadata-only", "consumer": "identity",
+                                 "note": "容器；叶字段逐项登记"}
+            continue
+        under_text = bool(text_prefix and path.startswith(text_prefix + "."))
+        suffix = path[len(text_prefix) + 1:] if under_text else path
+        # 视觉塔：文本推理 scope 外，显式登记为 metadata-only
+        if path.startswith("vision_config."):
+            covered[path] = {"status": "metadata-only", "consumer": "scope:text-only",
+                             "note": "视觉塔不在本仓文本推理 scope；未执行，不作为结构完备证据"}
+            continue
+        if path.startswith("auto_map."):
+            covered[path] = {"status": "metadata-only", "consumer": "identity",
+                             "note": "checkpoint auto_map 指向；实际实现另 pin"}
+            continue
+        if path.startswith("quantization_config."):
+            covered[path] = {"status": "unsupported-semantic", "consumer": "-",
+                             "note": "量化配置未映射到本仓计算精度；场景精度为独立输入"}
+            continue
+        if suffix.startswith("dspark_"):
+            covered[path] = {"status": "metadata-only", "consumer": "methods",
+                             "note": "方法层 DSpark 参数；不是模型结构已消费"}
+            continue
+        if suffix in ("compress_rope_theta",):
+            covered[path] = {"status": "metadata-only", "consumer": "identity",
+                             "note": "压缩 RoPE 角度参数；不改变本仓计数，未执行"}
+            continue
+        if suffix.startswith("rope_scaling."):
+            covered[path] = {"status": "metadata-only", "consumer": "identity",
+                             "note": "RoPE 缩放影响角度/位置；不改变本仓计数，未执行"}
+            continue
+        if suffix.startswith("rope_parameters."):
+            leaf = suffix.split(".", 1)[1]
+            if leaf == "partial_rotary_factor":
+                covered[path] = {"status": "mapped", "consumer": "model_ir",
+                                 "note": "部分旋转维度进入 AttentionIR.rotary_dim"}
+            elif leaf in ("rope_theta", "rope_type"):
+                covered[path] = {"status": "metadata-only", "consumer": "identity",
+                                 "note": "角度参数；不改变本仓计数，未执行"}
+            elif leaf in ("mrope_section", "mrope_interleaved"):
+                covered[path] = {"status": "metadata-only", "consumer": "identity",
+                                 "note": "多模位置 id 选择语义；文本算量不变，未执行"}
+            else:
+                covered[path] = {"status": "unsupported-semantic", "consumer": "-",
+                                 "note": "未登记的 rope_parameters 叶键（不默认忽略）"}
+                gaps.append(f"{path}: 未登记的 rope 参数（不默认忽略）")
+            continue
+        if path.startswith("dflash_config."):
+            covered[path] = {"status": "mapped", "consumer": "model_ir",
+                             "note": "DFlash 块协议绑定参数"}
+            continue
+        if path in hints:
+            covered[path] = {"status": "unsupported-semantic", "consumer": "-",
+                             "note": hints[path]}
+            gaps.append(f"{path}: {hints[path]}")
+            continue
+        if suffix in hints:
+            covered[path] = {"status": "unsupported-semantic", "consumer": "-",
+                             "note": hints[suffix]}
+            gaps.append(f"{suffix}: {hints[suffix]}")
+            continue
+        if suffix in struct:
+            covered[path] = {"status": "mapped", "consumer": "model_ir",
+                             "note": "进入层图/投影几何"}
+        elif suffix in _TRAIN_ONLY_KEYS:
+            covered[path] = {"status": "ignored-with-reason", "consumer": "-",
+                             "note": "仅训练期字段，推理结构不受影响"}
+        elif suffix in _META_KEYS or path in _OUTER_META:
+            covered[path] = {"status": "metadata-only", "consumer": "identity",
+                             "note": meta_note or "登记身份/兼容性，不进结构计数"}
         else:
-            covered[key] = {"status": "ignored-with-reason", "consumer": "-",
-                            "note": "未归类键：默认不影响文本推理结构（登记待复核）"}
+            covered[path] = {"status": "unsupported-semantic", "consumer": "-",
+                             "note": "未登记键：不默认忽略；需映射或显式缺口"}
+            gaps.append(f"{path}: 未登记 config 键（不默认忽略）")
     return covered, gaps
 
 
@@ -159,7 +282,8 @@ def _coverage(family: str, config: Dict[str, Any], gaps_hint: Dict[str, str] = N
 
 
 def parse_gqa(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-              label: str) -> ModelIR:
+              label: str, full_config: Dict[str, Any] = None,
+              text_prefix: str = "") -> ModelIR:
     """tiny 手算样例/通用 GQA dense（全部层 full attention + dense FFN）。"""
     h, v = config["hidden_size"], config["vocab_size"]
     heads, kv = config["num_attention_heads"], config["num_key_value_heads"]
@@ -171,7 +295,8 @@ def parse_gqa(config: Dict[str, Any], source: SourceIdentity, model_id: str,
     layers = [LayerIR(i, FULL, attn=attn, moe=None,
                       dense_inter=config.get("intermediate_size"))
               for i in range(config["num_hidden_layers"])]
-    coverage, gaps = _coverage("gqa", config)
+    coverage, gaps = _coverage("gqa", config, full_config=full_config,
+                                text_prefix=text_prefix)
     return ModelIR(id=model_id, label=label, family="gqa", hidden=h, vocab=v,
                    layers=layers, source=source,
                    max_position=config.get("max_position_embeddings", 0),
@@ -180,7 +305,8 @@ def parse_gqa(config: Dict[str, Any], source: SourceIdentity, model_id: str,
 
 
 def parse_qwen3_moe(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-                    label: str) -> ModelIR:
+                    label: str, full_config: Dict[str, Any] = None,
+                    text_prefix: str = "") -> ModelIR:
     """Qwen3 MoE（Qwen3-30B-A3B 等）：全层 GQA full attention + 全层 MoE。"""
     h, v = config["hidden_size"], config["vocab_size"]
     heads, kv = config["num_attention_heads"], config["num_key_value_heads"]
@@ -196,8 +322,10 @@ def parse_qwen3_moe(config: Dict[str, Any], source: SourceIdentity, model_id: st
     for i in range(config["num_hidden_layers"]):
         use_moe = (i + 1) % step == 0 and i not in dense_only
         layers.append(LayerIR(i, FULL, attn=attn, moe=moe if use_moe else None,
-                              dense_inter=None if use_moe else moe.intermediate))
-    coverage, gaps = _coverage("qwen3_moe", config)
+                              dense_inter=None if use_moe else
+                              config.get("intermediate_size", moe.intermediate)))
+    coverage, gaps = _coverage("qwen3_moe", config, full_config=full_config,
+                                text_prefix=text_prefix)
     return ModelIR(id=model_id, label=label, family="qwen3_moe", hidden=h, vocab=v,
                    layers=layers, source=source,
                    max_position=config.get("max_position_embeddings", 0),
@@ -207,7 +335,9 @@ def parse_qwen3_moe(config: Dict[str, Any], source: SourceIdentity, model_id: st
 
 
 def _parse_hybrid(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-                  label: str, family: str, default_interval: Optional[int]) -> ModelIR:
+                  label: str, family: str, default_interval: Optional[int],
+                  full_config: Dict[str, Any] = None,
+                  text_prefix: str = "") -> ModelIR:
     """qwen3_next / qwen3_5_moe 共用：GDN linear + GQA full 混合层序 + MoE。"""
     h, v = config["hidden_size"], config["vocab_size"]
     heads, kv = config["num_attention_heads"], config["num_key_value_heads"]
@@ -236,7 +366,8 @@ def _parse_hybrid(config: Dict[str, Any], source: SourceIdentity, model_id: str,
             linear=linear if kind == LINEAR else None,
             moe=moe if use_moe else None,
             dense_inter=None if use_moe else moe.intermediate))
-    coverage, gaps = _coverage(family, config)
+    coverage, gaps = _coverage(family, config, full_config=full_config,
+                                text_prefix=text_prefix)
     return ModelIR(id=model_id, label=label, family=family, hidden=h, vocab=v,
                    layers=layers, source=source,
                    max_position=config.get("max_position_embeddings", 0),
@@ -253,23 +384,32 @@ def _parse_hybrid(config: Dict[str, Any], source: SourceIdentity, model_id: str,
 
 
 def parse_qwen3_5_moe(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-                      label: str) -> ModelIR:
+                      label: str, full_config: Dict[str, Any] = None,
+                      text_prefix: str = "") -> ModelIR:
     """qwen3_5_moe 文本配置（Qwen3.5/Qwen3.6 家族；hybrid GDN + full + MoE）。
 
     多模态封装（vision_config/image_token_id 等）不在文本 config 内，由外层
     parse_multimodal_text 登记 metadata-only。
     """
-    return _parse_hybrid(config, source, model_id, label, "qwen3_5_moe", 4)
+    return _parse_hybrid(config, source, model_id, label, "qwen3_5_moe", 4,
+                         full_config=full_config, text_prefix=text_prefix)
 
 
 def parse_qwen3_next(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-                     label: str) -> ModelIR:
-    return _parse_hybrid(config, source, model_id, label, "qwen3_next", 4)
+                     label: str, full_config: Dict[str, Any] = None,
+                     text_prefix: str = "") -> ModelIR:
+    return _parse_hybrid(config, source, model_id, label, "qwen3_next", 4,
+                         full_config=full_config, text_prefix=text_prefix)
 
 
 def parse_deepseek_v3(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-                      label: str) -> ModelIR:
-    """DeepSeek-V3：全层 MLA + first_k_dense_replace/moe_layer_freq 分层。"""
+                      label: str, full_config: Dict[str, Any] = None,
+                      text_prefix: str = "") -> ModelIR:
+    """DeepSeek-V3：全层 MLA + first_k_dense_replace/moe_layer_freq 分层。
+
+    归档修复（2026-11-10 审查 F3）：dense 层 FFN 宽度取 intermediate_size
+    （18432），不是 moe_intermediate_size（2048）；模型已移出活跃 catalog。
+    """
     h, v = config["hidden_size"], config["vocab_size"]
     mla = MlaIR(heads=config["num_attention_heads"],
                 q_lora_rank=config["q_lora_rank"],
@@ -293,13 +433,16 @@ def parse_deepseek_v3(config: Dict[str, Any], source: SourceIdentity, model_id: 
     for i in range(n):
         is_moe = i >= first and i % freq == 0
         layers.append(LayerIR(i, MLA, mla=mla, moe=moe if is_moe else None,
-                              dense_inter=None if is_moe else moe.intermediate))
-    coverage, gaps = _coverage("deepseek_v3", config)
+                              dense_inter=None if is_moe else
+                              config.get("intermediate_size", moe.intermediate)))
+    coverage, gaps = _coverage("deepseek_v3", config, full_config=full_config,
+                                text_prefix=text_prefix)
     return ModelIR(id=model_id, label=label, family="deepseek_v3", hidden=h, vocab=v,
                    layers=layers, source=source,
                    max_position=config.get("max_position_embeddings", 0),
                    tie_embeddings=bool(config.get("tie_word_embeddings", False)),
                    coverage=coverage, gaps=gaps,
+                   mtp_layers=int(config.get("num_nextn_predict_layers", 0) or 0),
                    extras={"kv_spec": {
                        "family": "mla_v3",
                        "kv_lora_rank": mla.kv_lora_rank,
@@ -309,7 +452,8 @@ def parse_deepseek_v3(config: Dict[str, Any], source: SourceIdentity, model_id: 
 
 
 def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-                   label: str) -> ModelIR:
+                   label: str, full_config: Dict[str, Any] = None,
+                   text_prefix: str = "") -> ModelIR:
     """DeepSeek-V4.1-Flash：MLA+CSA2 压缩层计划 + 全层 MoE + mHC 建模 + Engram 缺口。
 
     mHC（hc_mult/hc_eps/hc_sinkhorn_iters）：2026-11-10 按 vLLM pin 源码建模
@@ -370,10 +514,19 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         "engram_layer_ids": "注入层位已证实（residual 流上、层 1/14，post/pre 分立）"
                             "；注入算子本身未建模",
         "engram_pad_token_id": "padding 参与哈希语义，随 Engram forward 缺口",
+        "swiglu_limit": "SwiGLU clamp（10.0）未进入本仓 MLP 计数/数值语义；"
+                        "不冒充已消费",
+        "candidate_block_size": "候选 block 缓冲粒度未进入 candidate_publish/"
+                                "容量建模；不冒充已消费",
     }
     # hc_* → mapped（计数 count/work.hc_boundary_rows；容量 lowering/memory；
     # 证据 vllm deepseek_v41 model.py pin @f358f057 source-checked 2026-11-10）
-    coverage, gaps = _coverage("v41_csa2", tc, gaps_hint)
+    coverage, gaps = _coverage("v41_csa2", tc, gaps_hint,
+                                full_config=full_config, text_prefix=text_prefix)
+    if len(ratios) > L:
+        gaps.append(
+            f"compress_ratios[{L}:{len(ratios)}]: 尾部 {len(ratios) - L} 项未进入"
+            "主干层图（MTP/草稿层作用未建模；不能当作已消费）")
     # mHC 参数（消费方：count/work.hc_boundary_rows、lowering/memory）。
     # post_alpha=2.0 为源码常数（model.py self.hc_post_alpha），入册便于对账。
     hc_spec = {
@@ -416,8 +569,13 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
 
 
 def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id: str,
-                       label: str) -> Any:
-    """DFlash 草稿 → DraftIR（结构 + 块扩散绑定；协议在 methods/dflash.py）。"""
+                       label: str, full_config: Dict[str, Any] = None,
+                       text_prefix: str = "") -> Any:
+    """DFlash 草稿 → DraftIR（结构 + 块扩散绑定；协议在 methods/dflash.py）。
+
+    DraftIR 也走完整 config 覆盖门禁；协议/服务端集成证据在 evidence 中单列，
+    不能因 config/结构 pin 就宣称已执行或已部署。
+    """
     from .schema import DraftIR
     h, v = config["hidden_size"], config["vocab_size"]
     heads, kv = config["num_attention_heads"], config["num_key_value_heads"]
@@ -436,9 +594,12 @@ def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id:
                              rotary_dim=_rotary_dim(d, config),
                              sliding_window=swa if kind == SLIDING else None),
             moe=None, dense_inter=config.get("intermediate_size")))
+    coverage, gaps = _coverage("dflash", config, full_config=full_config,
+                                text_prefix=text_prefix)
     return DraftIR(
         id=model_id, label=label, layers=layers, hidden=h, vocab=v,
         uses_target_embeddings=True, uses_target_lm_head=True,
         target_layer_ids=target_layer_ids, fc_in=len(target_layer_ids) * h,
         block_size=int(fc.get("block_size", 16)),
-        mask_token_id=fc.get("mask_token_id"), source=source)
+        mask_token_id=fc.get("mask_token_id"), source=source,
+        coverage=coverage, gaps=gaps)

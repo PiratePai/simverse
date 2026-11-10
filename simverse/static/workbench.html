@@ -183,6 +183,14 @@
         <select id="sel-tp">
           <option>1</option><option>2</option><option selected>8</option><option>16</option>
         </select></div>
+      <div class="wb-ctrl"><label for="sel-ep">专家并行 EP</label>
+        <select id="sel-ep">
+          <option value="1" selected>关（inter/tp 切分）</option>
+          <option value="tp">开（=TP，整专家分置）</option>
+        </select></div>
+      <div class="wb-ctrl"><label for="inp-budget">可分配预算 GB（假设）</label>
+        <input id="inp-budget" type="number" min="0" step="0.1" placeholder="留空=unknown">
+        </div>
       <div class="wb-ctrl"><label for="sel-draft-dev">草稿设备（DT）</label>
         <select id="sel-draft-dev"></select></div>
       <div class="wb-ctrl"><label for="sel-profile">成本校准 Profile</label>
@@ -250,8 +258,9 @@
         <div class="wb-pane-body">
           <table class="mx-table"><thead id="matrix-head"></thead>
             <tbody id="matrix-body"></tbody></table>
-          <div class="mx-note">颜色=解析估算同口径显示；资格不合格（结构缺口/容量
-            unknown）保留数值并标注，不参与排名。</div>
+          <div class="mx-note">矩阵仅展示有模型身份的 DFlash 与 MTP；chain_draft 和
+            chain_moe_proxy 可在方法选择器中查看研究演示。解析估算与假设接受率不代表实测；
+            结构、方法或容量证据不合格时保留数值并标注，不参与排名。</div>
         </div>
       </div>
       <div class="wb-pane">
