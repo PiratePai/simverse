@@ -54,7 +54,9 @@
         var m = cat.catalog.models[k];
         var o = document.createElement('option');
         o.value = k;
-        o.textContent = m.label + (m.structure_complete ? '' : ' [结构缺口]');
+        o.textContent = m.label
+          + (m.config_coverage_complete ? '' : ' [配置缺口]')
+          + (m.forward_evidence_complete ? '' : ' [forward未完备]');
         sel.appendChild(o);
       });
       sel.value = models.indexOf('qwen36_35b_a3b') >= 0 ? 'qwen36_35b_a3b' : models[0];
@@ -66,7 +68,7 @@
         o.textContent = ({
           chain_draft: 'chain_draft（合成草稿研究演示）',
           chain_moe_proxy: 'chain_moe_proxy（假想 MoE 代理）',
-          mtp: 'mtp（原生微头，当前解析近似）'
+          mtp: 'mtp（未验证：config+目标首层模板）'
         })[mid] || mid;
         ms.appendChild(o);
       });
@@ -246,10 +248,16 @@
     var bad = Object.keys(checks).filter(function (k) {
       return checks[k].status !== 'supported';
     });
-    $('kpi-ev').textContent = (b.model_ref.structure_complete ? '结构完备' : '结构缺口')
-      + ' · ' + (bad.length ? bad.length + ' 项注意' : '无阻断');
-    $('kpi-ev-sub').textContent = '解析估算 · 假设 ' +
-      Object.keys(b.assumption_dict || {}).length + ' 条';
+    var mr = b.model_ref || {};
+    var ev = mr.evidence || {};
+    $('kpi-ev').textContent =
+      '配置' + (mr.config_coverage_complete ? '完备' : '缺口')
+      + ' · forward ' + (mr.forward_evidence_complete ? '源码完备'
+        : (ev.forward_source || 'config-only'))
+      + ' · CPU ' + (ev.cpu_forward === 'cpu-executed' ? '已执行' : '未执行')
+      + ' · GPU ' + (ev.gpu_measurement === 'none' ? '无实测' : ev.gpu_measurement);
+    $('kpi-ev-sub').textContent = (bad.length ? bad.length + ' 项注意' : '无阻断')
+      + ' · 假设 ' + Object.keys(b.assumption_dict || {}).length + ' 条';
     renderOps(b);
     renderTimeline(b);
     renderEvidence(b);
@@ -474,7 +482,7 @@
   function renderCatalogDrawer() {
     var cat = state.catalog.catalog;
     var html = '<table class="plain"><tr><th>模型</th><th>家族/层序</th><th>身份</th>' +
-      '<th>覆盖/缺口</th></tr>';
+      '<th>config 覆盖</th><th>forward 源码</th><th>执行/实测</th></tr>';
     Object.keys(cat.models).forEach(function (k) {
       var m = cat.models[k];
       var cov = { mapped: 0, 'metadata-only': 0, 'ignored-with-reason': 0,
@@ -487,23 +495,36 @@
         JSON.stringify(m.kind_counts) + '</td><td style="font-size:11.5px">' +
         (m.source.repo_id || '') + '@' + (m.source.revision || '').slice(0, 10) +
         '<br><code style="font-size:10.5px">' + (m.source.config_sha256 || '').slice(0, 16) +
-        '</code></td><td>' + (m.structure_complete
-          ? '<span class="tag ok">结构完备</span>'
+        '</code></td><td>' + (m.config_coverage_complete
+          ? '<span class="tag ok">完整</span>'
           : '<span class="tag bad">' + m.gaps.length + ' 缺口</span> ' +
-            (m.gaps[0] || '').slice(0, 40)) +
+            (m.gaps[0] || '').slice(0, 36)) +
         '<br><span style="font-size:11px;color:var(--ink3)">mapped ' + (cov.mapped || 0) +
         ' · meta ' + (cov['metadata-only'] || 0) + ' · ignored ' +
         (cov['ignored-with-reason'] || 0) + ' · unsupported ' +
-        (cov['unsupported-semantic'] || 0) + '</span></td></tr>';
+        (cov['unsupported-semantic'] || 0) + '</span></td><td>' +
+        ((m.evidence && m.evidence.forward_source) || 'config-only') +
+        '<br><span style="font-size:11px;color:var(--ink3)">' +
+        (!m.forward_evidence_complete && (m.evidence.unverified_paths || []).length
+          ? (m.evidence.unverified_paths[0] || '').slice(0, 44) : '') +
+        '</span></td><td>CPU ' + (((m.evidence || {}).cpu_forward) || 'not-run') +
+        '<br>GPU ' + (((m.evidence || {}).gpu_measurement) || 'none') +
+        '</td></tr>';
     });
     html += '</table><h4>草稿</h4><table class="plain"><tr><th>id</th><th>结构</th>' +
-      '<th>绑定</th></tr>';
+      '<th>绑定</th><th>证据</th></tr>';
     Object.keys(cat.drafts).forEach(function (k) {
       var d = cat.drafts[k];
+      var de = d.evidence || {};
       html += '<tr><td>' + k + '</td><td>' + d.n_layers + ' 层 [' +
         d.layer_kinds.join(',') + '] blk=' + d.block_size +
         '</td><td style="font-size:11.5px">' + d.source.repo_id + '@' +
-        d.source.revision.slice(0, 10) + '</td></tr>';
+        d.source.revision.slice(0, 10) +
+        '</td><td style="font-size:11.5px">' + (de.forward_source || 'config-only') +
+        ' / CPU ' + (de.cpu_forward || 'not-run') +
+        ' / GPU ' + (de.gpu_measurement || 'none') +
+        '<br>' + ((de.unverified_paths || [])[0] || '').slice(0, 52) +
+        '</td></tr>';
     });
     html += '</table><h4>待核实资产（如实标注）</h4><ul>';
     Object.keys(cat.pending_assets).forEach(function (k) {

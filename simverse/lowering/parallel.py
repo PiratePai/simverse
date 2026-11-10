@@ -226,6 +226,18 @@ def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
             except ValueError as e:
                 errors.append(f"{e}（layer {layer.index}）")
 
+    # V4.1 grouped o_a/o_b：TP 必须整除 o_groups，否则每 rank 组数为 0；
+    # attention heads 也必须整除（MLA 路径不经过 _attn_rule）。
+    kvs = (model.extras or {}).get("kv_spec", {})
+    if model.family == "v41_csa2" and kvs:
+        groups = kvs.get("o_groups", 1)
+        if groups % tp or tp > groups:
+            errors.append(
+                f"V4.1 o_groups={groups} 不能被 TP{tp} 整除（分组投影每 rank "
+                "组数必须 ≥1）")
+        if kvs.get("heads", 1) % tp:
+            errors.append(f"V4.1 Q 头 {kvs.get('heads')} 不整除 TP{tp}")
+
     # MoE
     moe_ep = ep != 1 and not errors
     moe_rules: List[Tuple[int, MoEShardRule]] = []

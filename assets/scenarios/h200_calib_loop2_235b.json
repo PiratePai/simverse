@@ -35,5 +35,7 @@
     "state": 32
   },
   "cost_profile": "h200-qwen3-235b-a22b-op-v1",
-  "seed": 0
+  "seed": 0,
+  "archived": true,
+  "notes": "历史归档（qwen3_235b_a22b 已移出活跃 catalog；不得作为产品场景或跨模型 profile 依据）"
 }

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict
 
@@ -21,10 +22,57 @@ from .families import (parse_deepseek_v3, parse_dflash_draft, parse_gqa,
                        parse_qwen3_5_moe, parse_qwen3_moe, parse_qwen3_next,
                        parse_v41_csa2)
 from .schema import (FULL, LINEAR, AttentionIR, DraftIR, LayerIR, LinearAttnIR,
-                     MlaIR, ModelIR, MoeIR, SourceIdentity)
+                     MlaIR, ModelEvidence, ModelIR, MoeIR, SourceIdentity)
 
 ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 _VERSION = "0.3.0"
+
+_QWEN36_EVIDENCE = ModelEvidence(
+    forward_source="partial-source",
+    cpu_forward="not-run", gpu_measurement="none",
+    checked_paths=("sm-qwen35-gdn-decode-branch", "sm-qwen35-attn-output-gate",
+                   "sm-qwen35-moe-shared-gate", "sm-qwen35-moe-router",
+                   "sm-vllm-attn-gdn-shard", "sm-vllm-moe-tp-ep-recipe"),
+    unverified_paths=(
+        "mtp_head: config 声明 mtp_num_hidden_layers=1；HF _keys_to_ignore_on_load"
+        "_unexpected=[^mtp.*]，vLLM 主模型丢弃 mtp.；无原生 MTP forward pin",
+        "text_mrope_position_ids: Qwen3.6 文本 RoPE 读 mrope_section；本仓未执行"
+        "位置 id 选择，算量不受影响但语义未实测",
+    ),
+    method_status={"baseline": "source-checked", "dflash_v1": "source-checked",
+                   "mtp": "unverified"},
+    note="GDN/full-attn output gate/MoE router+shared gate/MoE TP-EP 分片已逐行"
+         "核过；MTP 仅 config+目标首层模板，未执行、未实测。")
+
+_V41_EVIDENCE = ModelEvidence(
+    forward_source="partial-source",
+    cpu_forward="not-run", gpu_measurement="none",
+    checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch"),
+    unverified_paths=(
+        "engram_forward: common/engram.py 未 pin；表 dtype/注入算子/容量未知",
+        "mhc_tilelang_kernel: mHC 边界计数为 source-checked+近似，tilelang 核未执行",
+        "csa2_attention_projection: CSA2 注意力/投影为 v0.1 移植，非独立 forward 证据",
+        "csa2_moe_routing: sqrtsoftplus/noaux_tc/分组路由未建模",
+        "candidate_publish: 候选块发布/消费语义未独立核验",
+        "quantization_config: FP8/FP4 配置未映射到本仓计算精度",
+    ),
+    method_status={"baseline": "partial-source", "dflash_v1": "unsupported",
+                   "mtp": "unverified"},
+    note="Engram 8 键/CSA2/MoE/量化仍是真实缺口；hc 仅 source-checked，未执行。")
+
+_DFLASH_EVIDENCE = ModelEvidence(
+    forward_source="source-checked",
+    cpu_forward="not-run", gpu_measurement="none",
+    checked_paths=("sm-dflash-round-protocol", "sm-dflash-cross-attention",
+                   "sm-vllm-dflash-colocated-sharing"),
+    unverified_paths=(
+        "serving_integration: SGLang DFLASH / vLLM PR#40898 未逐行核对（pending asset）",
+        "rejection_sampling_cost: 拒绝采样/KV 回退/hidden 提取无独立耗时，"
+        "当前显式 0 占位",
+        "runtime_pool_sizes: workspace/CUDA graph/NCCL 池尺寸无证据",
+    ),
+    method_status={"dflash_v1": "source-checked"},
+    note="草稿结构/轮协议/同卡共享已源码核对；未执行、未实测、未部署验证。")
 
 
 def _load(path: Path) -> Dict[str, Any]:
@@ -113,77 +161,91 @@ def _tiny_moe() -> ModelIR:
 
 def _v41() -> ModelIR:
     path = ASSETS / "config" / "deepseek_v41_config.json"
-    cfg = _load(path)["text_config"]
-    return parse_v41_csa2(
-        cfg, _src("deepseek-ai/DeepSeek-V4.1-Flash",
-                  "314113f8a7dadb388215396ba5fbee2c610a04d6", _sha(path),
-                  "官方 config 固定快照"),
-        "deepseek_v41_flash", "DeepSeek-V4.1-Flash (MLA+CSA2, 全层 MoE, Engram/hc 缺口)")
+    full = _load(path)
+    ir = parse_v41_csa2(
+        full["text_config"], _src("deepseek-ai/DeepSeek-V4.1-Flash",
+                                  "314113f8a7dadb388215396ba5fbee2c610a04d6",
+                                  _sha(path), "官方 config 固定快照"),
+        "deepseek_v41_flash", "DeepSeek-V4.1-Flash (MLA+CSA2, 全层 MoE, Engram/hc 缺口)",
+        full_config=full, text_prefix="text_config")
+    return replace(ir, evidence=_V41_EVIDENCE,
+                   evidence_refs=("ev-v41-config", "ev-vllm-v41-model"))
 
 
 def _qwen36() -> ModelIR:
     path = ASSETS / "config" / "qwen36_35b_a3b_main__config.json"
-    cfg = _load(path)["text_config"]
+    full = _load(path)
     ir = parse_qwen3_5_moe(
-        cfg, _src("Qwen/Qwen3.6-35B-A3B", "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
-                  _sha(path), "官方 main 固定快照（用户原名 Qwen3.6-35BA3B）"),
-        "qwen36_35b_a3b", "Qwen3.6-35B-A3B (30 GDN + 10 FullAttn, 256E top-8+shared, MTP1)")
-    # 多模封装键登记 metadata-only（文本推理范围；vision 进前置预算属后续）
-    for key in ("image_token_id", "video_token_id", "vision_start_token_id",
-                "vision_end_token_id"):
-        ir.coverage[key] = {"status": "metadata-only", "consumer": "identity",
-                            "note": "多模输入通道；本仓文本推理范围不消费（vision 预算另立 scope）"}
-    return ir
+        full["text_config"],
+        _src("Qwen/Qwen3.6-35B-A3B", "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
+             _sha(path), "官方 main 固定快照（用户原名 Qwen3.6-35BA3B）"),
+        "qwen36_35b_a3b", "Qwen3.6-35B-A3B (30 GDN + 10 FullAttn, 256E top-8+shared, MTP1)",
+        full_config=full, text_prefix="text_config")
+    return replace(ir, evidence=_QWEN36_EVIDENCE,
+                   evidence_refs=("ev-qwen36-main-config", "ev-hf-qwen35-modeling",
+                                  "ev-hf-qwen35-config"))
 
 
 def _dflash_draft() -> DraftIR:
     path = ASSETS / "config" / "qwen36_35b_a3b_dflash__config.json"
     cfg = _load(path)
-    return parse_dflash_draft(
+    ir = parse_dflash_draft(
         cfg, _src("z-lab/Qwen3.6-35B-A3B-DFlash",
                   "f181eece646affea2c38b2765f1aaa01a9734ccd", _sha(path),
                   "方法实现另 pin z-lab/dflash@07ebd93"),
-        "dflash_qwen36_35b_a3b", "DFlash v1 for Qwen3.6-35B-A3B (6L dense GQA, block diffusion)")
+        "dflash_qwen36_35b_a3b",
+        "DFlash v1 for Qwen3.6-35B-A3B (6L dense GQA, block diffusion)",
+        full_config=cfg)
+    return replace(ir, evidence=_DFLASH_EVIDENCE,
+                   evidence_refs=("ev-qwen36-dflash-config", "ev-dflash-impl",
+                                  "ev-dflash-readme"))
 
 
 def _qwen3_30b() -> ModelIR:
     path = ASSETS / "config" / "qwen3_30b_a3b__config.json"
     cfg = _load(path)
-    return parse_qwen3_moe(
-        cfg, _src("Qwen/Qwen3-30B-A3B", "ad44e777bcd14f90c4fc516864591c19e339c933",
-                  _sha(path), "官方 main 固定快照"),
-        "qwen3_30b_a3b", "Qwen3-30B-A3B (48L GQA MoE 128E top-8)")
+    ir = parse_qwen3_moe(
+        cfg, _src("Qwen/Qwen3-30B-A3B",
+                  "ad44e777bcd18fa416d9da3bd8f70d33ebb85d39",
+                  _sha(path), "历史归档；revision 与 identity 全等（2026-11-10 修复）"),
+        "qwen3_30b_a3b", "Qwen3-30B-A3B (48L GQA MoE 128E top-8) [历史归档]")
+    return replace(ir, evidence_refs=("ev-qwen3-30b-config",))
 
 
 def _qwen3_235b() -> ModelIR:
     path = ASSETS / "config" / "qwen3_235b_a22b__config.json"
     cfg = _load(path)
-    return parse_qwen3_moe(
+    ir = parse_qwen3_moe(
         cfg, _src("Qwen/Qwen3-235B-A22B",
                   "8efa61729e24bd65b1d152b5ab5409052aa80e65", _sha(path),
-                  "官方 main 快照（2026-11-10 经 HF resolve/main 获取并取 revision；"
-                  "pi-viewer 二手副本逐字段核对一致，仅其多自加 profiling 键）"),
+                  "历史归档；官方 main 快照（2026-11-10 HF resolve）"),
         "qwen3_235b_a22b",
-        "Qwen3-235B-A22B (94L GQA MoE 128E top-8; 官方身份 2026-11-10 补，G-D3 解除)")
+        "Qwen3-235B-A22B (94L GQA MoE 128E top-8) [历史归档]")
+    return replace(ir, evidence_refs=("ev-qwen3-235b-config",
+                                      "ev-h200-235b-distill"))
 
 
 def _qwen3_next() -> ModelIR:
     path = ASSETS / "config" / "qwen3_next_80b_a3b__config.json"
     cfg = _load(path)
-    return parse_qwen3_next(
+    ir = parse_qwen3_next(
         cfg, _src("Qwen/Qwen3-Next-80B-A3B-Instruct", "local-snapshot",
-                  _sha(path), "model-verse 本地快照；官方 HF 仓 gated(401)，"
-                  "官方 revision 身份待补（PENDING_ASSET）"),
-        "qwen3_next_80b_a3b", "Qwen3-Next-80B-A3B (48L: 12 Full@idx3,7..47 + 36 GDN, 512E top-10)")
+                  _sha(path), "历史归档；model-verse 本地快照，官方 revision 待补"),
+        "qwen3_next_80b_a3b",
+        "Qwen3-Next-80B-A3B (48L: 12 Full@idx3,7..47 + 36 GDN, 512E top-10) [历史归档]")
+    return replace(ir, evidence_refs=("ev-qwen3-next-config",))
 
 
 def _deepseek_v3() -> ModelIR:
     path = ASSETS / "config" / "deepseek_v3__config.json"
     cfg = _load(path)
-    return parse_deepseek_v3(
-        cfg, _src("deepseek-ai/DeepSeek-V3", "e815299b0bcbef1ef060f18c8ede89408bb1e93c",
-                  _sha(path), "官方 main 固定快照"),
-        "deepseek_v3", "DeepSeek-V3 (61L MLA, 3 Dense + 58 MoE 256E top-8+1shared)")
+    ir = parse_deepseek_v3(
+        cfg, _src("deepseek-ai/DeepSeek-V3",
+                  "e815299b0bcbac849fa540c768ef21845365c9eb",
+                  _sha(path), "历史归档；revision 与 identity 全等（2026-11-10 修复）"),
+        "deepseek_v3",
+        "DeepSeek-V3 (61L MLA, 3 Dense + 58 MoE 256E top-8+1shared) [历史归档]")
+    return replace(ir, evidence_refs=("ev-deepseek-v3-config",))
 
 
 # ---------------------------------------------------------------------------
@@ -205,25 +267,39 @@ PENDING_ASSETS = {
 }
 
 
-def build_catalog() -> Dict[str, Any]:
+def build_catalog(include_internal: bool = False) -> Dict[str, Any]:
+    """运行时目录（默认只含两款主模型 + 与 Qwen3.6 绑定的 DFlash DraftIR）。
+
+    include_internal=True 仅用于离线回归/历史校准验证：加入 tiny 合成 fixture
+    与四款历史归档模型。CLI/API/Web/部署排名路径**不得**传 True；它们使用默认
+    目录，历史模型只能通过测试显式注入的 archive catalog 运行。
+    """
     models: Dict[str, ModelIR] = {
-        "tiny_gqa": _tiny_gqa(),
-        "tiny_hybrid": _tiny_hybrid(),
-        "tiny_mla": _tiny_mla(),
-        "tiny_moe": _tiny_moe(),
         "deepseek_v41_flash": _v41(),
         "qwen36_35b_a3b": _qwen36(),
-        "qwen3_30b_a3b": _qwen3_30b(),
-        "qwen3_235b_a22b": _qwen3_235b(),
-        "qwen3_next_80b_a3b": _qwen3_next(),
-        "deepseek_v3": _deepseek_v3(),
     }
     drafts = {"dflash_qwen36_35b_a3b": _dflash_draft()}
+    if include_internal:
+        models.update({
+            # 合成 fixture：手算/机制测试专用，不是产品/部署选择
+            "tiny_gqa": _tiny_gqa(),
+            "tiny_hybrid": _tiny_hybrid(),
+            "tiny_mla": _tiny_mla(),
+            "tiny_moe": _tiny_moe(),
+            # 历史归档：保留解析与校准回归，禁止进入运行时目录
+            "qwen3_30b_a3b": _qwen3_30b(),
+            "qwen3_235b_a22b": _qwen3_235b(),
+            "qwen3_next_80b_a3b": _qwen3_next(),
+            "deepseek_v3": _deepseek_v3(),
+        })
     return {"models": models, "drafts": drafts,
             "pending_assets": PENDING_ASSETS, "version": _VERSION}
 
 
 PRODUCT_MODELS = frozenset({"qwen36_35b_a3b", "deepseek_v41_flash"})
+ARCHIVE_MODELS = frozenset({"qwen3_30b_a3b", "qwen3_235b_a22b",
+                            "qwen3_next_80b_a3b", "deepseek_v3"})
+FIXTURE_MODELS = frozenset({"tiny_gqa", "tiny_hybrid", "tiny_mla", "tiny_moe"})
 
 
 def catalog_json() -> dict:
@@ -232,16 +308,6 @@ def catalog_json() -> dict:
         "schema_version": "0.2",
         "model_ir_version": _VERSION,
         "models": {k: m.to_json() for k, m in cat["models"].items() if k in PRODUCT_MODELS},
-        "drafts": {k: {
-            "id": d.id, "label": d.label, "hidden": d.hidden, "vocab": d.vocab,
-            "n_layers": len(d.layers),
-            "layer_kinds": [l.kind for l in d.layers],
-            "uses_target_embeddings": d.uses_target_embeddings,
-            "uses_target_lm_head": d.uses_target_lm_head,
-            "target_layer_ids": list(d.target_layer_ids),
-            "fc_in": d.fc_in, "block_size": d.block_size,
-            "mask_token_id": d.mask_token_id,
-            "source": d.source.to_json(),
-        } for k, d in cat["drafts"].items()},
+        "drafts": {k: d.to_json() for k, d in cat["drafts"].items()},
         "pending_assets": cat["pending_assets"],
     }

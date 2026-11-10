@@ -4,6 +4,7 @@
 的枚举），不 import 生产计数函数。数字对不上即失败，不做容差（整数精确）。
 """
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -27,7 +28,8 @@ Q8 = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8, "state": 32}
 
 @pytest.fixture(scope="module")
 def cat():
-    return build_catalog()
+    # 历史模型/tiny 只作离线回归 fixture；默认运行时 catalog 只有两款主模型。
+    return build_catalog(include_internal=True)
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +42,8 @@ def test_qwen3_30b_structure(cat):
     assert all(l.kind == "full_attention" for l in m.layers)
     assert all(l.moe and l.moe.experts == 128 and l.moe.top_k == 8 for l in m.layers)
     assert m.layers[0].attn.heads == 32 and m.layers[0].attn.kv_heads == 4
-    assert m.source.revision.startswith("ad44e777")
+    # 2026-11-10 审查 F4：catalog revision 必须与 identity 全等
+    assert m.source.revision == "ad44e777bcd18fa416d9da3bd8f70d33ebb85d39"
 
 
 def test_qwen3_next_hybrid_schedule(cat):
@@ -52,7 +55,7 @@ def test_qwen3_next_hybrid_schedule(cat):
     assert len(full_idx) == 12
     assert m.layers[0].linear is not None and m.layers[0].linear.num_v_heads == 32
     assert m.layers[3].moe.experts == 512 and m.layers[3].moe.top_k == 10
-    assert m.source.note.find("gated") >= 0  # 官方 revision 身份待补，如实标注
+    assert m.source.revision == "local-snapshot"  # 官方 revision 待补，如实标注
 
 
 def test_deepseek_v3_mla_and_dense_moe_split(cat):
@@ -65,9 +68,14 @@ def test_deepseek_v3_mla_and_dense_moe_split(cat):
     assert len(moe) == 58
     assert moe[0].moe.experts == 256 and moe[0].moe.top_k == 8
     assert moe[0].moe.shared_intermediate == 1 * 2048  # n_shared=1 × inter 2048
+    # F3 根因修复（仅归档回归）：dense FFN 宽度 18432，不是 moe_intermediate 2048
+    assert all(l.dense_inter == 18432 for l in dense)
     kv = m.extras["kv_spec"]
     assert kv["kv_elems_per_token_per_layer"] == 512 + 64   # kv_lora + rope
-    assert m.structure_complete
+    # 历史模型只有 config 映射，无 forward 证据；不得再标结构完备
+    assert m.coverage["intermediate_size"]["status"] == "mapped"
+    assert not m.forward_evidence_complete and not m.structure_complete
+    assert m.source.revision == "e815299b0bcbac849fa540c768ef21845365c9eb"
 
 
 def test_v41_structure_and_gaps(cat):
@@ -75,11 +83,19 @@ def test_v41_structure_and_gaps(cat):
     m = cat["models"]["deepseek_v41_flash"]
     assert len(m.layers) == 40
     assert m.kind_counts() == {"mla_csa2": 40}
-    assert not m.structure_complete          # Engram 仍阻断（不冒充）
+    assert not m.structure_complete          # Engram/CSA2/MoE 仍阻断（不冒充）
+    assert not m.config_coverage_complete
+    assert m.evidence.forward_source == "partial-source"
     gap_keys = {g.split(":")[0] for g in m.gaps}
     assert "engram_vocab_size" in gap_keys
     assert not gap_keys & {"hc_mult", "hc_eps", "hc_sinkhorn_iters"}  # hc 已解除
-    assert len(gap_keys) == 8                 # 8 engram 键
+    engram = {k for k in gap_keys if k.startswith("engram_")}
+    assert len(engram) == 8                   # 8 engram 键
+    # 2026-11-10 审查新增：swiglu clamp/candidate block/compress_ratios 尾部/
+    # quantization_config 也是显式缺口，不默认 ignored。
+    assert {"swiglu_limit", "candidate_block_size", "quantization_config"} <= gap_keys
+    assert any("compress_ratios[40:43]" in g for g in m.gaps)
+    assert any("csa2_moe_routing" in p for p in m.evidence.unverified_paths)
     # hc 参数入册 extras（消费方 count/memory）
     hc = m.extras["hc"]
     assert hc["mult"] == 4 and hc["sinkhorn_iters"] == 20
@@ -101,7 +117,15 @@ def test_qwen36_required_scenario(cat):
     assert m.mtp_layers == 1
     assert m.source.repo_id == "Qwen/Qwen3.6-35B-A3B"
     assert m.source.revision.startswith("345d467b")
-    assert m.structure_complete
+    # config 全覆盖；但 MTP forward 未 pin → 不得宣称结构/forward 完备
+    assert m.config_coverage_complete
+    assert not m.forward_evidence_complete and not m.structure_complete
+    assert m.evidence.forward_source == "partial-source"
+    assert any("mtp_head" in p for p in m.evidence.unverified_paths)
+    assert m.evidence.method_status["mtp"] == "unverified"
+    # 已核分支保持 source-checked，不降格为 config-only
+    assert "sm-qwen35-gdn-decode-branch" in m.evidence.checked_paths
+    assert m.evidence.method_status["baseline"] == "source-checked"
 
 
 def test_dflash_draft_structure(cat):
@@ -127,15 +151,25 @@ def test_every_config_key_has_coverage(cat):
         for key, entry in cov.items():
             assert entry["status"] in valid, (mid, key, entry)
         if mid == "deepseek_v41_flash":
-            eng = [k for k, v in cov.items() if v["status"] == "unsupported-semantic"]
+            eng = [k for k, v in cov.items()
+                   if v["status"] == "unsupported-semantic"
+                   and k.split(".")[-1].startswith("engram_")]
             assert len(eng) == 8   # 8 engram；hc 3 键已 mapped（2026-11-10）
             for hk in ("hc_mult", "hc_eps", "hc_sinkhorn_iters"):
-                assert cov[hk]["status"] == "mapped"
+                assert cov[f"text_config.{hk}"]["status"] == "mapped"
+    # 完整 config 的每个叶键都必须有登记（2026-11-10 F7）
+    from simverse.model_ir.families import flatten_config
+    for fname, mid, prefix in (
+            ("qwen36_35b_a3b_main__config.json", "qwen36_35b_a3b", "text_config"),
+            ("deepseek_v41_config.json", "deepseek_v41_flash", "text_config")):
+        raw = json.loads((ROOT / "assets" / "config" / fname).read_text(encoding="utf-8"))
+        leaves = {k for k, v in flatten_config(raw).items() if not isinstance(v, dict)}
+        assert leaves <= set(cat["models"][mid].coverage), (mid, leaves - set(cat["models"][mid].coverage))
 
 
 def test_v41_dspark_fields_are_method_scoped(cat):
     m = cat["models"]["deepseek_v41_flash"]
-    ds = [k for k in m.coverage if k.startswith("dspark_")]
+    ds = [k for k in m.coverage if k.split(".")[-1].startswith("dspark_")]
     assert ds and all(m.coverage[k]["consumer"] == "methods" for k in ds)
 
 

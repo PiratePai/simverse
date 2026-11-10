@@ -94,12 +94,15 @@
   量化契约（scenario.validate 4/8/16）；检查器精度标签改从场景快照读取（不再
   写死）。**不把"profile 需要 BF16"转成输入精度**：profile 域门禁仍按其采集
   精度独立核对，不匹配组合显示具体回退原因。
-- 验收：tests/test_calibration_h200.py::test_ui_bf16_preset_enters_calibration_domain
-  （UI 场景 JSON → /api/v2/run 与进程内/CLI 同 run_id 同值，域 supported，
-  M01_tpot_profile_calibrated 出现）+ 静态接线核对。
+- 验收（历史归档）：`tests/test_calibration_h200.py::test_archive_bf16_calibration_still_verified_offline`
+  保留离线校准数值验证；产品 API 拒绝归档模型/历史 profile，静态接线核对保留。
+  30B 场景不得再经 `/api/v2/run` 作为 UI 验收通道。
 - 浏览器像素级观感仍待人工复核（本会话无图像通道，同前口径）。
 
-## G-C11 ~~per-rank MoE 分片账本统一（V04 扩展；235B MoE 准入前置）~~ → 已解除（2026-11-10 A组 R01）
+## G-C11 ~~per-rank MoE 分片账本统一（V04 扩展；235B MoE 准入前置）~~ → 已解除（2026-11-10 A组 R01；235B 现已归档）
+
+> **2026-11-10 后续**：235B 已移出活跃 catalog；本条的 per-rank 配方仍服务
+> Qwen3.6，但“235B 准入”不再是产品路径。
 
 - 统一配方落地：`simverse/lowering/parallel.py` ParallelPlan（vLLM @dc74b8cb
   pin）——EP 关 routed inter/tp、EP 开 E//ep(+余数) 整专家、router 复制、

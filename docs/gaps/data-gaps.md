@@ -21,7 +21,11 @@
   analytical-estimate；mean-only 输入→E[N] unknown 不排名。
 - **优先级**：P0（必需场景结论上限被它钉死）。依赖：G-C3（服务端集成核对）。
 
-## G-D2 真模型 MoE 实测接入（首选路径已明确：235B TP8/EP1 数据在册）⭐P0
+## G-D2 真模型 MoE 实测接入（历史 235B 路径已归档；两主模型需新采集）⭐P0
+
+> **2026-11-10 归档更新**：Qwen3-30B-A3B/235B-A22B 已移出活跃 catalog；下列
+> 30B/235B 数据只作历史校准归档，不能用于 Qwen3.6/V4.1。两款主模型的 MoE
+> 实测仍未采集。
 
 - **影响**：两条校准闭环的覆盖上限——MoE/router/lm_head 全部解析回退；
   30B B8 时间口径覆盖 71.8%、235B B8 42.5%。
@@ -42,12 +46,12 @@
   cost.calibration.groups 无 moe 项，fallback_ms 披露。
 - **优先级**：P0。依赖：G-C11（工程）或新采集。
 
-## G-D3 ~~Qwen3-235B-A22B 官方身份~~ → 已解除（2026-11-10）
+## G-D3 ~~Qwen3-235B-A22B 官方身份~~ → 已解除（2026-11-10；同轮归档）
 
 - 官方身份已入册：HF main @`8efa6172…`，config SHA256 `0ecd5d6f…`（网络获取，
-  与 pi-viewer 二手副本逐字段核对一致）；catalog 注册 `qwen3_235b_a22b`。
-- TP2/8 linear+attention 闭环已通（[h200-loop2-235b.md](../calibration/h200-loop2-235b.md)）；
-  其 MoE 部分并入 G-D2（依赖 G-C11）。
+  与 pi-viewer 二手副本逐字段核对一致）。
+- **该模型已移出活跃 catalog，只作历史归档**；TP2/8 闭环报告保留日期事实，
+  不得用于两款主模型（profile 绑定 235B，跨模型直接拒绝）。
 
 ## G-D4 prefill/混合批注意力 + verify（多 query）形状数据
 

@@ -93,7 +93,7 @@ def test_web_cli_json_csv_consistent(tmp_path):
     assert "T0 解析估算" in html
 
 
-def test_stale_response_not_reused(tmp_path):
+def test_stale_response_not_reused():
     """切换场景后 run_id 变化：晚到的旧响应不可覆盖新结果（UI 键含身份）。"""
     a = run_v2(ScenarioV2.from_json(SC))
     sc2 = dict(SC)

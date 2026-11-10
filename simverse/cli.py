@@ -22,7 +22,6 @@ from pathlib import Path
 from . import __version__
 from .contracts import ScenarioSpec, canonical_json
 from .engine import run
-from .models import registry_json
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCENARIO = ROOT / "assets" / "scenarios" / "v41_flash_dt_verification.json"
@@ -85,9 +84,18 @@ def _summary(result: dict):
     print("  breakeven α*:", {k: (round(v, 4) if v == v else "none") for k, v in be.items()})
 
 
+def _require_active_v01(scenario):
+    from .model_ir.catalog import PRODUCT_MODELS
+    if scenario.model_id not in PRODUCT_MODELS:
+        raise SystemExit(
+            f"历史/合成模型 {scenario.model_id} 不在活跃 CLI 目录；tiny 仅作测试 "
+            "fixture，请使用 run-v2 的两款主模型")
+
+
 def cmd_run(args):
     src = Path(args.scenario) if args.scenario else DEFAULT_SCENARIO
     scenario = ScenarioSpec.from_json(json.loads(src.read_text(encoding="utf-8")))
+    _require_active_v01(scenario)
     result = run(scenario).to_json()
     result["replay"] = {"scenario_file": str(src)}
     _summary(result)
@@ -104,6 +112,7 @@ def cmd_sweep(args):
     from .chartpng import line_chart
     src = Path(args.scenario) if args.scenario else DEFAULT_SCENARIO
     scenario = ScenarioSpec.from_json(json.loads(src.read_text(encoding="utf-8")))
+    _require_active_v01(scenario)
     data = sweep_suite(scenario)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -237,7 +246,11 @@ def cmd_run_v2(args):
     scenario = _v2_scenario(args.scenario)
     if getattr(args, "cost_profile", None):
         scenario.cost_profile = args.cost_profile
-    bundle = run_v2(scenario).to_json()
+    try:
+        bundle = run_v2(scenario).to_json()
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        raise SystemExit(2)
     bundle["replay"] = {"scenario_file": str(args.scenario) if args.scenario
                         else "builtin:cli-default"}
     _summary_v2(bundle)
@@ -326,7 +339,10 @@ def cmd_list(args):
         print(json.dumps(formulas_json(), ensure_ascii=False, indent=1))
         return
     if args.what in ("models", "drafts"):
-        print(json.dumps(registry_json(), ensure_ascii=False, indent=1))
+        from .model_ir import catalog_json
+        cj = catalog_json()
+        payload = cj["models"] if args.what == "models" else cj["drafts"]
+        print(json.dumps(payload, ensure_ascii=False, indent=1))
         return
     if args.what == "devices":
         from .devices import DEVICES, LINKS
@@ -366,7 +382,7 @@ def main(argv=None):
     p_r2.add_argument("--trace", default=None)
     p_r2.add_argument("--html", default=None)
     p_r2.add_argument("--cost-profile", default=None,
-                      help="实测校准 profile 集 id（如 h200-qwen3-30b-a3b-tiny-op-v1）")
+                      help="历史归档 profile 集 id（仅归档模型；跨模型直接拒绝）")
     p_r2.set_defaults(fn=cmd_run_v2)
     p_s2 = sub.add_parser("sweep-v2", help="v0.2 参数扫描（不可变快照）")
     p_s2.add_argument("scenario", nargs="?", default=None)

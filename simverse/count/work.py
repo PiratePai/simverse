@@ -257,11 +257,15 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
     start, length = (0, S + Q) if prefill else (S, Q)
     end = start + length
     rows: List[OpRow] = []
-    gemm = lambda op, ic, oc, wmult=1.0: OpRow(
-        stage, li, op, flops=2 * T * ic * oc, weight_read=int(ic * oc * wmult),
-        act_read=int(T * ic * b_a), act_write=int(T * oc * b_a),
-        weight_capacity=int(ic * oc * wmult), formula=FR.F_GEMM,
-        shape=f"[{T},{ic}]@[{ic},{oc}]")
+    def gemm(op, ic, oc, reps: int = 1):
+        """reps>1：分组投影（V4.1 o_a 每 rank ng 组，每组独立权重/激活）。"""
+        return OpRow(
+            stage, li, op, flops=2 * T * ic * oc * reps,
+            weight_read=int(ic * oc * reps * b_w),
+            act_read=int(T * ic * reps * b_a), act_write=int(T * oc * reps * b_a),
+            weight_capacity=int(ic * oc * reps * b_w), formula=FR.F_GEMM,
+            shape=f"{reps}×[{T},{ic}]@[{ic},{oc}]" if reps > 1
+            else f"[{T},{ic}]@[{ic},{oc}]")
     rows.append(gemm("q_a_proj", h, qrank))
     rows.append(gemm("kv_proj", h, d))
     for name, width in (("q_norm", qrank), ("k_norm", d)):
@@ -352,8 +356,11 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
     ops, _w, ar, aw = _rope_row(T, heads, d, rd, b_a)
     rows.append(OpRow(stage, li, "o_rope", flops=ops, act_read=ar, act_write=aw,
                       formula=FR.F_ROPE, shape=f"rotary={rd}"))
-    rows.append(gemm("o_a_proj", heads_full * d // groups, orank))
-    rows[-1].shape = f"分组 {ng}×[{heads_full * d // groups},{orank}]"
+    # o_a_proj：每 rank 持有 ng=groups/tp 组，每组输入 heads_full·d/groups、
+    # 输出 orank；count 必须乘 ng（2026-11-10 审计 F2：旧式只算一组，TP1 少 8×）
+    rows.append(gemm("o_a_proj", heads_full * d // groups, orank, reps=ng))
+    rows[-1].shape = (f"分组 {ng}×[{heads_full * d // groups},{orank}]"
+                      f"（reps={ng}；TP{tp}）")
     rows.append(gemm("o_b_proj", ng * orank, h))
     return rows
 

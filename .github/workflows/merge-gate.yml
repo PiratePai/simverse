@@ -1,0 +1,42 @@
+name: merge-gate
+
+# 不按路径过滤：PR/push/merge_group 都跑同一门禁。工作流文件本身不能强制
+# 仓库启用 required status check 或 PR review；需在仓库 ruleset/branch
+# protection 中把本 job 设为 required，并启用 review 要求（见 docs/MERGE_CRITERIA.md）。
+on:
+  pull_request:
+  push:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: pytest (Windows, Python 3.12)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install package and pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+
+      - name: Static check workbench JavaScript
+        run: node --check simverse/static/workbench.js
+
+      - name: Run merge gate and full test suite
+        run: python -m pytest tests -q

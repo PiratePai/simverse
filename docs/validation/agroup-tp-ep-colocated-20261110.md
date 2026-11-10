@@ -1,5 +1,10 @@
 # A 组验证报告：Qwen3.6-35B-A3B + DFlash TP/EP 分片与同卡账本（R01–R03b）
 
+> **历史轮次（2026-11-10 标注）**：本报告记录当轮实现与数值；之后的两模型
+> 审查修复了 shared gate、V4.1 o_a/memory 单位与草稿 B>1 口径。当前状态以
+> [两模型审查记录](two-model-forward-merge-gate-20261110.md) 与合入门禁为准，
+> 本报告数值不自动继承。
+
 日期：2026-11-10。本轮交付 ROADMAP A 组五项的工程实现与验证。本文是合入
 说明的证据入口；实现细节见 `simverse/lowering/parallel.py`（配方判定）与
 对应测试。

@@ -17,15 +17,19 @@ from .work import (OpRow, _norm_row, _rope_row, build_model_work, causal_pairs,
 
 def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                       e_produced: float, start_ctx: int, quant: dict,
-                      target_quant_act: float, tp: int = 1) -> List[OpRow]:
-    """DFlash 每轮草稿前向账本（**per-rank 口径**）。
+                      target_quant_act: float, tp: int = 1,
+                      batch: int = 1) -> List[OpRow]:
+    """DFlash 每轮草稿前向账本（**per-rank、整批口径**）。
 
-    e_produced：上轮提交 token 数期望（fc/lm_head 的 token 维权重）；
+    e_produced：**每序列**上轮提交 token 数期望；batch=B 时所有 token 维
+    （fc/hidden_norm/注意 KV/lm_head/noise）乘 B 一次。权重/容量与 B 无关。
     start_ctx：已提交前缀长度（草稿 KV 可见行数上限用 SWA 封顶）；
     tp：草稿与 target 同 TP 组运行（vLLM load_dflash_model pin，见
     lowering/parallel.py）；q/o 投影与 MLP 按 tp 切分，k/v 按 KV 头规则
     切分或复制，lm_head 读 target 的 V/tp 分片（logits 由集合通信聚合）。
     """
+    B = batch
+    produced = B * e_produced
     h = draft.hidden
     blk = draft.block_size
     b_w = quant["dense_w"] / 8
@@ -35,16 +39,16 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
     # 1) fc 投影：E[produced]×(8h→h) + hidden_norm；fc 为 ReplicatedLinear
     #    （每 rank 全宽复制，不随 tp 缩放）
     rows.append(OpRow(
-        stage, -1, "dflash_fc", flops=int(2 * e_produced * draft.fc_in * h),
+        stage, -1, "dflash_fc", flops=int(2 * produced * draft.fc_in * h),
         weight_read=int(draft.fc_in * h * b_w),
-        act_read=int(e_produced * draft.fc_in * b_a),
-        act_write=int(e_produced * h * b_a),
+        act_read=int(produced * draft.fc_in * b_a),
+        act_write=int(produced * h * b_a),
         weight_capacity=int(draft.fc_in * h * b_w), formula=FR.F_GEMM,
         statistic="expectation",
-        shape=f"E[produced]={e_produced:.2f}×[{draft.fc_in}→{h}] fc"
-              f"（replicated，不随 TP{tp} 缩放）"))
+        shape=f"B={B}·E[produced]={e_produced:.2f}→{produced:.2f}×"
+              f"[{draft.fc_in}→{h}] fc（replicated，不随 TP{tp} 缩放）"))
     # hidden_norm（fc 输出归一，pinned dflash model.py L584；2026-11-10 补齐）
-    ops_h, w_h, ar_h, aw_h = _norm_row(int(max(1.0, e_produced)), h, b_a)
+    ops_h, w_h, ar_h, aw_h = _norm_row(int(max(1.0, produced)), h, b_a)
     rows.append(OpRow(stage, -1, "dflash_hidden_norm", flops=int(ops_h),
                       weight_read=int(w_h), act_read=int(ar_h),
                       act_write=int(aw_h), statistic="expectation",
@@ -57,7 +61,7 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
         # KV 头 per-rank（kvh≥tp 切分；kvh<tp 复制）
         kvh = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
         d = a.head_dim
-        T = blk
+        T = B * blk
         rows.append(OpRow(stage, li, "q_proj",
                           flops=2 * T * h * heads_c * d,
                           weight_read=int(h * heads_c * d * b_w),
@@ -78,11 +82,12 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
         win = a.sliding_window
         end = start_ctx + blk
         if win:
-            pairs = causal_pairs(end, 1, win) - causal_pairs(start_ctx, 1, win)
-            read_rows = min(end, win)
+            pairs = B * (causal_pairs(end, 1, win)
+                         - causal_pairs(start_ctx, 1, win))
+            read_rows = B * min(end, win)
         else:
-            pairs = start_ctx * blk + blk * (blk + 1) // 2
-            read_rows = start_ctx
+            pairs = B * (start_ctx * blk + blk * (blk + 1) // 2)
+            read_rows = B * start_ctx
         kv_elems = 2 * kvh * d                # per-rank KV 元素
         rows.append(OpRow(
             stage, li, "draft_attn_core",
@@ -92,16 +97,18 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
             kv_read=int(read_rows * kv_elems * b_kv),
             kv_write=int(T * kv_elems * b_kv),
             formula=FR.F_ATTN_CORE if not win else FR.F_SWA_PAIRS,
-            shape=f"pairs={pairs} rows={read_rows} win={win} heads(卡上)={heads_c}"))
+            shape=f"B={B} pairs={pairs} rows={read_rows} win={win} "
+                  f"heads(卡上)={heads_c}"))
         # ctx K/V（target_hidden 投影，每轮 produced 行；权重与草稿 k/v_proj
         # 同一分片对象，无额外驻留）
         rows.append(OpRow(stage, li, "ctx_kv_proj",
-                          flops=int(2 * e_produced * h * 2 * kvh * d),
+                          flops=int(2 * produced * h * 2 * kvh * d),
                           weight_read=0, statistic="expectation",
-                          act_read=int(e_produced * h * b_a),
-                          kv_write=int(e_produced * kv_elems * b_kv),
+                          act_read=int(produced * h * b_a),
+                          kv_write=int(produced * kv_elems * b_kv),
                           formula=FR.F_GEMM,
-                          shape="k/v_ctx = k/v_proj(target_hidden) 每轮重取 produced 行"))
+                          shape=f"B={B}×produced={produced:.2f} 行 "
+                                "k/v_ctx = k/v_proj(target_hidden)"))
         rows.append(OpRow(stage, li, "o_proj", flops=2 * T * (heads_c * d) * h,
                           weight_read=int(heads_c * d * h * b_w),
                           act_read=int(T * heads_c * d * b_a),
@@ -143,25 +150,26 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                               act_read=int(2 * T * h * b_a),
                               act_write=int(T * h * b_a), formula=FR.F_RESIDUAL))
     # 2.5) 草稿 final norm（DFlashDraftModel.norm，pinned L565；补齐）
-    ops, w, ar, aw = _norm_row(blk, h, b_a)
+    ops, w, ar, aw = _norm_row(T, h, b_a)
     rows.append(OpRow(stage, -1, "draft_final_norm", flops=ops, weight_read=w,
                       act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
-                      shape=f"width={h}（draft final，replicated）"))
+                      shape=f"B={B}×blk={blk} 行，width={h}（draft final，replicated）"))
     # 3) 目标 lm_head 读出 blk−1 个候选：草稿与 target 共享同一词表行切
     #    lm_head（V/tp），logits 跨 rank 聚合（集合通信在 lowering 计）
+    cand = B * (blk - 1)
     rows.append(OpRow(
         stage, -1, "draft_lm_head",
-        flops=2 * (blk - 1) * h * (target_vocab // tp),
+        flops=2 * cand * h * (target_vocab // tp),
         weight_read=0,                    # 权重属目标（同对象共享；读流量另计）
-        act_read=int((blk - 1) * h * b_a),
-        act_write=int((blk - 1) * (target_vocab // tp) * b_a),
+        act_read=int(cand * h * b_a),
+        act_write=int(cand * (target_vocab // tp) * b_a),
         formula=FR.F_LM_HEAD,
-        shape=f"(blk−1)×{h}×{target_vocab}/tp{tp}（目标 lm_head 分片共享；"
-              f"logits 聚合通信另计）"))
+        shape=f"B={B}×(blk−1)={cand}×{h}×{target_vocab}/tp{tp}"
+              f"（目标 lm_head 分片共享；logits 聚合通信另计）"))
     # 4) 噪声/首位 embedding 查表（用目标 embedding 分片对象）
-    rows.append(OpRow(stage, -1, "noise_embed", act_read=int(blk * h * b_a),
-                      act_write=int(blk * h * b_a), formula=FR.F_EMBED,
-                      shape=f"blk={blk} 行查表（目标 embedding 共享，词表行切）"))
+    rows.append(OpRow(stage, -1, "noise_embed", act_read=int(T * h * b_a),
+                      act_write=int(T * h * b_a), formula=FR.F_EMBED,
+                      shape=f"B={B}×blk={blk} 行查表（目标 embedding 共享，词表行切）"))
     # 5) KV crop 浪费：块行写入 blk−1 候选中 (blk−1−(E[N]−1)) 行被回退
     wasted = max(0.0, blk - e_produced)
     rows.append(OpRow(stage, -1, "kv_rewind_waste", kv_write=0,
@@ -172,17 +180,19 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
 
 
 def chain_step_rows(stage: str, draft_model: ModelIR, tokens: int, ctx: int,
-                    quant: dict, tp: int = 1) -> List[OpRow]:
-    """链式草稿一步（M token）账本：直接复用目标家族计数器。"""
-    return build_model_work(draft_model, stage, 1, ctx, tokens, quant, tp,
+                    quant: dict, tp: int = 1, batch: int = 1) -> List[OpRow]:
+    """链式草稿一步（每序列 M token × B 批）账本：复用目标家族计数器。"""
+    return build_model_work(draft_model, stage, batch, ctx, tokens, quant, tp,
                             role="draft")
 
 
 def mtp_step_rows(stage: str, target: ModelIR, tokens: int, ctx: int,
-                  quant: dict, mtp_layers: int) -> List[OpRow]:
+                  quant: dict, mtp_layers: int, batch: int = 1) -> List[OpRow]:
     """MTP 微头一步：按目标层模板 × mtp_layers（approximated：结构按 config）。
 
     共享主干 embedding/lm_head（读流量在此计，容量与主干去重）。
+    batch>1 时 template 的全部 token 维乘 B。微头模板固定 TP1；原生 TP
+    配方仍缺证据，method recipe 保持 unverified，不据此进入排名。
     """
     rows: List[OpRow] = []
     h = target.hidden
@@ -190,14 +200,17 @@ def mtp_step_rows(stage: str, target: ModelIR, tokens: int, ctx: int,
     template = target.layers[0]
     for j in range(mtp_layers):
         sub = build_model_work(
-            _single_layer_model(target, template), stage, 1, ctx, tokens,
+            _single_layer_model(target, template), stage, batch, ctx, tokens,
             quant, tp=1, role="draft")
         for r in sub:
             r.layer = j
             rows.append(r)
-    rows.append(OpRow(stage, -1, "mtp_embed_share", act_read=int(tokens * h * b_a),
-                      act_write=int(tokens * h * b_a), formula=FR.F_EMBED,
-                      shape="共享主干 embedding/lm_head（容量去重，读流量计）"))
+    total_tokens = batch * tokens
+    rows.append(OpRow(stage, -1, "mtp_embed_share",
+                      act_read=int(total_tokens * h * b_a),
+                      act_write=int(total_tokens * h * b_a), formula=FR.F_EMBED,
+                      shape=f"B={batch}×tokens={tokens}；共享主干 embedding/"
+                            "lm_head（容量去重，读流量计；微头 TP 配方未验证）"))
     return rows
 
 

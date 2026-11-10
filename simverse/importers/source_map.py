@@ -57,21 +57,54 @@ ENTRIES: List[SourceMapEntry] = [
         model_or_method="qwen3_5_moe full attention",
         semantic="q_proj 输出 2×（query+gate chunk）；gate 经 ACT2FN 后乘输出",
         source_pin=HF_TF_PIN,
-        source_location="modeling_qwen3_5_moe.py:747-772 (Qwen3_5MoeAttention)",
+        source_location="modeling_qwen3_5_moe.py:731-805 (Qwen3_5MoeAttention；"
+                        "q_proj 2× at 743-745，chunk at 771-773，gate 乘 at 802)",
         branch_predicate="q_proj 输出 view(..., head_dim*2) 后 chunk(2)",
         input_domain="全部 full attention 层（attn_output_gate 家族默认）",
         both_sides_covered=True,
-        note="ModelIR AttentionIR.output_gated=True → q_out=2·heads·d（已进计数）"),
+        note="ModelIR AttentionIR.output_gated=True → q_out=2·heads·d（已进计数）；"
+             "原 source_map 747-772 未覆盖 L802 gate 乘，2026-11-10 修正"),
+    SourceMapEntry(
+        entry_id="sm-qwen35-moe-router",
+        model_or_method="qwen3_5_moe MoE",
+        semantic="router 线性 h→E，softmax(fp32)，top-k，top-k 权重按和重归一",
+        source_pin=HF_TF_PIN,
+        source_location="modeling_qwen3_5_moe.py:864-881 "
+                        "(Qwen3_5MoeTopKRouter)",
+        branch_predicate="topk(router_probs, num_experts_per_tok)；"
+                         "router_top_value /= sum(top-k)",
+        input_domain="Qwen3.6-35B-A3B（256E top-8，norm_topk_prob 语义）",
+        both_sides_covered=True,
+        note="router 行按 2·T·h·E 精确计；routed 专家并集用无放回期望，"
+             "softmax/renorm 的数值未执行"),
     SourceMapEntry(
         entry_id="sm-qwen35-moe-shared-gate",
         model_or_method="qwen3_5_moe MoE",
         semantic="共享专家输出经 sigmoid(shared_expert_gate(x)) 门控后与 routed 相加",
         source_pin=HF_TF_PIN,
-        source_location="modeling_qwen3_5_moe.py:884-901 (Qwen3_5MoeSparseMoeBlock)",
-        branch_predicate="shared_expert_intermediate_size 存在 → shared+gate 常驻",
+        source_location="modeling_qwen3_5_moe.py:884-901 (Qwen3_5MoeSparseMoeBlock；"
+                        "shared_expert at 889，gate at 890，sigmoid 乘 at 899)",
+        branch_predicate="shared_expert_intermediate_size > 0 → shared+gate 常驻"
+                         "（config 无 shared_expert_gate 键）",
         input_domain="Qwen3.6-35B-A3B（shared 512 + gate Linear(h,1)）",
         both_sides_covered=True,
-        note="shared_gate 行已入 moe_rows"),
+        note="2026-11-10 修复：shared_gate=True 由 shared_intermediate>0 推导；"
+             "moe_rows 每 MoE 层计 gate 行，memory 计 h 权重"),
+    SourceMapEntry(
+        entry_id="sm-qwen36-mtp-unverified",
+        model_or_method="qwen3_5_moe MTP",
+        semantic="config 声明 mtp_num_hidden_layers=1；原生 MTP 微头 forward 未 pin",
+        source_pin=HF_TF_PIN,
+        source_location="modeling_qwen3_5_moe.py:994/1807 "
+                        "(_keys_to_ignore_on_load_unexpected=[^mtp.*])；"
+                        "vllm_qwen35_pin/qwen3_next.py:847-848、qwen3_5.py:326/476 "
+                        "（主模型丢弃 mtp.）",
+        branch_predicate="MTP 权重不在主模型加载路径；仅 config 字段存在",
+        input_domain="Qwen3.6-35B-A3B MTP1",
+        both_sides_covered=False,
+        uncovered_domain=["原生 MTP 微头 forward 无 pin",
+                          "MTP 仅按目标首层模板估算，未执行、未实测"],
+        note="2026-11-10 审查：MTP 路径必须标 unverified，不能进入部署排名"),
     SourceMapEntry(
         entry_id="sm-v41-index-short-branch",
         model_or_method="deepseek_v41_flash CSA2",
@@ -108,6 +141,24 @@ ENTRIES: List[SourceMapEntry] = [
                           "approximated）"],
         note="hc 三键 mapped（2026-11-10）；Engram 8 键 unsupported → "
              "structure_complete=False 仍阻断完整结论，不冒充"),
+    SourceMapEntry(
+        entry_id="sm-v41-csa2-moe-unverified",
+        model_or_method="deepseek_v41_flash CSA2/MoE",
+        semantic="CSA2 注意力/投影为 v0.1 移植；MoE sqrtsoftplus/noaux_tc/"
+                 "分组路由未建模；候选块发布/量化未映射",
+        source_pin=VLLM_PIN,
+        source_location="vllm/models/deepseek_v41/nvidia/model.py:131-200 "
+                        "(DeepseekV4MoE)、204-327（sparse-MLA 选择）、"
+                        "787-800（candidate block buffer）",
+        branch_predicate="config scoring_func=sqrtsoftplus、topk_method=noaux_tc、"
+                         "candidate_topk_blocks=2048",
+        input_domain="V4.1-Flash 全 40 层",
+        both_sides_covered=False,
+        uncovered_domain=["CSA2 注意力/投影未独立逐行核（仅 v0.1 同源对账）",
+                          "MoE scoring/top-k/分组路由未消费",
+                          "candidate_publish 容量/时序未建模",
+                          "quantization_config 未映射到计算精度"],
+        note="2026-11-10 审查：这些路径不能因 config 通过而标完整或参与部署排名"),
     SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",

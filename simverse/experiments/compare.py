@@ -32,7 +32,10 @@ class ComparisonPolicy:
     quality_requirement: str = "未验证质量等价：接受率为假设输入（Q8）"
     ranking_metric_ref: Optional[Dict[str, str]] = None   # 用户临时排序
     eligibility_predicates: List[str] = field(default_factory=lambda: [
-        "structure_complete", "method_recipe_supported", "stage_cost_complete",
+        "structure_complete", "config_coverage_complete",
+        "forward_evidence_supported", "cpu_forward_executed",
+        "gpu_measurement_present", "deployment_evidence_complete",
+        "method_recipe_supported", "stage_cost_complete",
         "memory_feasible_known", "same_time_basis",
         "result_kind_compatible"])
 
@@ -82,6 +85,12 @@ def compare_runs(baseline_bundle: Any, candidate_bundles: List[Any],
         structure = checks.get("model_structure_complete")
         if structure and structure["status"] != "supported":
             return False, f"结构缺口：{structure['reason']}"
+        for cid in ("model_config_coverage", "model_forward_evidence",
+                    "draft_forward_evidence", "model_cpu_forward",
+                    "model_gpu_measurement", "deployment_ranking_evidence"):
+            chk = checks.get(cid)
+            if chk and chk["status"] != "supported":
+                return False, f"证据缺口（{cid}）：{chk['reason']}"
         for cid, chk in checks.items():
             if cid.startswith("memory_") and chk["status"] != "supported":
                 return False, f"容量：{chk['reason']}"

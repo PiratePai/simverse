@@ -43,6 +43,46 @@ _PINNED_ASSETS = [
      "HF z-lab/Qwen3.6-35B-A3B-DFlash @f181eece646affea2c38b2765f1aaa01a9734ccd",
      "DFlash 草稿结构：block_size 16 / mask_token / target_layer_ids 8 层",
      ["auto_map dflash.DFlashDraftModel 不在 checkpoint 内，实现见 ev-dflash-impl"], False),
+    ("ev-hf-qwen35-modeling", "source-checked",
+     "Qwen3.5/3.6 qwen3_5_moe HF forward：GDN decode 分支、full-attn output "
+     "gate、shared expert gate、router/top-k",
+     "identity/hf_transformers/modeling_qwen3_5_moe.py",
+     "huggingface/transformers @b6401d6605d16620e0f95b54fb2906f92de7e33f "
+     "modeling_qwen3_5_moe.py",
+     "Qwen3.6-35B-A3B 文本 forward 的关键分支（源码阅读，未执行）",
+     ["源码阅读非执行；融合 kernel 内部未核；MTP 被 HF 丢弃，另列 unverified"],
+     False),
+    ("ev-hf-qwen35-config", "source-checked",
+     "Qwen3.5/3.6 qwen3_5_moe HF configuration 字段语义",
+     "identity/hf_transformers/configuration_qwen3_5_moe.py",
+     "huggingface/transformers @b6401d6605d16620e0f95b54fb2906f92de7e33f "
+     "configuration_qwen3_5_moe.py",
+     "config 字段到 HF module 的构造路径（shared expert/gate 等）",
+     ["配置构造 ≠ forward 执行；不证明数值"], False),
+    ("ev-qwen3-30b-config", "config",
+     "Qwen3-30B-A3B 历史归档 config 快照（已移出活跃 catalog）",
+     "config/qwen3_30b_a3b__config.json",
+     "HF Qwen/Qwen3-30B-A3B @ad44e777bcd18fa416d9da3bd8f70d33ebb85d39",
+     "历史校准/回归资产；禁止作为产品模型或跨模型 profile 依据",
+     ["历史归档；无 HF forward pin；不得进入活跃目录"], False),
+    ("ev-qwen3-235b-config", "config",
+     "Qwen3-235B-A22B 历史归档 config 快照（已移出活跃 catalog）",
+     "config/qwen3_235b_a22b__config.json",
+     "HF Qwen/Qwen3-235B-A22B @8efa61729e24bd65b1d152b5ab5409052aa80e65",
+     "历史校准/回归资产；禁止作为产品模型或跨模型 profile 依据",
+     ["历史归档；无 HF forward pin；不得进入活跃目录"], False),
+    ("ev-qwen3-next-config", "config",
+     "Qwen3-Next-80B-A3B 历史归档本地快照（官方身份 PENDING）",
+     "config/qwen3_next_80b_a3b__config.json",
+     "model-verse 本地快照；官方 HF resolve gated",
+     "历史回归资产；revision 未核实",
+     ["身份不完整；历史归档；不得进入活跃目录或部署排名"], False),
+    ("ev-deepseek-v3-config", "config",
+     "DeepSeek-V3 历史归档 config 快照（已移出活跃 catalog）",
+     "config/deepseek_v3__config.json",
+     "HF deepseek-ai/DeepSeek-V3 @e815299b0bcbac849fa540c768ef21845365c9eb",
+     "历史回归资产；dense FFN 宽度/revision 冲突根因已记录",
+     ["历史归档；无 forward pin；不得进入活跃目录"], False),
     ("ev-dflash-impl", "source-checked",
      "DFlash 方法实现（dflash_generate 协议/DFlashDraftModel 结构/拒绝采样）",
      "identity/dflash_repo/model.py",
@@ -104,6 +144,16 @@ _PINNED_ASSETS = [
      ["16 专家缩小复制品：MoE/router/lm_head 不在域内（回退解析）；"
       "不是 Qwen3.6-35BA3B+DFlash 场景的真实性证据；无端到端实测对照；"
       "本会话未做新的硬件测量"],
+     True),
+    ("ev-h200-235b-distill", "measured",
+     "H200 Qwen3-235B-A22B TP2/8 算子级 profile 蒸馏集（历史归档）",
+     "profiles/h200_qwen3_235b_a22b/manifest.json",
+     "pi-viewer @c5909a7699a1d2bb422d931bdca6cba399451f00 "
+     "data/profiling/compute/h200/Qwen3-235B-A22B/（逐文件 SHA256 在 manifest；"
+     "本仓只蒸馏导入）",
+     "历史算子级成本校准（TP2/8、BF16、FLASHINFER；MoE defer）",
+     ["模型已移出活跃 catalog；profile 绑定 235B，禁止跨模型使用；"
+      "不是 Qwen3.6/V4.1 的真实性证据；无端到端实测对照"],
      True),
 ]
 

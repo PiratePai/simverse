@@ -259,16 +259,19 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             ng = kvs["o_groups"] // tp
             a = layer.csa2
             mlt = 2 if a.ratio == 2 else 1
-            dense_b += model.hidden * qrank                       # q_a_proj
-            dense_b += model.hidden * d                           # kv_proj
-            dense_b += qrank * heads * d                          # q_b_proj
-            dense_b += (kvs["heads"] * d // kvs["o_groups"]) * orank   # o_a（组输入全宽）
-            dense_b += ng * orank * model.hidden                  # o_b（组切分）
+            # 单位必须与 count 的 weight_capacity 一致（字节）：旧式漏 b_dense，
+            # BF16 下内存少 2×（2026-11-10 审查 F2 同轮发现，独立 oracle 暴露）。
+            dense_b += model.hidden * qrank * b_dense             # q_a_proj
+            dense_b += model.hidden * d * b_dense                 # kv_proj
+            dense_b += qrank * heads * d * b_dense                # q_b_proj
+            # o_a（每 rank ng 组；F2：旧式漏乘 ng，TP1 少 8×）
+            dense_b += (kvs["heads"] * d // kvs["o_groups"]) * orank * ng * b_dense
+            dense_b += ng * orank * model.hidden * b_dense        # o_b（组切分）
             if a.produces_kv:
-                dense_b += model.hidden * d * mlt                 # compress_proj
-                dense_b += d * di                                 # index_k_proj
+                dense_b += model.hidden * d * mlt * b_dense       # compress_proj
+                dense_b += d * di * b_dense                       # index_k_proj
             if a.produces_index:
-                dense_b += model.hidden * ih + qrank * ih * di    # index 投影
+                dense_b += (model.hidden * ih + qrank * ih * di) * b_dense
         hc_spec = (model.extras or {}).get("hc") if fam == "v41_csa2" else None
         if hc_spec and layer.kind == "mla_csa2":
             # mHC 权重（FP32，每卡复制不随 TP 缩放：全宽流 + torch.empty 全宽参数，

@@ -18,7 +18,8 @@ sys.path.insert(0, str(ROOT))
 
 from simverse.count import build_model_work  # noqa: E402
 from simverse.count.moe import moe_rows  # noqa: E402
-from simverse.lowering import LinkLike, model_collectives, validate_parallel  # noqa: E402
+from simverse.lowering import (LinkLike, model_collectives,  # noqa: E402
+                               target_weight_allocations, validate_parallel)
 from simverse.lowering.parallel import plan_collective_recipe  # noqa: E402
 from simverse.model_ir import build_catalog  # noqa: E402
 from simverse.model_ir.schema import (  # noqa: E402
@@ -120,7 +121,7 @@ def test_moe_rows_tp_off_hand_oracle():
       容量 = 8·3·256·256·2B = 3,145,728B
       E[U] = 8·(1−(1−2/8)^6) = 8·(1−0.75^6) ≈ 7.823（期望读 = E[U]·分片字节）
     """
-    cat = build_catalog()
+    cat = build_catalog(include_internal=True)
     moe = cat["models"]["tiny_hybrid"].layers[0].moe
     rows = moe_rows(moe, 6, 256, Q8, tp=2, ep=1)
     routed = next(r for r in rows if r["layer_op"] == "moe_routed")
@@ -139,6 +140,35 @@ def test_moe_rows_tp_off_hand_oracle():
     assert gate["weight_capacity"] == 256 * 1
 
 
+def test_qwen36_shared_expert_gate_counted_every_moe_layer():
+    """F5：Qwen3.6 每 MoE 层都有 shared_expert_gate 行 + h 权重容量。
+
+    HF pin：modeling_qwen3_5_moe.py:889-899 无条件构造/应用 gate；
+    config 无 shared_expert_gate 键，不能用缺失键推断 False。
+    """
+    cat = build_catalog()
+    m = cat["models"]["qwen36_35b_a3b"]
+    assert all(l.moe is not None and l.moe.shared_gate for l in m.layers)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=1)
+    gate = [r for r in rows if r.op == "shared_gate"]
+    assert len(gate) == 40
+    for r in gate:
+        assert r.flops == 2 * 1 * 2048
+        assert r.weight_read == 2048 * 1 and r.weight_capacity == 2048 * 1
+    # 容量：每层 MoE allocation 必须包含 gate 的 h 字节
+    for tp in (1, 8):
+        allocs = {a.alloc_id.split("-L")[-1]: a.bytes
+                  for a in target_weight_allocations(m, Q8, tp)
+                  if "-w-moe-L" in a.alloc_id}
+        inter = 512 // tp
+        router = 2048 * 256 * 1
+        shared = 3 * 2048 * inter * 1
+        gate_b = 2048 * 1
+        experts = 256 * 3 * 2048 * inter * 1
+        assert len(allocs) == 40
+        assert all(v == router + shared + gate_b + experts for v in allocs.values())
+
+
 def test_moe_rows_ep_on_hand_oracle():
     """EP 开（ep=tp=4，E=8）：E_local=2 整专家；期望份额 E_l/E=1/4。
 
@@ -146,7 +176,7 @@ def test_moe_rows_ep_on_hand_oracle():
     容量 = 2·3·256·512·2B = 786,432B（16bit）
     E[U_local] = E_l·(1−(1−k/E)^T) = 2·(1−0.75^6) ≈ 1.956
     """
-    cat = build_catalog()
+    cat = build_catalog(include_internal=True)
     moe = cat["models"]["tiny_hybrid"].layers[0].moe
     rows = moe_rows(moe, 6, 256, Q8, tp=4, ep=4, local_experts=2)
     routed = next(r for r in rows if r["layer_op"] == "moe_routed")

@@ -194,4 +194,11 @@ def test_hypothesis_budget_not_eligible_for_ranking():
     out = compare_runs(base, [cand])
     row = out["rows"][0]
     assert row["eligible"] is False
-    assert "容量" in row["ineligible_reason"] or "峰值" in row["ineligible_reason"]
+    # 峰值不完整优先于假设预算 → unknown；预算条件可行语义另用单元核。
+    mem = cand.capability["checks"]["memory_colocated_r0"]
+    assert mem["status"] == "unknown" and "峰值不完整" in mem["reason"]
+    from simverse.lowering.memory import Allocation, DeviceBudget, RankMemory
+    rm = RankMemory("r", "d", DeviceBudget("d", 1000, 900, "hypothesis", "研究假设"))
+    rm.add(Allocation("a", "weights", "target", 100))
+    assert rm.peak_vs_budget()["status"] == "feasible-conditional"
+    assert row["ineligible_reason"]

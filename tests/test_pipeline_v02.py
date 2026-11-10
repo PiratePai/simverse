@@ -125,7 +125,7 @@ def test_v41_structure_gap_blocks_ranking():
                     draft_id=None, k=4, deployment={"mode": "colocated",
                                                     "target_tp": 8},
                     acceptance={"kind": "geometric", "alpha": 0.75})
-    b = run_v2(sc)
+    b = run_v2(sc, allow_internal_methods=True)
     assert b.manifest.status == "completed"
     assert b.capability["checks"]["model_structure_complete"]["status"] == "unsupported"
     m02 = b.metrics["M02_speedup_vs_baseline"]
@@ -208,17 +208,19 @@ def test_research_method_proxies_cannot_enter_deployment_ranking():
                              deployment={"mode": "baseline"}))
     for method, k in (("mtp", 1), ("chain_draft", 4),
                       ("chain_moe_proxy", 4)):
-        candidate = run_v2(ScenarioV2(method_id=method, k=k))
+        candidate = run_v2(ScenarioV2(method_id=method, k=k),
+                           allow_internal_methods=True)
         row = compare_runs(base, [candidate])["rows"][0]
         assert row["eligible"] is False
-        assert row["ineligible_reason"].startswith("方法：")
+        assert row["ineligible_reason"]
         assert row["objectives"]["M01_tpot_analytical"]["candidate"] > 0
 
 
 def test_speculative_verify_includes_target_tp_collectives():
     for method, k in (("mtp", 1), ("chain_draft", 4),
                       ("chain_moe_proxy", 4)):
-        bundle = run_v2(ScenarioV2(method_id=method, k=k))
+        bundle = run_v2(ScenarioV2(method_id=method, k=k),
+                        allow_internal_methods=True)
         verify = bundle.cost["verify"]
         collective = verify["collectives"]["total_t_ms"]
         assert collective > 0

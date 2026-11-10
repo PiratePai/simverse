@@ -16,7 +16,7 @@ from .count.draft import chain_step_rows, dflash_round_rows, mtp_step_rows
 from .devices import DEVICES, LINKS  # v0.1 设备注册表（v0.2 沿用数值+分层预算）
 from .cost.t0 import dtype_route, price_rows, stage_total
 from .cost.calibrated import CalibratedPricer
-from .cost.profile_store import PROFILE_SETS, load_profile_set
+from .cost.profile_store import load_profile_set, profile_model_id
 from .execute.serial import build_serial_round
 from .lowering import (DeviceBudget, LinkLike, colocated_rank_memory,
                        kv_shard_note, model_collectives, validate_parallel)
@@ -25,6 +25,30 @@ from .methods.plans import UNSUPPORTED
 from .model_ir import build_catalog
 from .validation import code_revision
 from .scenario import ScenarioV2
+
+_PROFILE_EVIDENCE = {
+    "h200-qwen3-30b-a3b-tiny-op-v1": "ev-h200-tiny-distill",
+    "h200-qwen3-235b-a22b-op-v1": "ev-h200-235b-distill",
+}
+
+
+def _run_evidence_refs(model, draft, method_id: str,
+                       profile_set: Optional[str]) -> List[str]:
+    """按实际 model/draft/method/profile 生成证据引用，不做跨模型硬编码。"""
+    refs: List[str] = []
+    refs.extend(model.evidence_refs)
+    if draft is not None and method_id == "dflash_v1":
+        refs.extend(draft.evidence_refs)
+        refs.append("ev-vllm-parallel-recipe")
+    if profile_set:
+        ev = _PROFILE_EVIDENCE.get(profile_set)
+        if ev:
+            refs.append(ev)
+    out: List[str] = []
+    for r in refs:
+        if r not in out:
+            out.append(r)
+    return out
 
 
 def _link_like(link_id: str) -> LinkLike:
@@ -51,9 +75,21 @@ def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
     return b
 
 
-def run_v2(scenario: ScenarioV2) -> ResultBundle:
+def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
+           allow_internal_methods: bool = False) -> ResultBundle:
+    """生产入口：默认只解析活跃目录（两款主模型 + DFlash）。
+
+    catalog 仅允许离线测试显式注入 archive/fixture 目录；CLI/API 不暴露该参数。
+    allow_internal_methods 同理：tiny 合成草稿的 chain 方法只作内部研究 fixture，
+    不进入产品/部署选择。
+    """
     scenario.validate()
-    cat = build_catalog()
+    cat = catalog if catalog is not None else build_catalog()
+    if allow_internal_methods and "tiny_gqa" not in cat["models"]:
+        # 仅补 tiny 合成 fixture，不引入历史归档模型；供 chain 内部研究测试。
+        internal = build_catalog(include_internal=True)
+        cat = {**cat, "models": {**cat["models"], **{
+            k: v for k, v in internal["models"].items() if k.startswith("tiny_")}}}
     cap = CapabilityReport()
 
     # ---- 模型解析 + 能力检查 ----
@@ -63,13 +99,57 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     cap.add("model_registered", "supported", model.id)
     if not model.structure_complete:
         cap.add("model_structure_complete", "unsupported",
-                "存在 unsupported-semantic 字段（Engram/hc 等）",
-                affected_metrics=["M06 每卡显存", "M02/M04 完整模型性能", "M05 MoE 完整读"])
+                "配置覆盖/forward 源码证据未同时完备（详见 model_config_coverage "
+                "与 model_forward_evidence）",
+                affected_metrics=["M06 每卡显存", "M02/M04 完整模型性能",
+                                  "M05 MoE 完整读"])
     else:
-        cap.add("model_structure_complete", "supported", "全部结构字段已映射")
+        cap.add("model_structure_complete", "supported",
+                "配置覆盖 + forward 源码证据均完备")
+    if model.config_coverage_complete:
+        cap.add("model_config_coverage", "supported",
+                f"完整 config（含嵌套键）{len(model.coverage)} 项均显式登记")
+    else:
+        cap.add("model_config_coverage", "unsupported",
+                f"config 覆盖不完整：{len(model.gaps)} 项缺口；"
+                "未登记键不得默认 ignored",
+                affected_metrics=["全部结构/容量结论"])
+    fwd = model.evidence
+    fwd_status = ("supported" if model.forward_evidence_complete else
+                  "approximated" if fwd.forward_source in
+                  ("source-checked", "partial-source") else "unknown")
+    if fwd_status == "supported":
+        fwd_reason = "关键 forward 路径已源码核过（未执行/未实测）"
+    elif fwd_status == "approximated":
+        fwd_reason = ("forward 仅部分源码核过；未核路径："
+                      + "；".join(fwd.unverified_paths[:4]))
+    else:
+        fwd_reason = "forward 仅 config 推断，未核源码分支"
+    cap.add("model_forward_evidence", fwd_status, fwd_reason,
+            affected_metrics=["M02 部署排名资格", "M04 轮分解"])
+    cap.add("model_cpu_forward",
+            "supported" if fwd.cpu_forward == "cpu-executed" else "unknown",
+            "小尺寸 CPU forward 已执行" if fwd.cpu_forward == "cpu-executed"
+            else "当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失",
+            affected_metrics=["M02 部署排名资格"])
+    cap.add("model_gpu_measurement",
+            "supported" if fwd.gpu_measurement == "model-measured" else "unknown",
+            "当前模型已登记 GPU/部署实测" if fwd.gpu_measurement == "model-measured"
+            else "两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型",
+            affected_metrics=["M01/M02 实测结论"])
+    cap.add("deployment_ranking_evidence", "unknown",
+            "实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；"
+            "当前证据不足，数值仅供假设探索",
+            affected_metrics=["M02 实际部署排名"])
     draft = cat["drafts"].get(scenario.draft_id) if scenario.draft_id else None
 
     # ---- 方法 ----
+    if scenario.method_id in ("chain_draft", "chain_moe_proxy") \
+            and not allow_internal_methods:
+        return _bundle_error(
+            scenario, cap, "internal_research_method",
+            f"{scenario.method_id} 使用 tiny 合成草稿，只作内部测试 fixture；"
+            "不出现在产品/部署选择，也不进入排名")
     if scenario.method_id in UNSUPPORTED:
         return _bundle_error(scenario, cap, "unsupported_method",
                              f"{scenario.method_id}: {UNSUPPORTED[scenario.method_id]}")
@@ -95,6 +175,14 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
         return _bundle_error(scenario, cap, "unsupported_combo",
                              "MTP 当前仅有 Qwen3.6 首层模板研究估计；"
                              "其他模型缺原生微头 forward 身份，不能套用模板")
+    if draft is not None and scenario.method_id == "dflash_v1":
+        dstatus = {"source-checked": "approximated",
+                   "partial-source": "approximated"}.get(
+                       draft.evidence.forward_source, "unknown")
+        cap.add("draft_forward_evidence", dstatus,
+                "DFlash 草稿结构/轮协议已源码核过，但未执行/未实测；"
+                "未核：" + "；".join(draft.evidence.unverified_paths[:3]),
+                affected_metrics=["M02 部署排名资格", "M04 轮分解"])
     if scenario.method_id in ("chain_draft", "chain_moe_proxy"):
         cap.add("method_recipe_ready", "approximated",
                 f"{scenario.method_id} 使用 tiny_gqa 合成草稿；缺真实草稿身份、"
@@ -111,6 +199,11 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     pricer = None
     if scenario.cost_profile:
         pset = load_profile_set(scenario.cost_profile)  # 完整性不符即抛错
+        bound = profile_model_id(pset.set_id)
+        if bound != model.id:
+            raise ValueError(
+                f"profile {pset.set_id} 绑定历史模型 {bound}，禁止用于 "
+                f"{model.id}（跨模型误用；该资产为历史归档）")
         pricer = CalibratedPricer(pset, model, scenario)
         if pricer.applicable:
             cap.add("cost_profile_domain", "supported",
@@ -204,14 +297,20 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             manifest.compute_run_id()
             return ResultBundle(
                 manifest=manifest, scenario_snapshot=scenario.to_json(),
-                model_ref={"id": model.id, "structure_complete": model.structure_complete,
-                           "gaps": model.gaps, "source": model.source.to_json()},
+                model_ref={"id": model.id,
+                           "structure_complete": model.structure_complete,
+                           "config_coverage_complete": model.config_coverage_complete,
+                           "forward_evidence_complete": model.forward_evidence_complete,
+                           "evidence": model.evidence.to_json(),
+                           "gaps": model.gaps,
+                           "source": model.source.to_json()},
                 method_plan=plan.to_json(),
                 work={"target_decode": _rows_json(base_rows)},
                 cost={"target_decode": {"t_ms": t_base}},
                 execution={"rounds": [empty.to_json()], "mode": "serial-analytical"},
                 metrics=metrics, capability=cap.to_json(),
-                evidence_refs=["ev-qwen36-main-config"],
+                evidence_refs=_run_evidence_refs(
+                    model, draft, scenario.method_id, scenario.cost_profile),
                 formula_dict=FR.formulas_json()["formulas"],
                 assumption_dict=_assumptions(scenario, plan))
         if scenario.method_id == "dflash_v1":
@@ -220,7 +319,7 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             draft_tp = dep.target_tp if dep.mode == "colocated" else dep.draft_tp
             draft_rows = dflash_round_rows(
                 "draft_block", draft, model.vocab, e_n, ctx, dquant,
-                quant["act"] / 8, tp=draft_tp)
+                quant["act"] / 8, tp=draft_tp, batch=B)
             d_gemm, d_ew = dtype_route(dquant)
             d_dev = target_dev if dep.mode == "colocated" else draft_dev
             d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew)
@@ -252,10 +351,11 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                     "selected_ms": None}
             blk = plan.block_size
             greedy = scenario.acceptance.get("kind") == "geometric"  # 概率随采样策略
+            # 草稿/验收消息按整批 B 计一次（不重复乘 target/通信）
             msg_bytes = {
-                "d2t": int((blk - 1) * (4 + (2 if not greedy else 0))),
-                "t2d": int(e_n * len(draft.target_layer_ids) * draft.hidden
-                           * (quant["act"] / 8)),
+                "d2t": int(B * (blk - 1) * (4 + (2 if not greedy else 0))),
+                "t2d": int(B * e_n * len(draft.target_layer_ids)
+                           * draft.hidden * (quant["act"] / 8)),
             }
             stage_costs = {"draft_block": t_draft, "verify_block": t_verify,
                            "commit_rewind": 0.0, "hidden_extract": 0.0}
@@ -271,7 +371,7 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                                     "collectives": col_v["detail"]}
         elif scenario.method_id == "mtp":
             draft_rows = mtp_step_rows("draft_step_0", model, 1, ctx, quant,
-                                       model.mtp_layers or 1)
+                                       model.mtp_layers or 1, batch=B)
             d_prices = price_rows(draft_rows, target_dev, gemm_dt, ew_dt)
             t_draft = stage_total(d_prices)
             verify_rows = build_model_work(model, "verify", B, ctx,
@@ -289,7 +389,8 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                     plan.k_effective + 1)
                 calibration["stages"]["verify"]["collectives_ms"] = col_v["t_ms"]
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
-                         "t2d": int(e_n * model.hidden * (quant["act"] / 8))}
+                         "t2d": int(B * e_n * model.hidden
+                                    * (quant["act"] / 8))}
             stage_costs = {"draft_step_0": t_draft, "verify": t_verify}
             cost["verify"] = {"t_ms": t_verify,
                               "collectives": col_v["detail"]}
@@ -304,7 +405,7 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                 m = 2 if j == 0 else 1
                 weight = (1 - p_full if j == 0 else 1.0)
                 rows = chain_step_rows(f"draft_step_{j}", draft_model, m, ctx,
-                                       dquant, 1)
+                                       dquant, 1, batch=B)
                 t = stage_total(price_rows(rows, target_dev, gemm_dt, ew_dt))
                 t_draft += t * (weight if j == 0 else 1.0) + (
                     p_full * t if j == 0 else 0.0)
@@ -487,6 +588,9 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
         scenario_snapshot=scenario.to_json(),
         model_ref={"id": model.id, "label": model.label, "family": model.family,
                    "structure_complete": model.structure_complete,
+                   "config_coverage_complete": model.config_coverage_complete,
+                   "forward_evidence_complete": model.forward_evidence_complete,
+                   "evidence": model.evidence.to_json(),
                    "gaps": model.gaps, "kind_counts": model.kind_counts(),
                    "source": model.source.to_json(),
                    "coverage": model.coverage,
@@ -500,10 +604,8 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                            "本值作同假设对照"},
         metrics=metrics,
         capability=cap.to_json(),
-        evidence_refs=[*(["ev-h200-tiny-distill"] if pricer else []),
-                       "ev-qwen36-main-config", "ev-qwen36-dflash-config",
-                       "ev-dflash-impl", "ev-dflash-readme", "ev-v41-config",
-                       "ev-vllm-parallel-recipe"],
+        evidence_refs=_run_evidence_refs(
+            model, draft, scenario.method_id, scenario.cost_profile),
         formula_dict=FR.formulas_json()["formulas"],
         assumption_dict=_assumptions(scenario, plan),
     )
@@ -741,7 +843,7 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
             formula_ref="v2.moe_routed",
             scope=Scope(role="target" if "target" in rk or "colocated" in rk else "draft",
                         phase="steady-decode", rank=rk),
-            evidence_refs=["ev-qwen36-main-config"],
+            evidence_refs=list(model.evidence_refs),
             reason=("; ".join(blk.get("reasons", [])) or None)
                 if blk["status"] in ("unknown", "oom", "feasible-conditional")
                 else None,
@@ -777,6 +879,10 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
     m["M07_support_summary"] = {
         "capability_checks": {k: v["status"] for k, v in cap.checks.items()},
         "structure_complete": model.structure_complete,
+        "config_coverage_complete": model.config_coverage_complete,
+        "forward_source": model.evidence.forward_source,
+        "cpu_forward": model.evidence.cpu_forward,
+        "gpu_measurement": model.evidence.gpu_measurement,
         "result_kind": "analytical-estimate",
     }
     return m
@@ -791,8 +897,11 @@ def _eligibility(cap: CapabilityReport) -> bool:
 def _eligibility_issues(cap: CapabilityReport) -> list[str]:
     issues = []
     for cid, chk in cap.checks.items():
-        if cid in ("model_structure_complete", "method_recipe_ready",
-                   "stage_cost_complete") \
+        if cid in ("model_structure_complete", "model_config_coverage",
+                   "model_forward_evidence", "draft_forward_evidence",
+                   "method_recipe_ready", "stage_cost_complete",
+                   "model_cpu_forward", "model_gpu_measurement",
+                   "deployment_ranking_evidence") \
                 and chk["status"] != "supported":
             issues.append(str(chk["reason"]))
         elif cid.startswith("memory_") and chk["status"] in (

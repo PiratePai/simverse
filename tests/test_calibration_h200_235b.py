@@ -11,8 +11,16 @@ import pytest
 
 from simverse.cost.profile_store import (PROFILE_SETS, ProfileIntegrityError,
                                          load_profile_set)
+from simverse.model_ir import build_catalog
 from simverse.pipeline import run_v2
 from simverse.scenario import ScenarioV2
+
+_ARCHIVE_CAT = build_catalog(include_internal=True)
+
+
+def _run_archive(sc, **kw):
+    return run_v2(sc, catalog=_ARCHIVE_CAT, **kw)
+
 
 ROOT = Path(__file__).resolve().parent.parent
 SET_ID = "h200-qwen3-235b-a22b-op-v1"
@@ -108,7 +116,7 @@ def test_domain_reject_tp1_with_reason():
     sc = _scenario(deployment={"mode": "baseline", "target_device": "h200_sxm",
                                "target_tp": 1, "draft_device": "l40",
                                "draft_tp": 1, "link": "pcie5"})
-    b = run_v2(sc).to_json()
+    b = _run_archive(sc).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("TP" in r for r in cal["reasons"])
@@ -118,7 +126,7 @@ def test_domain_reject_tp1_with_reason():
 def test_domain_reject_precision():
     sc = _scenario(quant={"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
                           "state": 32})
-    b = run_v2(sc).to_json()
+    b = _run_archive(sc).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("精度" in r for r in cal["reasons"])
@@ -131,7 +139,7 @@ def test_domain_reject_precision():
 def _stage_cal(tp=8):
     dep = {"mode": "baseline", "target_device": "h200_sxm", "target_tp": tp,
            "draft_device": "l40", "draft_tp": 1, "link": "pcie5"}
-    b = run_v2(_scenario(deployment=dep)).to_json()
+    b = _run_archive(_scenario(deployment=dep)).to_json()
     return b, b["cost"]["calibration"]["stages"]["target_decode"]
 
 
@@ -180,8 +188,8 @@ def test_tp2_also_in_domain():
 
 def test_count_ledger_unchanged_with_without_profile():
     """G7 同型：开/关 cost_profile，work 账本逐字段不变（校准只改成本）。"""
-    a = run_v2(_scenario()).to_json()
-    b = run_v2(_scenario(cost_profile=None)).to_json()
+    a = _run_archive(_scenario()).to_json()
+    b = _run_archive(_scenario(cost_profile=None)).to_json()
     ra = a["work"]["target_decode"]["rows"]
     rb = b["work"]["target_decode"]["rows"]
     assert len(ra) == len(rb)

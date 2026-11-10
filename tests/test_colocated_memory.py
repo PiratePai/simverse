@@ -98,7 +98,8 @@ def test_independent_hand_oracle_steady_bytes():
 
     口径：dense_w=8bit=1B、expert_w=4bit=0.5B、kv=8bit、state fp32。
     结构：40 层（30 GDN + 10 full attn，kvh=2；全层 MoE E=256 inter=512
-    shared=512 无 gate）；草稿 6 层 GQA（heads=32 kvh=8 d=128 inter=6144）。
+    shared=512 + shared_expert_gate Linear(h,1)）；草稿 6 层 GQA
+    （heads=32 kvh=8 d=128 inter=6144）。
     """
     rm = _colocated(tp=8, batch=1, ctx=32768)
     h, V, L, E = 2048, 248320, 40, 256
@@ -115,10 +116,11 @@ def test_independent_hand_oracle_steady_bytes():
             + ((16 * 256) // 8) * h             # o_proj 行切
             + 2 * 256)                          # q/k norm 权重
     dense_per_rank = 30 * gdn + 10 * attn
-    # ③ MoE 层 per rank（EP 关：router 复制、shared inter/tp、E 全量分片；
-    #   config 无 shared_expert_gate → 无 gate 行）
+    # ③ MoE 层 per rank（EP 关：router 复制、shared inter/tp、gate h、
+    #   E 全量分片；2026-11-10 修复 shared_expert_gate 漏计）
     moe_per_layer = (h * E * 1                       # router（复制）
                      + 3 * h * (512 // 8) * 1        # shared inter/tp
+                     + h * 1                         # shared_expert_gate
                      + E * 3 * h * (512 // 8) * b_e)  # routed 分片
     moe_per_rank = L * moe_per_layer
     # ④ 词表行切 embed/lm_head + final norm
