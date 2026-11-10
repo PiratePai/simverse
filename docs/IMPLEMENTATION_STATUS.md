@@ -1,11 +1,26 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
 更新：2026-11-10（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（本地；远端 main 保护规则只读查询返回 HTTP 403，未推送）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（全量由外层 Codex 唯一执行）。
+代码身份：本仓 git（分支 `codex/forward-merge-gate`；远端公开仓库 `PiratePai/simverse`，候选分支已推送、PR [#1](https://github.com/PiratePai/simverse/pull/1) 已建；main 保护规则未配置）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（全量由外层 Codex 唯一执行；2026-11-10 hermetic 修复后本地全量 exit 0：196 passed，5.04s，1 条既有 Windows 子进程 UTF-8 解码警告；不代表远端已通过）。
 **pytest 收集数：196**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-10；最终全量结果见本轮审查记录）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**CI hermetic 修复（2026-11-10）**：`tests/test_consistency.py` 两项验收不再读取
+被 `.gitignore` 忽略的 `outputs/run_v41.json`。CSV 导出改为复核本次 `run` 新落盘的
+RunResult；固定场景重放改用纳入版本库、带 provenance 的历史快照
+`tests/fixtures/v41_flash_dt_verification_expected.json`。远端 run `42803015653`
+的 `2 failed, 194 passed` 是 clean checkout 缺文件；此前本地 `196 passed` 属环境
+假阳性。详见 [Windows CI hermetic 修复](validation/windows-ci-hermetic-fix-20261110.md)。
+测试总数仍为 196。
+
+**外层本地验收（2026-11-10，hermetic 修复后）**：外层 Codex 唯一一次全量
+`py -3.12 -m pytest tests -q` 实际 exit 0：`196 passed, 1 warning in 5.04s`；
+警告为既有的 Windows 子进程 UTF-8 解码线程（`test_csv_export_matches_runresult`）。
+该结果只证明本地工作区（含尚未提交的修复）通过，不是 clean checkout 或远端 CI
+通过证据。修复文件尚未提交/推送；PR #1 现有检查仍是修复前失败记录，远端重跑
+由外层执行。
 
 ## 0. 当前有效状态（2026-11-10 两模型门禁轮）
 
@@ -34,7 +49,9 @@
   [两模型审查记录](validation/two-model-forward-merge-gate-20261110.md)。
 - **合入门禁**：G1–G17；`.github/workflows/merge-gate.yml` 覆盖
   PR/push/merge_group，Windows + Node 20 + Python 3.12。required check/PR review
-  仍需仓库 ruleset 启用；当前私有仓库账号查询保护规则返回 HTTP 403，未能配置强制检查。
+  仍需仓库 ruleset 启用；2026-11-10 只读查询：仓库已公开（`isPrivate=false`），
+  main branch protection 返回 404 `Branch not protected`，rulesets 为空，
+  保护规则尚未配置。
 - **未完成**：V4.1 Engram/CSA2/MoE 源码与执行、Qwen3.6 MTP 原生 forward、
   两款主模型 CPU/GPU 实测、DFlash 服务端集成与运行时池尺寸、真实可分配预算。
 
@@ -306,10 +323,18 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 6. **历史归档**：30B/235B/Next/V3 与 tiny fixture 只可显式注入归档目录；
    `h200_calib_*` 场景标 archived。Qwen3.8 本地身份仍 PENDING_ASSET。
 7. pi-viewer 适配器（V09b）：未建；数据通道经蒸馏已通（无需写旧仓）。
-8. 远端 required check/PR review：未配置；私有仓库当前账号查询保护规则返回
-   HTTP 403，工作流文件仅提供自动检查，不能强制阻止合入。
+8. 远端 required check/PR review：未配置。历史事实：私有仓库时期（2026-11-10
+   修复前）只读查询 main branch protection 与 rulesets 均返回 HTTP 403
+   （需 GitHub Pro 或转为公开）。仓库现已公开；同日复查询返回 404
+   `Branch not protected`、rulesets 为空，故强制检查仍未启用。PR #1 已建，
+   其现有检查是修复前失败记录；工作流文件仅提供自动检查，不能强制阻止合入。
 9. 移动端像素观感：截图存证但本会话通道无法目检；`tmp_path` 用例在本机
-   DSH 沙箱目录权限下未能完成（setup PermissionError），外层全量验收已通过。
+   DSH 沙箱目录权限下未能完成（setup PermissionError）。历史事实：hermetic
+   修复前外层本地 `196 passed` 因复用 ignored `outputs/run_v41.json`，不代表
+   clean checkout；远端 run `42803015653` 的 2 项失败即该文件缺失。两项验收
+   已按 hermetic 方式修复，外层 Codex 于 2026-11-10 验收本地全量 exit 0：
+   `196 passed, 1 warning in 5.04s`。修复文件尚未提交/推送，远端重跑待外层执行
+   （见 [Windows CI hermetic 修复](validation/windows-ci-hermetic-fix-20261110.md)）。
 
 ## 4. 恢复入口
 

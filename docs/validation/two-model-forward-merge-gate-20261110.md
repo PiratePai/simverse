@@ -104,7 +104,7 @@ DFlash/MTP B>1 草稿计数、model/draft/profile 证据引用、source_map 行�
   KV 回退/hidden 提取仍显式 0 占位；运行时池尺寸未知。
 - **CPU/GPU 执行**：Qwen3.6 固定 HF 源码的两层随机权重 CPU shape probe 已执行；
   真实 40 层 checkpoint、MTP、V4.1 和 DFlash 服务端未执行，两款主模型无 GPU/部署实测。
-- 远端 required check/PR review 未配置；未推送。
+- 远端 required check/PR review 未配置；候选分支已推送并建 PR #1（2026-11-10）。
 
 ## 4. 自动门禁与测试收据
 
@@ -162,15 +162,30 @@ setup 报 `PermissionError`（pytest 自建临时目录无法列目录：
   `flash-linear-attention` 未安装，实际走 PyTorch reference fallback。
   这证明所选源码分支可作小尺寸 CPU shape 执行，不证明真实模型数值、
   MTP、融合核、完整 forward 或部署延迟；模型级 `cpu_forward` 仍为 `not-run`。
-- 远端 `PiratePai/simverse` 为私有仓库；Codex 对 main 的 branch protection
-  与 rulesets 做只读 API 查询，两者均返回 HTTP 403：
-  `Upgrade to GitHub Pro or make this repository public to enable this feature.`
-  因此当前账号条件下无法启用 GitHub 强制 required check/PR review；
+- **历史事实（2026-11-10 修复前）**：远端 `PiratePai/simverse` 当时为私有仓库；
+  Codex 对 main 的 branch protection 与 rulesets 做只读 API 查询，两者均返回
+  HTTP 403：`Upgrade to GitHub Pro or make this repository public to enable this feature.`
+  当时账号条件下无法启用 GitHub 强制 required check/PR review。
+- **当前状态（2026-11-10 文档收口时）**：仓库已公开（`isPrivate=false`），候选分支
+  已推送，PR #1 为 OPEN；main branch protection 查询返回 404
+  `Branch not protected`，rulesets 为空。保护规则仍未配置；
   `.github/workflows/merge-gate.yml` 只提供自动检查，不冒称已强制合并阻断。
 - 最终候选 `py -3.12 -m pytest --collect-only -q tests`：196 tests collected，exit 0；
   `py -3.12 -m pytest tests -q`：**196 passed, 1 warning in 6.73s**，exit 0。
   警告仍来自既有 Windows 子进程 UTF-8 解码线程（`test_csv_export_matches_runresult`），
   不能写成无警告通过。Codex 增加的单项 forward 缺口资格测试亦包含在此轮。
+
+> **2026-11-10 CI 复核（DSH）**：上述本地 `196 passed`（6.73s）复用了被
+> `.gitignore` 忽略的 `outputs/run_v41.json`，**不能证明 clean checkout 可复现**。
+> 远端 run `42803015653` 的 `2 failed, 194 passed` 正是该文件缺失导致。两项验收
+> 已改为 hermetic 形式（本次 run 落盘结果 + 纳入版本库的历史快照），验证边界见
+> [Windows CI hermetic 修复](windows-ci-hermetic-fix-20261110.md)。
+>
+> **2026-11-10 外层复验（hermetic 修复后、未提交）**：外层唯一全量
+> `py -3.12 -m pytest tests -q` 实际 exit 0：`196 passed, 1 warning in 5.04s`；
+> 警告仍为既有 Windows 子进程 UTF-8 解码线程。该结果证明本地工作区通过，
+> 不是 clean checkout 或远端 CI 通过。修复文件尚未提交/推送，PR #1 现有检查
+> 仍是修复前失败；远端重跑待外层执行。
 
 ## 5. 历史归档声明
 
@@ -194,8 +209,9 @@ API/CLI/工作台无法选择。历史 profile 通过 `PROFILE_MODEL_BINDINGS` �
 
 1. 优先补 V4.1 Engram pin、CSA2/MoE 源码逐行核对、Qwen3.6 MTP 原生 forward；
    在这些完成前不要解除 `forward_evidence_complete` 或部署排名阻断。
-2. GitHub 强制审查需要支持该私有仓库保护规则的账号方案，再由仓库管理员在
-   ruleset/branch protection 中把 `pytest (Windows, Python 3.12)` 设为 required，
-   并启用 PR review；当前只具备 CI 自动检查。
+2. GitHub 强制审查：仓库已公开，已具备配置公开仓库保护规则的条件；仍需仓库
+   管理员在 ruleset/branch protection 中把 `pytest (Windows, Python 3.12)` 设为
+   required，并启用 PR review。当前查询 main 为 404 `Branch not protected`、
+   rulesets 为空，只具备 CI 自动检查。
 3. H200 profile 若要重新启用，必须重新绑定到对应活跃模型并完成留出/域门禁，
    不能把 30B-tiny/235B 的结果平移到 Qwen3.6/V4.1。

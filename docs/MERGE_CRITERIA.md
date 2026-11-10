@@ -129,8 +129,10 @@ ruleset/branch protection 中把该 job 的 check 设为 required，并启用
 [branch protection rule](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule)、
 [rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)、
 [merge_group event](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#merge_group)。
-本轮未推送、未配置远端保护。外层 Codex 于 2026-11-10 只读查询
-`PiratePai/simverse`（私有仓库）的 main branch protection 与 rulesets API，
-均得到 HTTP 403：`Upgrade to GitHub Pro or make this repository public to enable this feature.`
-当前仓库条件下不能把本工作流设为 GitHub 强制 required check/PR review；
-合入审查按本文件与本地/CI 结果执行，远端强制能力待账号条件变化后再核。
+历史（2026-11-10 门禁轮记录时）：未推送、未配置远端保护。私有仓库时期
+外层 Codex 只读查询 main branch protection 与 rulesets API，均得到 HTTP 403：
+`Upgrade to GitHub Pro or make this repository public to enable this feature.`
+当前（2026-11-10 文档收口时）：仓库已公开，候选分支已推送并建 PR #1；
+main branch protection 查询返回 404 `Branch not protected`，rulesets 为空。
+保护规则仍未配置，不能把本工作流视为 GitHub 强制 required check/PR review；
+合入审查按本文件与本地/CI 结果执行，远端强制能力待仓库管理员配置后再核。

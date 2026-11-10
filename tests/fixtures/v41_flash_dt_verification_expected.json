@@ -1,0 +1,57 @@
+{
+  "schema_version": "1",
+  "kind": "historical-run-snapshot",
+  "provenance": {
+    "purpose": "Hermetic replay expectation for tests/test_consistency.py. CI checkout does not include the git-ignored outputs/ directory.",
+    "source_archive": "outputs/run_v41.json",
+    "source_archive_sha256": "4dce83d65b932bc103593c85cd7541df74863a571132b8539d0a0e91be326b63",
+    "source_archive_size_bytes": 1331879,
+    "source_archive_mtime_local": "2026-11-06 01:58:30 (observed local time; no timezone recorded)",
+    "source_archive_simulator_version": "0.1.0",
+    "source_archive_ops_count": 2493,
+    "source_archive_replay_scenario_file": "D:\\Github\\new-viewer\\assets\\scenarios\\v41_flash_dt_verification.json",
+    "scenario_file": "assets/scenarios/v41_flash_dt_verification.json",
+    "scenario_file_sha256_lf": "38c6c34764ffa30913a089663523bbf06e7a9969bb78502ee8499baf01561103",
+    "scenario_file_hash_normalization": "SHA256 over file bytes after CRLF -> LF normalization (Git checkout EOL independent)",
+    "scenario_digest": "sha256:196c24706cbc635a",
+    "extraction": "Copied verbatim from the archived digests.scenario and metrics only; the full ops/stages/timeline payload is intentionally omitted. No run() output from the test session was used to derive these expected values.",
+    "archive_command": "not recorded in the archive; archive.replay only records the scenario path",
+    "scope": "Historical T0 formula estimates for the fixed v0.1 scenario; not a measurement and not a forward-execution result."
+  },
+  "digests": {
+    "scenario": "sha256:196c24706cbc635a"
+  },
+  "metrics": {
+    "E_committed_len": 3.05078125,
+    "alpha": 0.75,
+    "P_full": 0.31640625,
+    "E_draft_step0_tokens": 1.31640625,
+    "verify_tokens_M": 5,
+    "K": 4,
+    "B": 1,
+    "ctx_tokens": 32768,
+    "t_base_ms": 0.5825947462108018,
+    "t_prefill_ms": 86.93301836438253,
+    "t_verify_ms": 1.1992092173414202,
+    "t_draft_colocated_ms": 0.14332099879725163,
+    "t_draft_dt_ms": 0.5558478637802989,
+    "t_d2t_ms": 0.10000046875,
+    "t_t2d_ms": 0.10000400000000001,
+    "bytes_d2t": 30,
+    "bytes_t2d": 256.0,
+    "memory": {
+      "weight_capacity_per_card": 36010098688,
+      "kv_retained_per_card": 55062528,
+      "target_mem_gb": 80.0,
+      "oom_target": false,
+      "oom_draft": false,
+      "draft_weight_bytes": 4529848320
+    },
+    "baseline_tps_per_req": 1716.4590077476728,
+    "breakeven_alpha": {
+      "colocated": 0.5971505960869099,
+      "dt_serial": 0.802339267856145,
+      "dt_pipeline_ideal": 0.5813572086781063
+    }
+  }
+}
