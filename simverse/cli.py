@@ -272,12 +272,20 @@ def _summary_v2(bundle: dict):
         if x.get("value") is None:
             print(f"  {key:26} 未知 —— {(x.get('reason') or '')[:60]}")
         else:
-            print(f"  {key:26} {x['value']:.4f} {x.get('unit', '')}"
-                  + ("   ! " + x["reason"][:44] if x.get("reason") else ""))
+            note = ("   ! 不参与排名；原因见下方能力检查与导出 JSON"
+                    if key == "M02_speedup_vs_baseline" and x.get("reason")
+                    else ("   ! " + x["reason"] if x.get("reason") else ""))
+            print(f"  {key:26} {x['value']:.4f} {x.get('unit', '')}" + note)
     checks = (bundle.get("capability") or {}).get("checks") or {}
     bad = [k for k, v in checks.items() if v["status"] != "supported"]
     if bad:
-        print("  注意：", ", ".join(bad))
+        for key in bad:
+            check = checks[key]
+            if key.startswith("memory_"):
+                print(f"  注意 {key} [{check['status']}]：已知显存下界仅供核对；"
+                      "缺可分配预算或完整运行时峰值，不能判定可部署（明细见 JSON）")
+            else:
+                print(f"  注意 {key} [{check['status']}]：{check['reason']}")
 
 
 def cmd_sweep_v2(args):

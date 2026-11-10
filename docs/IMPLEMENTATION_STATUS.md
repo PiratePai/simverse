@@ -1,8 +1,8 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-10（A 组轮：TP/EP per-rank 配方 + 同卡对象账本 + 预算判定链）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（本地，无远端——Q3 私有远端信息待补）；包版本 0.2.0（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（当前 176 passed，无警告输出）；
+更新：2026-11-10（投机耗时与排名资格复核；A 组 TP/EP 与显存账本仍有效）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（本地 origin=https://github.com/PiratePai/simverse.git；本轮未推送或验证远端权限）；包版本 0.2.0（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（本轮 180 passed；1 条 Windows 子进程 UTF-8 解码线程警告，见验收记录）；
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /，v0.1 简表 /legacy）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G7 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -83,9 +83,9 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   每点独立 run_id、breakeven 无交点返回 null 不造数；
   ComparisonPolicy（Q4 双资源政策、Q11 多目标并列、资格谓词、资源 delta 披露）。
 - 测试 tests/test_pipeline_v02.py：18 项。
-- 必需场景数字（Qwen3.6+DFlash colocated 8×H100 B1 ctx32k α0.72 blk16）：
-  基线 TPOT 3.4704ms、投机 1.6874ms、加速比 2.0567（容量标称口径→不排名标注）、
-  E[N]=3.5528、T_round=5.995ms（draft 0.163+verify 5.832）。
+- M2 初版历史数字（Qwen3.6+DFlash colocated 8×H100 B1 ctx32k α0.72 blk16）：
+  基线 TPOT 3.4704ms、投机 1.6874ms、加速比 2.0567。后续 A 组修复了逐层 TP 通信，
+  本轮再补 DFlash 草稿通信；**当前值见下方投机耗时复核**，此处不得作当前性能结论。
 
 ### UI（M1/M2 区域）— 完成（生产工作台）
 - simverse/static/workbench.html+js：复用 v3 DOM/CSS 骨架（场景栏/7 KPI/矩阵/

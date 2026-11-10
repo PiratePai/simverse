@@ -91,6 +91,20 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     if scenario.method_id == "dflash_v1" and model.id != "qwen36_35b_a3b":
         return _bundle_error(scenario, cap, "unsupported_combo",
                              "该 DFlash checkpoint 仅核对 Qwen3.6-35B-A3B 配对；不能用于其他主模型")
+    if scenario.method_id == "mtp" and model.id != "qwen36_35b_a3b":
+        return _bundle_error(scenario, cap, "unsupported_combo",
+                             "MTP 当前仅有 Qwen3.6 首层模板研究估计；"
+                             "其他模型缺原生微头 forward 身份，不能套用模板")
+    if scenario.method_id in ("chain_draft", "chain_moe_proxy"):
+        cap.add("method_recipe_ready", "approximated",
+                f"{scenario.method_id} 使用 tiny_gqa 合成草稿；缺真实草稿身份、"
+                "服务配方及草稿驻留账本",
+                affected_metrics=["M01 TPOT", "M02 加速比", "M06 显存"])
+    elif scenario.method_id == "mtp":
+        cap.add("method_recipe_ready", "approximated",
+                "MTP 微头按目标首层模板估算；缺原生微头的完整计数、"
+                "TP 配方及驻留账本",
+                affected_metrics=["M01 TPOT", "M02 加速比", "M06 显存"])
     acc = acceptance_summary(plan)
 
     # ---- 实测 profile 校准（可选；MERGE_CRITERIA §3：只改成本不改计数）----
@@ -111,8 +125,7 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
     pplan = validate_parallel(model, dep.target_tp, dep.target_ep,
                               draft if (draft is not None
                                         and scenario.method_id == "dflash_v1"
-                                        and dep.mode in ("colocated",
-                                                         "dt_pipeline_sim"))
+                                        and dep.mode == "colocated")
                               else None)
     if not pplan.valid:
         cap.add("parallel_valid", "invalid", "; ".join(pplan.errors[:2]),
@@ -204,8 +217,7 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
         if scenario.method_id == "dflash_v1":
             # 草稿与 target 同 TP 组（vLLM load_dflash_model pin；dt_serial
             # 独立设备时草稿组 TP1 全量副本——无共享配方，见 memory）
-            draft_tp = dep.target_tp if dep.mode in ("colocated",
-                                                     "dt_pipeline_sim") else dep.draft_tp
+            draft_tp = dep.target_tp if dep.mode == "colocated" else dep.draft_tp
             draft_rows = dflash_round_rows(
                 "draft_block", draft, model.vocab, e_n, ctx, dquant,
                 quant["act"] / 8, tp=draft_tp)
@@ -213,6 +225,14 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             d_dev = target_dev if dep.mode == "colocated" else draft_dev
             d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew)
             t_draft = stage_total(d_prices)
+            draft_model = _draft_as_model(draft)
+            draft_plan = validate_parallel(draft_model, draft_tp, 1)
+            if not draft_plan.valid:
+                return _bundle_error(scenario, cap, "unsupported_combo",
+                                     "; ".join(draft_plan.errors))
+            col_d = _collectives_cost(draft_model, draft_plan,
+                                      B * plan.block_size, dquant, tp_link)
+            t_draft += col_d["t_ms"]
             verify_rows = build_model_work(model, "verify_block", B, ctx,
                                            plan.block_size, quant, dep.target_tp,
                                            role="target", ep=dep.target_ep,
@@ -225,6 +245,7 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
             if pricer:
                 calibration["stages"]["verify_block"] = pricer.price_stage(
                     "verify_block", verify_rows, v_prices, B, ctx, plan.block_size)
+                calibration["stages"]["verify_block"]["collectives_ms"] = col_v["t_ms"]
                 calibration["stages"]["draft_block"] = {
                     "stage": "draft_block", "domain_ok": False,
                     "reasons": ["草稿模型（DFlash 6L dense GQA）无匹配 profile 域"],
@@ -236,10 +257,16 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                 "t2d": int(e_n * len(draft.target_layer_ids) * draft.hidden
                            * (quant["act"] / 8)),
             }
-            stage_costs = {"draft_block": t_draft, "verify_block": t_verify}
+            stage_costs = {"draft_block": t_draft, "verify_block": t_verify,
+                           "commit_rewind": 0.0, "hidden_extract": 0.0}
+            cap.add("stage_cost_complete", "unknown",
+                    "DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；"
+                    "时间线以显式 0 占位，仅为已建模阶段下界",
+                    affected_metrics=["M01 TPOT", "M02 加速比", "M04 轮分解"])
             work["draft_block"] = _rows_json(draft_rows)
             work["verify_block"] = _rows_json(verify_rows)
-            cost["draft_block"] = {"t_ms": t_draft, "device": d_dev.id}
+            cost["draft_block"] = {"t_ms": t_draft, "device": d_dev.id,
+                                   "collectives": col_d["detail"]}
             cost["verify_block"] = {"t_ms": t_verify,
                                     "collectives": col_v["detail"]}
         elif scenario.method_id == "mtp":
@@ -253,13 +280,19 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                                            ep=dep.target_ep, plan=pplan)
             v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
             t_verify = stage_total(v_prices_m)
+            col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
+                                      quant, tp_link)
+            t_verify += col_v["t_ms"]
             if pricer:
                 calibration["stages"]["verify"] = pricer.price_stage(
                     "verify", verify_rows, v_prices_m, B, ctx,
                     plan.k_effective + 1)
+                calibration["stages"]["verify"]["collectives_ms"] = col_v["t_ms"]
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
                          "t2d": int(e_n * model.hidden * (quant["act"] / 8))}
             stage_costs = {"draft_step_0": t_draft, "verify": t_verify}
+            cost["verify"] = {"t_ms": t_verify,
+                              "collectives": col_v["detail"]}
             work["draft_step_0"] = _rows_json(draft_rows)
             work["verify"] = _rows_json(verify_rows)
         else:  # chain_draft / chain_moe_proxy：草稿用 tiny_gqa 结构演示闭环
@@ -282,33 +315,41 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
                                            ep=dep.target_ep, plan=pplan)
             v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
             t_verify = stage_total(v_prices_c)
+            col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
+                                      quant, tp_link)
+            t_verify += col_v["t_ms"]
             if pricer:
                 calibration["stages"]["verify"] = pricer.price_stage(
                     "verify", verify_rows, v_prices_c, B, ctx,
                     plan.k_effective + 1)
+                calibration["stages"]["verify"]["collectives_ms"] = col_v["t_ms"]
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
                          "t2d": int(B * 256)}
             stage_costs = {f"draft_step_{j}": t_draft / max(1, plan.k_effective)
                            for j in range(plan.k_effective)}
             stage_costs["verify"] = t_verify
+            cost["verify"] = {"t_ms": t_verify,
+                              "collectives": col_v["detail"]}
             draft_rows = rows_all
             work["draft_steps"] = _rows_json(rows_all)
             work["verify"] = _rows_json(verify_rows)
         # 链路
-        if dep.mode == "dt_serial":
+        if dep.mode in ("dt_serial", "dt_pipeline_sim"):
             lk = LINKS[dep.link]
             t_d2t = lk.fixed_ms + msg_bytes["d2t"] / lk.bw * 1e3
             t_t2d = lk.fixed_ms + msg_bytes["t2d"] / lk.bw * 1e3
         else:
             t_d2t = t_t2d = 0.0
         step_map = {"d2t": t_d2t, "t2d": t_t2d}
-        stage_costs.update({k: v for k, v in step_map.items() if v or dep.mode == "dt_serial"})
+        stage_costs.update(step_map)
         cost["link"] = {"t_d2t_ms": t_d2t, "t_t2d_ms": t_t2d, "bytes": msg_bytes}
         if dep.mode == "dt_pipeline_sim":
             # M3 资源事件核：真实调度（互斥资源+半双工链路），周期≠请求延迟
             from .execute.resource_core import dt_pipeline_schedule
+            draft_time = sum(v for k, v in stage_costs.items()
+                             if k == "draft_block" or k.startswith("draft_step_"))
             sim = dt_pipeline_schedule(
-                stage_costs.get("draft_block", 0.0) + stage_costs.get("draft_step_0", 0.0),
+                draft_time,
                 t_d2t, stage_costs.get("verify_block", stage_costs.get("verify", 0.0)),
                 t_t2d, rounds=dep.pipeline_rounds,
                 microbatches=dep.pipeline_microbatches)
@@ -527,7 +568,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
     分设备。峰值含结构化临时缓冲；workspace/graph/NCCL 池为缺口组件
     （不填 0）→ 峰值不完整 → feasible 判定 unknown（已知下界超标称仍 OOM）。
     """
-    from .lowering.memory import (RankMemory, colocated_rank_memory,
+    from .lowering.memory import (RankMemory, UNKNOWN_RUNTIME_COMPONENTS,
+                                  colocated_rank_memory,
                                   kv_allocations, target_weight_allocations)
     pplan = plan
     blocks: Dict[str, Any] = {}
@@ -564,10 +606,11 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
         for a in kv_allocations(model, quant, B, ctx, tp=dep.target_tp):
             a.consumers = ["target"]
             rm.add(a)
+        rm.unknown_components = list(UNKNOWN_RUNTIME_COMPONENTS)
         rep = rm.peak_vs_budget()
         rep["inventory"] = rm.inventory()
         blocks["target_r0"] = rep
-        if draft_ir is not None and dep.mode == "dt_serial":
+        if draft_ir is not None and dep.mode in ("dt_serial", "dt_pipeline_sim"):
             # 草稿独立设备 TP1：无共享对象配方（vLLM 配方为同组共享，
             # 独立组需全量 embed/lm_head 副本——服务栈未见证据，如实登记）
             db = _device_budget(dep.draft_device, dep.draft_budget)
@@ -589,6 +632,7 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                                     tp=dep.draft_tp):
                 a.consumers = ["draft"]
                 drm.add(a)
+            drm.unknown_components = list(UNKNOWN_RUNTIME_COMPONENTS)
             rep = drm.peak_vs_budget()
             rep["inventory"] = drm.inventory()
             blocks["draft_r0"] = rep
@@ -642,10 +686,7 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
             statistic=Statistic.EXPECTATION,
             support=Support.APPROXIMATED, feasibility=Feasibility.UNKNOWN,
             evidence_refs=[], formula_ref=FR.F_ROOFLINE,
-            reason="不参与排名：" + "; ".join(
-                str(chk["reason"]) for cid, chk in cap.checks.items()
-                if (cid == "model_structure_complete" and chk["status"] != "supported")
-                or (cid.startswith("memory_") and chk["status"] in ("unsupported", "unknown"))))
+            reason="不参与排名：" + "; ".join(_eligibility_issues(cap)))
     else:
         m["M02_speedup_vs_baseline"] = Metric.unknown("ratio", "TPOT 缺失")
     # M03 每轮产出（baseline：恒 1 精确值）
@@ -744,13 +785,20 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
 def _eligibility(cap: CapabilityReport) -> bool:
     """比较资格：结构完整 + 无 OOM + 容量非 unknown/条件（§7.2；R03b：
     假设预算（approximated/feasible-conditional）不进实际部署排名）。"""
+    return not _eligibility_issues(cap)
+
+
+def _eligibility_issues(cap: CapabilityReport) -> list[str]:
+    issues = []
     for cid, chk in cap.checks.items():
-        if cid == "model_structure_complete" and chk["status"] != "supported":
-            return False
-        if cid.startswith("memory_") and chk["status"] in (
+        if cid in ("model_structure_complete", "method_recipe_ready",
+                   "stage_cost_complete") \
+                and chk["status"] != "supported":
+            issues.append(str(chk["reason"]))
+        elif cid.startswith("memory_") and chk["status"] in (
                 "unsupported", "unknown", "approximated"):
-            return False
-    return True
+            issues.append(str(chk["reason"]))
+    return issues
 
 
 def _moe_union_summary(rows) -> Optional[Dict[str, Any]]:

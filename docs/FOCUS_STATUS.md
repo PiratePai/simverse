@@ -1,5 +1,7 @@
 # 重点模型与功能状态（2026-11-10）
 
+2026-11-10 投机耗时复核：MTP/chain 的 target verify 漏计逐层 TP 通信已修；DFlash 同组草稿漏计 TP 通信已修，DT 流水草稿容量与运行时峰值缺口会阻断排名。MTP 首层模板、chain 合成草稿仍是研究估计，不能进入实际部署排名。原始复现、DeepSeek 只读审查、修复后数值与未解数据见 [投机耗时与排名复核](validation/speculative-ranking-audit-20261110.md)。
+
 本轮产品目录收敛为已固定身份的 Qwen3.6-35B-A3B + DFlash、DeepSeek-V4.1-Flash。用户已确认 Qwen3.5 为笔误，重点模型为 Qwen3.6-35B-A3B，不新增或替换模型身份。历史模型与 H200 数据保留作内部校准和回归，不继续扩展产品模型数量。
 
 2026-11-10 A 组轮（R01–R03b）：TP/EP per-rank 统一配方 + 同卡对象身份

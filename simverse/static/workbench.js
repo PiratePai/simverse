@@ -60,9 +60,14 @@
       sel.value = models.indexOf('qwen36_35b_a3b') >= 0 ? 'qwen36_35b_a3b' : models[0];
       var ms = $('sel-method');
       ms.innerHTML = '';
-      cat.methods.supported.forEach(function (mid) {
+      cat.methods.supported.concat(cat.methods.research || []).forEach(function (mid) {
         var o = document.createElement('option');
-        o.value = mid; o.textContent = mid;
+        o.value = mid;
+        o.textContent = ({
+          chain_draft: 'chain_draft（合成草稿研究演示）',
+          chain_moe_proxy: 'chain_moe_proxy（假想 MoE 代理）',
+          mtp: 'mtp（原生微头，当前解析近似）'
+        })[mid] || mid;
         ms.appendChild(o);
       });
       ms.value = 'dflash_v1';
@@ -103,9 +108,9 @@
       model_id: $('sel-model').value,
       method_id: $('sel-method').value,
       draft_id: $('sel-method').value === 'dflash_v1'
-        ? 'dflash_qwen36_35b_a3b'
-        : ($('sel-method').value === 'baseline' ? null : 'dflash_qwen36_35b_a3b'),
-      k: $('sel-method').value === 'dflash_v1' ? 15 : 4,
+        ? 'dflash_qwen36_35b_a3b' : null,
+      k: $('sel-method').value === 'dflash_v1' ? 15
+        : ($('sel-method').value === 'mtp' ? 1 : 4),
       block_size: parseInt($('inp-blk').value, 10),
       deployment: {
         mode: $('sel-method').value === 'baseline' ? 'baseline' : $('sel-deploy').value,
@@ -208,8 +213,10 @@
     var sp = metric(b, 'M02_speedup_vs_baseline');
     $('kpi-speedup').textContent = sp && sp.value !== null
       ? fmt(sp.value, '×', 3) : '未知';
-    $('kpi-speedup-sub').innerHTML = sp && sp.reason
-      ? '⚠ ' + sp.reason : ('基线 ' + fmt(base, 'ms', 3) + '（同 B/ctx）');
+    $('kpi-speedup-sub').textContent = sp && sp.reason
+      ? '不参与排名：见下方「证据 / 能力检查」中的容量与方法原因'
+      : ('基线 ' + fmt(base, 'ms', 3) + '（同 B/ctx）');
+    $('kpi-speedup-sub').title = sp && sp.reason ? sp.reason : '';
     var en = val(b, 'M03_E_N');
     $('kpi-en').textContent = en !== null ? fmt(en, 'tok', 3)
       + ' / K=' + (val(b, 'M03_K') || 0) : '未知';
@@ -232,7 +239,7 @@
     $('kpi-mem').textContent = mem ? fmtBytes(mem.value) : '–';
     $('kpi-mem-sub').textContent = mem
       ? (mem.feasibility === 'oom' ? 'OOM（超预算）'
-        : mem.feasibility === 'unknown' ? 'feasible 判定 unknown（仅标称容量）'
+        : mem.feasibility === 'unknown' ? '可部署性未知：缺可分配预算或运行时峰值证据'
         : '可分配预算内')
       : '–';
     var checks = (b.capability && b.capability.checks) || {};
@@ -507,7 +514,7 @@
   }
 
   // ---------- matrix（每格独立 run） ----------
-  var METHODS = ['dflash_v1', 'chain_draft', 'mtp', 'chain_moe_proxy'];
+  var METHODS = ['dflash_v1', 'mtp'];
   var DEPLOYS = [
     { key: 'colocated', label: '同卡混部' },
     { key: 'dt_serial', label: 'DT 分离串行' }
@@ -544,8 +551,7 @@
   function cellScenario(deploy, method) {
     return currentScenario({
       method_id: method,
-      draft_id: method === 'dflash_v1' ? 'dflash_qwen36_35b_a3b'
-        : (method === 'baseline' ? null : 'dflash_qwen36_35b_a3b'),
+      draft_id: method === 'dflash_v1' ? 'dflash_qwen36_35b_a3b' : null,
       deployment: { mode: deploy },
       k: method === 'dflash_v1' ? 15 : (method === 'mtp' ? 1 : 4),
       name: 'matrix-' + deploy + '-' + method
