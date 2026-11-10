@@ -116,6 +116,27 @@ def logits_gather(tokens_with_logits: int, vocab: int, tp: int,
              f"上界 (tp−1)/tp×总量（all-gather/gather-to-rank0 同界）")
 
 
+def engram_gather(tokens: int, width: int, tp: int, act_bytes: float,
+                  link: LinkLike, kind: str, note: str) -> CollectiveCost:
+    """Engram 层 all-gather（R04；每 engram 层各一次，TP>1）。
+
+    证据（engram.py pin @f358f057）：wkv 为 ColumnParallelLinear
+    gather_output=True（L1728/L1328-1329 tensor_model_parallel_all_gather
+    dim=1）→ [T,25600/tp] 分片聚合为全宽 [T,25600]；查表后按 head 分片
+    的 bf16 行 [T,part,256] 同样 all-gather（L1831-1832）。每 rank 线上
+    接收 = (tp−1)/tp × T×width×act（logits_gather 同式；延迟按单向环
+    (tp−1) 段近似，已登记）。表行读是 host UVA/peer 行为（cpu_offload
+    研究假设），不进通信行。
+    """
+    if tp < 2:
+        return CollectiveCost(kind, 0, 0.0, FR.F_COLLECTIVE,
+                              note="TP1 无 Engram 通信")
+    total = int(tokens * width * act_bytes)
+    per_rank = int((tp - 1) / tp * total)
+    t = per_rank / link.bw * 1e3 + (tp - 1) * link.fixed_ms
+    return CollectiveCost(kind, per_rank, t, FR.F_COLLECTIVE, note=note)
+
+
 def tp_layer_collectives(model: ModelIR, tp: int, hidden: int, act_bytes: float,
                          tokens: int, link: LinkLike
                          ) -> List[CollectiveCost]:
@@ -149,15 +170,33 @@ def model_collectives(model: ModelIR, plan: ParallelPlan, hidden: int,
         logits（logits_processor.py pin；2026-11-10 二轮审计补漏——此前
         draft.py 注释声称"另计"但此处未实现）。lm_head_tokens：经 lm_head
         的行数（默认=tokens；草稿阶段为 B×(blk−1) 候选行）。
+      * engram gathers（R04，TP>1，每 engram 层 2 次）：查表 head 分片
+        all-gather + wkv gather_output=True all-gather（engram.py
+        L1328-1329/L1831-1832；表行读为 host UVA 行为，不进通信行）。
     """
     out: List[CollectiveCost] = []
     if plan.tp < 2:
         return out
     msg = int(tokens * hidden * act_bytes)
+    engram_spec = (model.extras or {}).get("engram") or {}
+    e_ids = list(engram_spec.get("layer_ids", ()))
     for layer in model.layers:
         c = ring_allreduce(msg, plan.tp, link)
         c.note = f"attn_allreduce L{layer.index}"
         out.append(c)
+        if layer.index in e_ids:
+            cols = int(engram_spec["n_hash_cols"])
+            d_v = int(engram_spec["head_dim"])
+            wkv_out = hidden * (int(engram_spec["hc_mult"]) + 1)
+            out.append(engram_gather(
+                tokens, cols * d_v, plan.tp, act_bytes, link,
+                "engram_head_gather",
+                note=f"L{layer.index} 查表 [T,{cols},{d_v}] bf16 head 分片"
+                     " 聚合（L1831-1832）"))
+            out.append(engram_gather(
+                tokens, wkv_out, plan.tp, act_bytes, link, "engram_wkv_gather",
+                note=f"L{layer.index} wkv 列切 [T,{wkv_out // plan.tp}]→"
+                     f"[T,{wkv_out}]（gather_output=True，L1728）"))
         recipe = plan_collective_recipe(plan, layer)
         if recipe == "tp_allreduce":
             c2 = ring_allreduce(msg, plan.tp, link)

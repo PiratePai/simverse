@@ -7,7 +7,9 @@
   * 真实 V4.1 配置的整模型独立复算；
   * TP 不变性（hc 全宽流不切分）与权重复制守恒（count 行 = memory 账本）；
   * v41 层不再重复计通用 norm/add 行。
-Engram 8 键仍为缺口（common/engram.py 未 pin）→ 不测猜测常数。
+Engram 8 键已 mapped（2026-11-11 R04，common/engram.py pin blob ba4ceea6）：
+engram 层（1/14）现在额外出现 engram_* 4/3 行（tests/test_v41_engram.py
+独立 oracle 覆盖），hc 边界行构成不变（仍 6 行/层）。
 """
 import sys
 from pathlib import Path
@@ -91,11 +93,23 @@ def test_v41_hc_totals_independently_recomputed():
     assert sum(r.flops for r in hc_rows) == flops
     # 行数：40 层 ×6 + expand 1 = 241
     assert len(hc_rows) == 6 * L + 1
-    # Engram 层（1/14）边界算子构成与常规层相同（分立执行不改变总量）；
-    # Engram 注入本体不出现任何猜测行
+    # Engram 层（1/14）边界算子构成与常规层相同（分立执行不改变总量）。
+    # 归因更新（2026-11-11 R04）：Engram 注入已建模（engram.py pin），engram
+    # 层额外出现 engram_* 行——首 engram 层 L1 挂 4 行（hash/lookup/wkv/
+    # post_wkv），L14 无批级哈希行只 3 行；hc 边界行仍 6 行/层不变。
     for li in (1, 14):
-        layer_rows = [r for r in hc_rows if r.layer == li]
-        assert len(layer_rows) == 6 and not any("engram" in r.op for r in rows)
+        hc_layer = [r for r in hc_rows if r.layer == li]
+        eng_layer = [r for r in rows if r.layer == li and r.op.startswith("engram_")]
+        assert len(hc_layer) == 6
+        if li == 1:
+            assert [r.op for r in eng_layer] == [
+                "engram_hash", "engram_lookup", "engram_wkv", "engram_post_wkv"]
+        else:
+            assert [r.op for r in eng_layer] == [
+                "engram_lookup", "engram_wkv", "engram_post_wkv"]
+    # 非 engram 层无 engram 行
+    assert not any(r.op.startswith("engram_") for r in rows
+                   if r.layer not in (1, 14))
 
 
 def test_v41_no_generic_norm_add_double_counting():

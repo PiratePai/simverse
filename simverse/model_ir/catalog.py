@@ -1,7 +1,8 @@
 """模型目录：pinned config 快照 → ModelIR / DraftIR（身份与覆盖一并携带）。
 
 登记项（M1 边界如实标注）：
-  deepseek_v41_flash     必需场景① 主模型（草稿未指定；Engram/hc gaps → 不完整结构）
+  deepseek_v41_flash     必需场景① 主模型（草稿未指定；Engram/hc 已 source-checked
+                         建模（R04）；CSA2/MoE/量化 gaps → 不完整结构）
   qwen36_35b_a3b         必需场景② 主模型（结构完备；多模 vision 登记 metadata-only）
   dflash_qwen36_35b_a3b  必需场景② 草稿（结构与协议证据已 pin）
   tiny_*                 手算锚点（tiny_gqa / tiny_hybrid / tiny_mla / tiny_moe）
@@ -49,7 +50,10 @@ _V41_EVIDENCE = ModelEvidence(
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch"),
     unverified_paths=(
-        "engram_forward: common/engram.py 未 pin；表 dtype/注入算子/容量未知",
+        "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与"
+        "EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；"
+        "cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子"
+        "已 source-checked（ev-vllm-v41-engram，R04）",
         "mhc_tilelang_kernel: mHC 边界计数为 source-checked+近似，tilelang 核未执行",
         "csa2_attention_projection: CSA2 注意力/投影为 v0.1 移植，非独立 forward 证据",
         "csa2_moe_routing: sqrtsoftplus/noaux_tc/分组路由未建模",
@@ -58,7 +62,9 @@ _V41_EVIDENCE = ModelEvidence(
     ),
     method_status={"baseline": "partial-source", "dflash_v1": "unsupported",
                    "mtp": "unverified"},
-    note="Engram 8 键/CSA2/MoE/量化仍是真实缺口；hc 仅 source-checked，未执行。")
+    note="Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 "
+         "cpu_offload 运行时行为未覆盖）；CSA2/MoE scoring/量化仍缺口；"
+         "hc 仅 source-checked，未执行。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",
@@ -167,10 +173,12 @@ def _v41() -> ModelIR:
         full["text_config"], _src("deepseek-ai/DeepSeek-V4.1-Flash",
                                   "314113f8a7dadb388215396ba5fbee2c610a04d6",
                                   _sha(path), "官方 config 固定快照"),
-        "deepseek_v41_flash", "DeepSeek-V4.1-Flash (MLA+CSA2, 全层 MoE, Engram/hc 缺口)",
+        "deepseek_v41_flash",
+        "DeepSeek-V4.1-Flash (MLA+CSA2, 全层 MoE, Engram/hc 已建模/CSA2-MoE 缺口)",
         full_config=full, text_prefix="text_config")
     return replace(ir, evidence=_V41_EVIDENCE,
-                   evidence_refs=("ev-v41-config", "ev-vllm-v41-model"))
+                   evidence_refs=("ev-v41-config", "ev-vllm-v41-model",
+                                  "ev-vllm-v41-engram"))
 
 
 def _qwen36() -> ModelIR:

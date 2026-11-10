@@ -101,6 +101,30 @@ _PINNED_ASSETS = [
      "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5（评审包 pin）",
      "V4.1 Engram/hc 结构存在性与 forward 参与",
      ["AST/阅读证据，非执行；完整 lowering/容量仍缺（capability 登记）"], False),
+    ("ev-vllm-v41-engram", "source-checked",
+     "vLLM V4.1 Engram 完整建模证据（R04，2026-11-11）：EngramLayout 素数桶"
+     "分配（vocab_size−1 起连续抽取、seen 全局不复用；层 1/14 的 24 桶长之和"
+     "与 config engram_num_embeddings 精确相等）、表值 FP8 e4m3 + ue8m0 "
+     "block-scale（32）= 264 B/行、TP 按 hash head ceil 切分（断言 "
+     "(tp−1)·part<24，每 rank 行数=桶长和而非 num_embeddings/tp）、批级 "
+     "n-gram 哈希一次 kernel 算全部 engram 层（lookback 3，挂首本地层 SWA）、"
+     "wkv ColumnParallelLinear 6144→25600 gather_output=True、q/k_weight "
+     "[hc,5120] bf16 复制、post_wkv 门控（rsqrt 归一点积→sign-sqrt→sigmoid）"
+     "注入 residual 流",
+     str(REFS / "vllm" / "vllm" / "models" / "deepseek_v41" / "common" / "engram.py"),
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5（engram.py blob sha1 "
+     "ba4ceea624ef6513ed7e787d084883f42d9d8322 + nvidia ops "
+     "engram_host_table/engram_peer/specialized_decode engram prefetch 三文件；"
+     "blob sha1 已对 docs/rebuild-20261106/references/vllm-tree.json 逐项校验）",
+     "R04 Engram 结构映射（model_ir extras.engram）、count/work.engram_rows "
+     "四行、lowering/memory engram 表/wkv/qk/staged 对象与 engram gathers",
+     ["源码阅读（source-checked）非执行；CPU/GPU 均未运行",
+      "DP 分片交换（all-to-all/peer/symmetric memory）与 EngramBatch MXFP8 "
+      "路径未建模（本仓默认单副本路径不启用）",
+      "cpu_offload 运行时行为（预取流/TLB/排序阈值）未建模；表位置为显式"
+      "研究假设配方（场景 engram_table_placement，默认 cpu_offload）",
+      "kernel 内部 op 数（哈希/门控常数 10d+5 等）为解析近似计数"],
+     False, "2026-11-11"),
     ("ev-vllm-v41-dspark", "source-checked",
      "vLLM V4.1 DSpark speculator：num_reqs 批处理、复用 V4 decoder 的事实",
      str(REFS / "vllm" / "vllm" / "v1" / "worker" / "gpu" / "spec_decode" / "dspark" / "speculator.py"),
@@ -243,19 +267,22 @@ def build_registry() -> Dict[str, EvidenceRecord]:
             domain="模型/checkpoint 身份",
             limits=["身份核实 ≠ 语义验证；configs 另有单列证据"],
             executed=True, command=f"py -3.12 <identity fetch> → {rel}")
-    for (ev_id, kind, claim, rel, source, domain, limits, executed) in _PINNED_ASSETS:
+    for entry in _PINNED_ASSETS:
+        (ev_id, kind, claim, rel, source, domain, limits, executed) = entry[:8]
+        # 可选第 9 元素：登记日期（缺省 2026-11-09，与既有记录一致）
+        captured = entry[8] if len(entry) > 8 else "2026-11-09"
         path = (ASSETS / rel) if not rel.startswith("docs") else ROOT / rel
         sha = _sha256_file(path)
         if not sha:
             # 资产缺失：登记为缺口而不是跳过（如实标注原则）
             records[ev_id] = EvidenceRecord(
                 evidence_id=ev_id, kind="source-checked", claim=claim,
-                source=source, content_sha256="MISSING", captured_at="2026-11-09",
+                source=source, content_sha256="MISSING", captured_at=captured,
                 domain=domain, limits=["资产文件缺失：" + rel], executed=False)
             continue
         records[ev_id] = EvidenceRecord(
             evidence_id=ev_id, kind=kind, claim=claim, source=source,
-            content_sha256=sha, captured_at="2026-11-09", domain=domain,
+            content_sha256=sha, captured_at=captured, domain=domain,
             limits=limits, executed=executed,
             command=f"sha256sum {rel}")
     return records

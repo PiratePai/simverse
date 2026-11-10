@@ -278,10 +278,21 @@ def test_g9_complete_config_leaves_registered_no_default_ignore():
                                        "future_unknown_key": 1})
     assert cov["future_unknown_key"]["status"] == "unsupported-semantic"
     assert any("future_unknown_key" in g for g in gaps)
-    # V4.1 的 Engram/量化/candidate/swiglu/尾部 ratio 是显式缺口
+    # V4.1 缺口归因更新（2026-11-11 R04）：Engram 8 键已按 common/engram.py
+    # pin（blob sha1 ba4ceea6 对 vllm-tree.json 校验）source-checked 建模
+    # → **不再**是 gap（本断言曾断言 engram_vocab_size ∈ gap_keys；该底层
+    # 事实变化是合法门禁更新，非放宽——剩余缺口不变，仍在阻断）。
     m = cat["models"]["deepseek_v41_flash"]
     gap_keys = {g.split(":")[0] for g in m.gaps}
-    assert {"engram_vocab_size", "quantization_config", "candidate_block_size",
+    assert not gap_keys & {f"engram_{k}" for k in (
+        "vocab_size", "num_embeddings", "layer_ids", "n_heads", "head_dim",
+        "max_ngram_size", "compressed_vocab_size", "pad_token_id")}, \
+        "Engram 8 键应已 mapped（R04）；若重新出现缺口须按准则登记原因"
+    engram_cov = {k.split(".")[-1]: v["status"]
+                  for k, v in m.coverage.items() if "engram_" in k}
+    assert set(engram_cov.values()) == {"mapped"}
+    # 剩余显式缺口原样保留（不因 Engram 解除而整体放行）
+    assert {"quantization_config", "candidate_block_size",
             "swiglu_limit"} <= gap_keys
     assert any("compress_ratios[40:43]" in g for g in m.gaps)
 
@@ -304,7 +315,13 @@ def test_g10_evidence_levels_separated_and_not_overclaimed():
     assert q.evidence.method_status["mtp"] == "unverified"
     assert "sm-qwen35-gdn-decode-branch" in q.evidence.checked_paths
     assert not v.config_coverage_complete and not v.forward_evidence_complete
-    assert any("engram_forward" in p for p in v.evidence.unverified_paths)
+    # Engram 归因更新（2026-11-11 R04）：单机 Engram 算子已 pin + source-checked
+    # → checked_paths/证据引用在册；未核范围收窄为 DP 交换/cpu_offload 运行时
+    # 行为（本断言曾要求 engram_forward ∈ unverified_paths——底层事实变化，
+    # 合法门禁更新而非放宽：csa2_moe_routing 仍须 unverified）。
+    assert "sm-v41-engram-hc" in v.evidence.checked_paths
+    assert "ev-vllm-v41-engram" in v.evidence_refs
+    assert any("engram_dp_exchange" in p for p in v.evidence.unverified_paths)
     assert any("csa2_moe_routing" in p for p in v.evidence.unverified_paths)
     assert d.config_coverage_complete
     assert d.evidence.cpu_forward == "not-run"

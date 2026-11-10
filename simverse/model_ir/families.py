@@ -73,8 +73,106 @@ _STRUCT_KEYS = {
                  "num_nextn_predict_layers", "norm_topk_prob",
                  # mHC（2026-11-10 mapped：count/work.hc_boundary_rows +
                  # lowering/memory hc 权重；vLLM pin source-checked）
-                 "hc_mult", "hc_eps", "hc_sinkhorn_iters"},
+                 "hc_mult", "hc_eps", "hc_sinkhorn_iters",
+                 # Engram（2026-11-11 R04 mapped：common/engram.py pin
+                 # @f358f057 blob ba4ceea6 source-checked；count/work.engram_rows
+                 # + lowering/memory engram 表/wkv/qk 对象；逐键覆盖注记见
+                 # parse_v41_csa2 的 _ENGRAM_KEY_NOTES）
+                 "engram_layer_ids", "engram_num_embeddings", "engram_vocab_size",
+                 "engram_compressed_vocab_size", "engram_max_ngram_size",
+                 "engram_n_heads", "engram_head_dim", "engram_pad_token_id"},
 }
+
+# Engram 8 键的 mapped 覆盖注记（engram.py = vllm/models/deepseek_v41/common/
+# engram.py pin @f358f057，blob sha1 ba4ceea6；逐键给行号证据）
+_ENGRAM_KEY_NOTES = {
+    "engram_layer_ids":
+        "mapped：注入层位 [1,14]（EngramLayout L221；model.py L350-361 构造、"
+        "L583-600 注入 residual 流）",
+    "engram_num_embeddings":
+        "mapped：每层表行数 = 该层 24 个素数桶长之和（EngramLayout L230-242 "
+        "素数分配；L1=384,006,168 / L14=384,016,682 与本键精确相等）",
+    "engram_vocab_size":
+        "mapped：语义 = 哈希空间 / 素数扫描起点（find_next_prime 从 "
+        "vocab_size−1=15,999,999 起抽素数，L130-135/L235-239），**不是存储规模**；"
+        "存储规模是 engram_num_embeddings",
+    "engram_compressed_vocab_size":
+        "mapped：tokenizer 归一化压缩词表 99092，断言一致（L457-464）；"
+        "哈希乘子由它派生（compute_hash_multipliers L189-208）",
+    "engram_max_ngram_size":
+        "mapped：n-gram 最大尺寸 4（lookback_depth=3，L444）；哈希列数 "
+        "(max−1)×n_heads=24（L243）",
+    "engram_n_heads":
+        "mapped：每 (ngram 尺寸, head) 独立素数桶，8 heads × 3 组 = 24 列/层"
+        "（L232-241）",
+    "engram_head_dim":
+        "mapped：表值 head_dim=256；FP8 行 256B + E8M0 scale 8B = 264B/行"
+        "（L1152-1161/L968-969）",
+    "engram_pad_token_id":
+        "mapped：blocked/dead 位置哈希输入取 pad（L411 token_map 归一），"
+        "参与哈希语义",
+}
+
+
+def _is_prime(n: int) -> bool:
+    """确定性 Miller-Rabin（n < 2**32 有效；基 {2,7,61}）。
+
+    common/engram.py L105-127 `_is_prime` 的忠实移植（含小素数试除短路）；
+    测试用**独立实现**对账，不 import 本函数当 oracle。
+    """
+    if n < 2:
+        return False
+    for p in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        if n % p == 0:
+            return n == p
+    d = n - 1
+    r = 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    for a in (2, 7, 61):
+        x = pow(a, d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(r - 1):
+            x = x * x % n
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _find_next_prime(start: int, seen: set) -> int:
+    """大于 start 且未在 seen 中出现过的最小素数（engram.py L130-135）。"""
+    candidate = start + 1
+    while not _is_prime(candidate) or candidate in seen:
+        candidate += 1
+    return candidate
+
+
+def engram_bucket_primes(vocab_size: int, n_layers: int, max_ngram_size: int,
+                         n_heads: int) -> List[List[int]]:
+    """EngramLayout 的素数桶分配（engram.py L211-252 的忠实移植）。
+
+    每个 (ngram 尺寸, head) 对拥有独立 prime 桶长：每 ngram 组从
+    vocab_size−1 重置起点顺序抽 n_heads 个素数，但 seen 集合**全局**不复用
+    → 实际为 vocab_size−1 之上连续 n_layers×(max−1)×n_heads 个素数，
+    层 i 取第 [i×24, (i+1)×24) 个。返回 [n_layers][n_hash_cols] 桶长；
+    TP 分片时每 rank 行数 = 其分到的桶长之和（**不是** num_embeddings/tp）。
+    """
+    seen: set = set()
+    out: List[List[int]] = []
+    for _ in range(n_layers):
+        flat: List[int] = []
+        for _ in range(max_ngram_size - 1):
+            current = vocab_size - 1
+            for _ in range(n_heads):
+                current = _find_next_prime(current, seen)
+                seen.add(current)
+                flat.append(current)
+        out.append(flat)
+    return out
 
 # 已核不影响文本推理结构、也不进 IR 的键（metadata/ignored 分类）
 _META_KEYS = {
@@ -454,13 +552,17 @@ def parse_deepseek_v3(config: Dict[str, Any], source: SourceIdentity, model_id: 
 def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str,
                    label: str, full_config: Dict[str, Any] = None,
                    text_prefix: str = "") -> ModelIR:
-    """DeepSeek-V4.1-Flash：MLA+CSA2 压缩层计划 + 全层 MoE + mHC 建模 + Engram 缺口。
+    """DeepSeek-V4.1-Flash：MLA+CSA2 压缩层计划 + 全层 MoE + mHC/Engram 建模。
 
     mHC（hc_mult/hc_eps/hc_sinkhorn_iters）：2026-11-10 按 vLLM pin 源码建模
-    （count/work.hc_boundary_rows + lowering/memory hc 权重）→ mapped；
-    Engram 8 键仍 unsupported-semantic（注入点/批级哈希/层位已从 model.py 证实，
-    但 common/engram.py 未 pin：forward 内部算子与表 dtype 未知，不猜常数）
-    → gaps 非空，structure_complete=False。
+    （count/work.hc_boundary_rows + lowering/memory hc 权重）→ mapped。
+    Engram 8 键：2026-11-11 R04 按 common/engram.py pin（vllm @f358f057，
+    blob sha1 ba4ceea6 对 vllm-tree.json 校验）source-checked 建模 → mapped
+    （count/work.engram_rows + lowering/memory engram 表/wkv/qk 对象）；
+    表布局 FP8+E8M0 264B/行、素数桶、TP head 切分、wkv/qk 投影与门控注入
+    语义见 extras["engram"]。
+    CSA2/MoE scoring、量化映射、swiglu clamp、candidate block、尾部
+    compress_ratios 仍为显式缺口 → gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
     tc = config
@@ -502,27 +604,23 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                         produces_candidates=i == candidate),
             moe=moe))
     gaps_hint = {
-        "engram_vocab_size": "Engram 表规模已知（num_embeddings 精确）但表 dtype "
-                             "未 pin（common/engram.py 不在评审包）→ 容量字节未知，"
-                             "不猜；默认 cpu_offload 在主机内存（engram_config）",
-        "engram_compressed_vocab_size": "同上（哈希压缩词表参与批级 ngram 哈希）",
-        "engram_head_dim": "Engram.forward 内部算子未 pin → 注入算子不计猜测常数",
-        "engram_n_heads": "同上",
-        "engram_num_embeddings": "同 engram_vocab_size",
-        "engram_max_ngram_size": "批级 ngram 哈希窗口（NgramHashState，每批一次）"
-                                 "已证实；哈希算量小未单列（误差异常小，登记近似）",
-        "engram_layer_ids": "注入层位已证实（residual 流上、层 1/14，post/pre 分立）"
-                            "；注入算子本身未建模",
-        "engram_pad_token_id": "padding 参与哈希语义，随 Engram forward 缺口",
         "swiglu_limit": "SwiGLU clamp（10.0）未进入本仓 MLP 计数/数值语义；"
                         "不冒充已消费",
         "candidate_block_size": "候选 block 缓冲粒度未进入 candidate_publish/"
                                 "容量建模；不冒充已消费",
     }
-    # hc_* → mapped（计数 count/work.hc_boundary_rows；容量 lowering/memory；
-    # 证据 vllm deepseek_v41 model.py pin @f358f057 source-checked 2026-11-10）
+    # hc_* / engram_* 8 键 → mapped（hc：count/work.hc_boundary_rows +
+    # lowering/memory hc 权重，vllm model.py pin @f358f057 source-checked
+    # 2026-11-10；engram：count/work.engram_rows + lowering/memory engram
+    # 对象，common/engram.py pin blob ba4ceea6 source-checked 2026-11-11）
     coverage, gaps = _coverage("v41_csa2", tc, gaps_hint,
                                 full_config=full_config, text_prefix=text_prefix)
+    # Engram 8 键的 mapped 注记逐键替换为行号证据（默认 struct 注记过于笼统）
+    for key, note in _ENGRAM_KEY_NOTES.items():
+        path = f"{text_prefix}.{key}" if text_prefix else key
+        if path in coverage and coverage[path]["status"] == "mapped":
+            coverage[path] = {"status": "mapped", "consumer": "model_ir+count+memory",
+                              "note": note}
     if len(ratios) > L:
         gaps.append(
             f"compress_ratios[{L}:{len(ratios)}]: 尾部 {len(ratios) - L} 项未进入"
@@ -535,6 +633,34 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         "eps": float(tc["hc_eps"]),
         "post_alpha": 2.0,
         "engram_layer_ids": list(tc.get("engram_layer_ids", [])),
+    }
+    # Engram 参数（消费方：count/work.engram_rows、lowering/memory engram 对象；
+    # 常数全部来自 common/engram.py pin @f358f057 blob ba4ceea6）：
+    #   * 表值 FP8 e4m3 [rows, head_dim] + ue8m0 scale [rows, head_dim/32]
+    #     （L1151-1161 分配、L726-731 dequant：scale byte<<23 即 fp32 指数）；
+    #   * block_size=32（L1037 默认）→ 264 B/行（L968-969 can_share 同式）；
+    #   * 哈希源 = 第一个本地层 SWA cache lookback(3)（L444/L919-948）。
+    e_heads, e_dim = int(tc["engram_n_heads"]), int(tc["engram_head_dim"])
+    e_max = int(tc["engram_max_ngram_size"])
+    engram_spec = {
+        "layer_ids": list(tc.get("engram_layer_ids", [])),
+        "num_embeddings": list(tc.get("engram_num_embeddings", [])),
+        "max_ngram_size": e_max,
+        "vocab_size": int(tc["engram_vocab_size"]),
+        "n_heads": e_heads,
+        "head_dim": e_dim,
+        "pad_token_id": int(tc["engram_pad_token_id"]),
+        "compressed_vocab_size": int(tc["engram_compressed_vocab_size"]),
+        "n_hash_cols": (e_max - 1) * e_heads,       # 24 = 3 组 × 8 heads（L243）
+        "block_size": 32,                            # L1037 默认
+        "value_dtype": "fp8_e4m3",                   # L1157-1160
+        "scale_encoding": "ue8m0",                   # L726-727
+        "bytes_per_row": e_dim + e_dim // 32,        # 264（L968-969/L1139）
+        # wkv 几何（Engram L1693-1733）：in = n_hash_cols·head_dim = 6144，
+        # out = hidden·(hc_mult+1) = 5120×5 = 25600；hc_mult 取自 config
+        # （Engram.__init__ L1694 self.hc_mult = config.hc_mult）
+        "hc_mult": int(tc["hc_mult"]),
+        "hash_source": "first_local_layer_swa_lookback(3)",
     }
     # dspark_* 归方法层消费（登记 metadata-only，消费者 methods）
     for key in list(coverage):
@@ -565,7 +691,8 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             "kv_source_layer_ids": kv_ids,
             "index_source_layer_ids": ix_ids,
         },
-        "hc": hc_spec})
+        "hc": hc_spec,
+        "engram": engram_spec})
 
 
 def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id: str,

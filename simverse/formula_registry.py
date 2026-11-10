@@ -87,6 +87,45 @@ F_MHC_POST_PRE = _f(
 F_MHC_EXPAND = _f("v2.mhc_expand", "写 = T·m·h（首层嵌入广播到 m 流）",
                   "model.py 首层 hc_expand(x, hc_mult)", "首层流广播")
 
+# ---- Engram（DeepSeek-V4.1-Flash；证据 vllm/models/deepseek_v41/common/
+#       engram.py pin @f358f057 blob sha1 ba4ceea6，source-checked 2026-11-11
+#       R04；注入点 nvidia/model.py L583-600，批级哈希 L1030-1092）----
+F_ENGRAM_HASH = _f(
+    "v2.engram_hash",
+    "FLOPs = T·n_engram_layers·(2·max_ngram + 2·(max_ngram−1)·n_heads) "
+    "（V4.1: T·2·56）；读 = T·4（int32 ids）；写 = T·n_layers·24·4（int32 哈希）",
+    "engram.py L291-423 _hash_ids_kernel：每 (token,layer,shift) 滚动哈希 "
+    "1 mul+1 xor ×MAX_NGRAM=4；shift>0 每 head 1 mod+1 add ×3×8；"
+    "grid (cdiv(T,32), n_layers) 一次算全部 engram 层（L565）——整数 op "
+    "计数口径，非 kernel 指令数",
+    "Engram 批级 n-gram 哈希（整批一次，挂首 engram 层行）")
+F_ENGRAM_LOOKUP = _f(
+    "v2.engram_lookup",
+    "FLOPs = T·24·256（FP8→bf16 dequant 逐元素 1 乘）；"
+    "weight_read_expected = T·24·264（表行读期望流量，不去重保守）；"
+    "容量 = per-rank 行数·264（素数桶 head 分片，非 num_embeddings/tp）",
+    "engram.py L642-732 _engram_lookup_kernel（ue8m0 byte<<23 即 fp32 指数，"
+    "L726-731）；264 B/行 = FP8 256 + E8M0 256/32（L968-969/L1151-1161）；"
+    "桶长/TP 分片见 model_ir.families.engram_bucket_primes（L211-252 移植）",
+    "Engram 查表（每 engram 层；表行读为数据依赖期望流量，容量另计）")
+F_ENGRAM_WKV = _f(
+    "v2.engram_wkv",
+    "FLOPs = 2·T·6144·(25600/tp)；weight/容量 = 6144·(25600/tp)·B_w（列切）；"
+    "act_write = T·(25600/tp)·B_a；gather_output=True → all-gather 见通信行",
+    "engram.py L1719-1733 ColumnParallelLinear(n_hash_cols·head_dim=6144 → "
+    "hidden·(hc_mult+1)=25600, bias=False, gather_output=True)；"
+    "无 sequence parallel 时输出列切",
+    "Engram wkv 投影（每 engram 层，per-rank 列切口径）")
+F_ENGRAM_POST_WKV = _f(
+    "v2.engram_post_wkv",
+    "FLOPs = T·hc_mult·(10·d+5)（乘 6d + 加 3(d−1)+d + 标量≈8；d=hidden）；"
+    "weight/容量 = 2·hc·d·2（q/k_weight bf16 每 rank 复制）",
+    "engram.py L1334-1422 _fused_engram_post_wkv_kernel（每 (token,hc)："
+    "ρ=(Σ hidden·q·k·key)·rsqrt(mean h²+eps)·rsqrt(mean key²+eps)·rsqrt(d)；"
+    "gate=sigmoid(sign(ρ)·sqrt(clamp|ρ|,1e-6))；out=hidden+gate·value）；"
+    "eps=rms_norm_eps=1e-20、clamp=1e-6（L1695-1696）——op 计数为解析近似口径",
+    "Engram 门控注入核（每 engram 层，post_wkv 逐 (token,hc)）")
+
 # ---- Cost（T0 解析估算；Q2：无实测数字） ----
 F_ROOFLINE = _f("v2.roofline", "t = max(F/P_eff, Q/BW_eff) + ρ·min(...)；ρ=0.15 登记",
                 "原理 §5：乐观约束 + 显式经验尾部", "kernel 级 T0")

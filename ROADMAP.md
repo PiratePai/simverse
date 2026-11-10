@@ -7,7 +7,8 @@
 - [x] 重点模型产品目录、DFlash 配对门禁、具体资格失败原因。
 - [x] ModelIR、计数/成本/执行分层，CLI/Web/导出共用结果。
 - [x] Qwen3.6+DFlash 解析实验、DT 串行及初步微批流水。
-- [x] V4.1 部分结构及 mHC 边界计数；Engram 仍不完整。
+- [x] V4.1 部分结构及 mHC 边界计数；Engram 单副本路径已 source-checked 建模
+  （R04，2026-11-11；DP 分片交换/cpu_offload 运行时行为未覆盖，见 B 组表）。
 - [x] 历史 H200 部分算子校准、来源与覆盖域门禁；不代表重点模型实测。
 - [x] A 组（2026-11-10）：TP/EP per-rank 统一配方、同卡对象身份账本、
   生命周期峰值分列、预算契约与可部署性四态判定链路（见 A 组表；真实
@@ -51,8 +52,8 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 
 | ID | 独立交付物与验收标准 | 硬依赖／联合验收点 |
 |---|---|---|
-| R04 | Engram：固定源码；查表/投影/权重/容量/跨层依赖映射；独立小尺寸验证 | Engram 源码；不依赖 Qwen 或设备扩展 |
-| R05 | mHC/Sinkhorn：固定 kernel 分支、迭代与操作计数；精确与近似分列 | 对应 kernel 源码；不等待 R04 |
+| R04 | ✅ 完成（单副本路径，2026-11-11）：common/engram.py pin（vllm @f358f057，blob sha1 对 vllm-tree.json 校验）→ 素数桶表布局/批级哈希/查表/wkv/门控四行入 count、表/wkv/qk/staged 对象入 memory（表默认 cpu_offload 研究假设，显式 engram_table_placement 输入）、TP 通信行；独立 oracle tests/test_v41_engram.py 22 项（层桶和 == engram_num_embeddings 精确相等）。证据 ev-vllm-v41-engram；[报告](docs/validation/v41-engram-20261111.md)。**剩余（未完）**：DP 分片交换（all-to-all/peer/symmetric memory）与 EngramBatch MXFP8 路径、cpu_offload 运行时行为、amd 变体——登记未覆盖 | Engram 源码（已 pin）；不依赖 Qwen 或设备扩展 |
+| R05 | mHC/Sinkhorn：固定 kernel 分支、迭代与操作计数；精确与近似分列（hc 三键已 mapped，边界行已计；tilelang kernel 源仍未 pin，sinkhorn 每迭代 OP 数保持解析近似） | 对应 kernel 源码；不等待 R04 |
 
 各模块分别解除自己的缺口；整个模型的结构资格需全部相关缺口闭环，不能以一个模块通过代表整体通过。
 

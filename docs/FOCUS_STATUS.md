@@ -1,4 +1,16 @@
-# 重点模型与功能状态（2026-11-10）
+# 重点模型与功能状态（2026-11-10；2026-11-11 R04 增补）
+
+2026-11-11 R04（V4.1 Engram 建模）：common/engram.py pin（vllm @f358f057，
+blob sha1 ba4ceea6 对 vllm-tree.json 校验）后单副本路径 Engram 落地——
+engram 8 键 → mapped；count 新增 engram_hash/lookup/wkv/post_wkv 四行
+（层 1/14，批级哈希一次）；memory 新增表/wkv/qk 对象 + staged 下界
+（表默认 **cpu_offload 研究假设**，场景显式 engram_table_placement 输入，
+host 驻留不进 GPU 峰值）；TP>1 补 head/wkv 两次 all-gather。独立 oracle
+tests/test_v41_engram.py 22 项（素数桶和 == engram_num_embeddings 精确
+相等、TP1 表 202,758,032,400 B、tp=7/9/16 拒绝）。默认 V4.1 replay：
+TPOT 113.34→116.15ms、GPU steady +39.5MB（表在 host 25.3GB 另列）；
+structure_complete 仍 False（CSA2/MoE/量化缺口不变）。详见
+[validation/v41-engram-20261111.md](validation/v41-engram-20261111.md)。
 
 2026-11-10 两模型门禁轮：活跃目录只保留 Qwen3.6-35B-A3B + DFlash、
 DeepSeek-V4.1-Flash；历史模型/tiny 移出运行时选择。修复 V4.1 o_a 分组与
@@ -27,12 +39,12 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 
 | 能力 | 范围与限制 |
 |---|---|
-| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 部分结构，Engram/CSA2/MoE/量化缺口；四栏证据见 JSON |
+| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 Engram 单副本路径 + hc 已 source-checked 建模（R04；DP 交换/cpu_offload 运行时未覆盖），CSA2/MoE/量化仍缺口；四栏证据见 JSON |
 | Qwen3.6+DFlash | pinned 草稿、接受律、draft/verify 解析成本、同卡与 DT 串行；非实测收益；CPU/GPU 未执行 |
 | **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
 | **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
 | **预算契约与判定（R03a/b）** | nominal/allocatable(measured/hypothesis)/额外开销分列；四态判定 unknown/oom/feasible/conditional；已知下界超标称即 OOM；假设预算不进实际部署排名 |
-| mHC | 已有源码边界映射和计数测试；Sinkhorn 操作数仍近似 |
+| mHC / Engram | mHC 已有源码边界映射和计数测试（Sinkhorn 操作数仍近似）；Engram 素数桶表/哈希/查表/wkv/门控已建模（R04；表位置 cpu_offload 为研究假设，DP 分片交换未覆盖） |
 | DT 流水事件核 | 微批依赖、资源互斥、周期和利用率；非完整在线服务 |
 | 接受律与比较 | 显式假设、未知传播、资格门禁；不从平均接受长度推造完整概率律 |
 | CLI/Web/导出/扫描 | 共用生产结果、精度选择、EP 选择、预算输入、独立运行身份 |
@@ -43,7 +55,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 1. ~~Qwen3.6 优先：统一 MoE per-rank TP/EP 配方~~（2026-11-10 A组 R01 完成）。
 2. ~~同卡显存复核（草稿 batch/共享去重/KV 分片/生命周期峰值分列）~~（A组 R02a/b 完成；运行时池尺寸证据仍缺，见下）。
 3. 可分配预算：契约已就绪（R03a），**真实 measured 数据仍缺**（G-D7）；解除前默认场景保持 unknown。
-4. V4.1：获取并固定 Engram 实现、补查表/投影/参数/容量/跨层依赖；完整前不解除结构门禁。
+4. ~~V4.1：获取并固定 Engram 实现、补查表/投影/参数/容量/跨层依赖~~（单副本路径 2026-11-11 R04 完成；剩余 DP 分片交换/MXFP8 批路径/amd 变体与 CSA2/MoE scoring/量化缺口，完整前不解除结构门禁）。
 5. 请求级 lookahead、取消与浪费；在线到达/组批/抢占、KV 分页、Chunked Prefill/PD/Prefix Cache。
 6. ~~235B moe.csv TP8/EP1 准入~~：模型已移出活跃 catalog，只保留历史归档研究；
    不再作为产品优先项。两款主模型缺匹配 profile，需新采集。
@@ -53,7 +65,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 - 重点模型小尺寸 CPU forward 与计数的独立执行对照（当前全部未执行）。
 - Qwen3.6+DFlash 实际接受分布、draft/verify 延迟及服务栈配对验证。
 - 重点模型各精度/TP 的 GDN、MoE、attention 测量；历史 H200 profile 不能按名称相似迁移。
-- V4.1 Engram 与 mHC kernel 数值和操作边界。
+- V4.1 Engram DP 分片交换路径与 mHC tilelang kernel 数值/操作边界（单机 Engram 已 source-checked）。
 - 实际可分配显存（G-D7）、非 KV 运行时开销（workspace/CUDA graph/NCCL 池尺寸，当前按缺口传播）、匹配 E2E 请求轨迹。
 - 浏览器交互与像素复核：2026-11-10 A组轮已实测 EP 选择/预算输入/运行链路
   （截图 docs/evidence/workbench_ep_budget_run.png）；其余页面沿此前口径。
