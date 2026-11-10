@@ -1,0 +1,21 @@
+from simverse.model_ir.catalog import catalog_json
+from simverse.pipeline import run_v2
+from simverse.scenario import ScenarioV2
+
+
+def test_product_catalog_only_focus_models():
+    assert set(catalog_json()["models"]) == {"qwen36_35b_a3b", "deepseek_v41_flash"}
+
+
+def test_default_pair_has_unknown_budget_not_structure_failure():
+    b = run_v2(ScenarioV2()).to_json()
+    checks = b["metrics"]["M07_support_summary"]
+    assert checks["structure_complete"] is True
+    assert checks["capability_checks"]["memory_colocated_r0"] == "unknown"
+    reason = b["metrics"]["M02_speedup_vs_baseline"]["reason"]
+    assert "colocated_r0" in reason and "OOM" not in reason
+
+
+def test_dflash_rejects_unverified_target_pair():
+    b = run_v2(ScenarioV2(model_id="deepseek_v41_flash")).to_json()
+    assert "unsupported_combo" in str(b)

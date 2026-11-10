@@ -2,7 +2,7 @@
 
 更新：2026-11-10（校准闭环复审修复 + 235B 第二闭环 + V4.1 hc 建模轮）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（本地，无远端——Q3 私有远端信息待补）；包版本 0.2.0（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（当前 129 passed，无警告输出）；
+运行：`py -3.12 -m pytest tests -q`（当前 132 passed，无警告输出）；
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /，v0.1 简表 /legacy）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G7 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -247,3 +247,10 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   G-C1 Engram 源 pin（等上游评审包）；G-D4/G-C2 prefill/verify 形状域；
   G-D6/G-C5 KERNEL_ONLY 双口径；G-D1/G-C3 DFlash 实测与集成核对；
   G-C4 单请求超前事件 → M17；V09b 三方对账。
+
+
+## 2026-11-10 产品范围收敛
+
+产品目录仅展示 Qwen3.6-35B-A3B 和 DeepSeek-V4.1-Flash。历史模型保留为内部回归/校准资产，不再作为产品扩展优先项。用户已确认 Qwen3.5 为笔误，沿用 Qwen3.6-35B-A3B 及其 DFlash 配对。
+默认 Qwen3.6+DFlash 结构检查通过；不排名的直接原因是可分配显存未知，非已确认 OOM。现在输出实际检查原因。DFlash checkpoint 禁止用于未经核对的其他主模型。
+本轮详细功能状态见 [FOCUS_STATUS.md](FOCUS_STATUS.md)。

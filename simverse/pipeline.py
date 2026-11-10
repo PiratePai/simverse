@@ -75,6 +75,9 @@ def run_v2(scenario: ScenarioV2) -> ResultBundle:
         except ValueError as exc:
             return _bundle_error(scenario, cap, "unsupported_combo", str(exc))
         draft_ir = draft
+    if scenario.method_id == "dflash_v1" and model.id != "qwen36_35b_a3b":
+        return _bundle_error(scenario, cap, "unsupported_combo",
+                             "该 DFlash checkpoint 仅核对 Qwen3.6-35B-A3B 配对；不能用于其他主模型")
     acc = acceptance_summary(plan)
 
     # ---- 实测 profile 校准（可选；MERGE_CRITERIA §3：只改成本不改计数）----
@@ -549,7 +552,10 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
             statistic=Statistic.EXPECTATION,
             support=Support.APPROXIMATED, feasibility=Feasibility.UNKNOWN,
             evidence_refs=[], formula_ref=FR.F_ROOFLINE,
-            reason="资格不合格（结构缺口/OOM/unknown 容量）：数值保留，不参与排名")
+            reason="不参与排名：" + "; ".join(
+                str(chk["reason"]) for cid, chk in cap.checks.items()
+                if (cid == "model_structure_complete" and chk["status"] != "supported")
+                or (cid.startswith("memory_") and chk["status"] in ("unsupported", "unknown"))))
     else:
         m["M02_speedup_vs_baseline"] = Metric.unknown("ratio", "TPOT 缺失")
     # M03 每轮产出（baseline：恒 1 精确值）

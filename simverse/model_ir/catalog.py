@@ -223,12 +223,15 @@ def build_catalog() -> Dict[str, Any]:
             "pending_assets": PENDING_ASSETS, "version": _VERSION}
 
 
+PRODUCT_MODELS = frozenset({"qwen36_35b_a3b", "deepseek_v41_flash"})
+
+
 def catalog_json() -> dict:
     cat = build_catalog()
     return {
         "schema_version": "0.2",
         "model_ir_version": _VERSION,
-        "models": {k: m.to_json() for k, m in cat["models"].items()},
+        "models": {k: m.to_json() for k, m in cat["models"].items() if k in PRODUCT_MODELS},
         "drafts": {k: {
             "id": d.id, "label": d.label, "hidden": d.hidden, "vocab": d.vocab,
             "n_layers": len(d.layers),

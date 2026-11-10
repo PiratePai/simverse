@@ -1,5 +1,9 @@
 # simverse — 统一推理仿真仓
 
+重点模型：**Qwen3.6-35B-A3B + DFlash**、**DeepSeek-V4.1-Flash**。
+待办优先级与验收标准见 **[Roadmap](ROADMAP.md)**；已实现能力与限制见
+[功能状态](docs/FOCUS_STATUS.md)。历史模型保留为内部回归/校准资产。
+
 v0.2 重构（2026-11-09 起，依据 `docs/rebuild-20261106/` 计划包）：ModelIR 共享子包 →
 计数 → 降层 → T0 成本 → 串行/资源事件执行 → ResultBundle，CLI/Web/导出同入口。
 实施状态与验收清单见 **[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)**。
@@ -16,7 +20,7 @@ v0.1 首切片（投机解码/DT 分离可追溯验证）报告保留于
 ## 命令行入口
 
 ```bash
-python -m pytest tests -q                    # 86 项验收（手算 oracle + 一致性 + 负例）
+python -m pytest tests -q                    # 全量验收（手算 oracle + 一致性 + 负例）
 python -m simverse.cli run-v2                # v0.2 管线（Qwen3.6-35B-A3B + DFlash，默认场景）
 python -m simverse.cli run-v2 --csv ops.csv --trace events.csv --html report.html
 python -m simverse.cli serve --port 8765     # Web 工作台（同上；/ 生产 v0.2，/legacy v0.1）
