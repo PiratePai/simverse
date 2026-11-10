@@ -99,16 +99,22 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
             formula=FR.F_ATTN_CORE if not win else FR.F_SWA_PAIRS,
             shape=f"B={B} pairs={pairs} rows={read_rows} win={win} "
                   f"heads(卡上)={heads_c}"))
-        # ctx K/V（target_hidden 投影，每轮 produced 行；权重与草稿 k/v_proj
-        # 同一分片对象，无额外驻留）
+        # ctx K/V（target_hidden 投影，每轮 produced 行；与草稿块 token 的
+        # qkv 投影是**两次独立 GEMM**——k/v 权重每轮从 HBM 读第二遍：
+        # dflash model.py L384-387 k_ctx/k_noise 分开调用；vLLM 集成为全层
+        # 融合 GEMM（qwen3_dflash.py _fused_kv_weight），读的是融合驻留副本
+        # （容量在 lowering/memory 另立对象），字节数与逐层等价。2026-11-10
+        # 二轮审计补漏：原 weight_read=0 低估二次读）
         rows.append(OpRow(stage, li, "ctx_kv_proj",
                           flops=int(2 * produced * h * 2 * kvh * d),
-                          weight_read=0, statistic="expectation",
+                          weight_read=int(2 * h * kvh * d * b_w),
+                          statistic="expectation",
                           act_read=int(produced * h * b_a),
                           kv_write=int(produced * kv_elems * b_kv),
                           formula=FR.F_GEMM,
                           shape=f"B={B}×produced={produced:.2f} 行 "
-                                "k/v_ctx = k/v_proj(target_hidden)"))
+                                "k/v_ctx = k/v_proj(target_hidden) 二次读"
+                                f"（2×{h}×{kvh}×{d}B）"))
         rows.append(OpRow(stage, li, "o_proj", flops=2 * T * (heads_c * d) * h,
                           weight_read=int(heads_c * d * h * b_w),
                           act_read=int(T * heads_c * d * b_a),
@@ -155,17 +161,23 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                       act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
                       shape=f"B={B}×blk={blk} 行，width={h}（draft final，replicated）"))
     # 3) 目标 lm_head 读出 blk−1 个候选：草稿与 target 共享同一词表行切
-    #    lm_head（V/tp），logits 跨 rank 聚合（集合通信在 lowering 计）
+    #    lm_head（V/tp）。容量归 target 物理对象（账本去重，见 memory），
+    #    但**读流量按每次 GEMM 计**：草稿每轮对同一分片独立前向读一遍
+    #    （dflash model.py L260 compute_logits → L599-601 output_head(hidden)；
+    #    vLLM qwen3_dflash.py L920-935 走同一 LogitsProcessor）。
+    #    2026-11-10 二轮审计补漏：原 weight_read=0 低估草稿侧读流量。
+    #    logits 词表聚合通信（TP>1）在 lowering/sharding.logits_gather 计。
     cand = B * (blk - 1)
     rows.append(OpRow(
         stage, -1, "draft_lm_head",
         flops=2 * cand * h * (target_vocab // tp),
-        weight_read=0,                    # 权重属目标（同对象共享；读流量另计）
+        weight_read=int(h * (target_vocab // tp) * b_w),
         act_read=int(cand * h * b_a),
         act_write=int(cand * (target_vocab // tp) * b_a),
         formula=FR.F_LM_HEAD,
         shape=f"B={B}×(blk−1)={cand}×{h}×{target_vocab}/tp{tp}"
-              f"（目标 lm_head 分片共享；logits 聚合通信另计）"))
+              f"（目标 lm_head 分片共享，读流量入草稿；容量归目标对象；"
+              f"logits 聚合通信在 lowering 计）"))
     # 4) 噪声/首位 embedding 查表（用目标 embedding 分片对象）
     rows.append(OpRow(stage, -1, "noise_embed", act_read=int(T * h * b_a),
                       act_write=int(T * h * b_a), formula=FR.F_EMBED,

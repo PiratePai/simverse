@@ -246,6 +246,58 @@ ENTRIES: List[SourceMapEntry] = [
                           "workspace/graph/NCCL 池尺寸未 pin（峰值缺口）"],
         note="R02a：colocated 账本草稿 embed/lm_head 零字节引用 + consumer "
              "登记；修复前幻影副本 ~1GB 与去重键失配双重计费"),
+    SourceMapEntry(
+        entry_id="sm-vllm-lmhead-logits-gather",
+        model_or_method="lm_head 词表行切后的 logits 集合通信（TP>1）",
+        semantic="ParallelLMHead 每 rank 只产出 T×(V/tp) logits；"
+                 "LogitsProcessor._get_logits 在 lm_head.tp_size>1 时对每次 "
+                 "lm_head 调用执行 gather（all-gather 或 gather-to-rank0，"
+                 "由 current_platform.use_all_gather 决定）。每 rank 线上"
+                 "最大字节均为 (tp−1)/tp × T×V×head_dtype 字节",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/model_executor/layers/logits_processor.py:90-91"
+                        "（use_all_gather 平台开关）、122-133（_gather_logits："
+                        "tensor_model_parallel_all_gather / _gather）、185-198"
+                        "（_get_logits：lm_head.tp_size>1 → _gather_logits）、"
+                        "qwen3_5.py:345/428（ParallelLMHead + logits_processor）、"
+                        "qwen3_dflash.py:920-935（草稿 compute_logits 走同一 "
+                        "LogitsProcessor）",
+        branch_predicate="lm_head.tp_size > 1 且非 skip_gather → gather",
+        thresholds="tp>1 恒触发；decode/verify/草稿候选各一次",
+        input_domain="Qwen3.6 V=248320 TP{2,4,8,16}；B×T 按阶段（decode B、"
+                     "verify B×blk、草稿 B×(blk−1)）",
+        both_sides_covered=True,
+        uncovered_domain=["gather 的平台分支差异（all-gather vs rank0-gather）"
+                          "按同一字节上界建模；NCCL 内部缓冲另计缺口"],
+        note="R01 通信配方补漏（2026-11-10 二轮审计）：此前 draft.py 注释声称"
+             " 'logits 聚合通信另计' 但 model_collectives 未实现；本轮按 pin "
+             "补 logits_gather 计费（lowering/sharding.py）"),
+    SourceMapEntry(
+        entry_id="sm-vllm-dflash-ctx-kv-second-read",
+        model_or_method="DFlash 草稿 ctx KV 投影的第二次权重读与融合驻留缓冲",
+        semantic="草稿层 K/V 投影权重每轮被读两次：noise 块 token 走 qkv_proj，"
+                 "target_hidden 上下文行单独再投影（k_ctx/v_ctx）。vLLM 集成把"
+                 "全部草稿层的 K/V 行 torch.cat 成 _fused_kv_weight（新驻留"
+                 "副本，非视图）后一次融合 GEMM；量化（MXFP8）走独立 "
+                 "ReplicatedLinear _context_kv_proj；CPU/repacked 走逐层回退",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="dflash/model.py:384-391（k_ctx/k_noise 两次独立 "
+                        "k_proj/v_proj 调用后 cat）、models/qwen3_dflash.py:"
+                        "529-530（_context_kv_proj 条件构造）、541-568"
+                        "（_build_context_kv_buffers：torch.cat → "
+                        "_fused_kv_weight/_k_norm_weights refill_derived）、"
+                        "617-698（_project_context_kv_token_major 三分支："
+                        "fused GEMM / MXFP8 / 逐层回退）",
+        branch_predicate="全层 qkv MXFP8 → _context_kv_proj；否则 GPU 上"
+                         " UnquantizedLinearMethod → _fused_kv_weight 副本；"
+                         "否则逐层回退（无额外驻留）",
+        thresholds="草稿 dense_w ≥8bit（未量化）→ 融合副本驻留；4bit → 回退",
+        input_domain="Qwen3.6 DFlash 草稿（6 层，kvh=8）TP{1,2,4,8}",
+        both_sides_covered=True,
+        uncovered_domain=["MXFP8 路径的 checkpoint 行重复装载细节未建模"
+                          "（本仓场景无 MXFP8 精度档）"],
+        note="R01/R02a 补漏（2026-11-10 二轮审计）：ctx_kv_proj 行 weight_read"
+             " 原为 0（漏二次读）；_fused_kv_weight 驻留副本原不在账本"),
 ]
 
 

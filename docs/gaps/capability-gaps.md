@@ -108,8 +108,14 @@
   pin）——EP 关 routed inter/tp、EP 开 E//ep(+余数) 整专家、router 复制、
   shared inter/tp、attention KV 头切/复制、GDN 切分、词表行切；count 行、
   memory 分配、EP 通信三方同 plan。
+- **同日二轮审计补漏**（[报告](../validation/agroup-lmhead-ctxkv-audit-20261110.md)）：
+  lm_head 词表行切后 logits_gather 集合通信（logits_processor.py L185-198
+  入 pin）、DFlash 草稿 lm_head/ctx KV 二次读流量、vLLM `_fused_kv_weight`
+  驻留副本与三件结构化临时（ctx 归一副本/融合输出/aux hidden）入账本；
+  MXFP8 ctx 投影分支维持 uncovered 登记（场景无该精度档）。
 - 验收：守恒测试 ×配方×tp∈{1,2,4,8} + EP 守恒 + 复制对象不求和 + 非法组合
-  拒绝（tests/test_parallel_sharding.py 19 项）；235B manifest defer 理由已
+  拒绝（tests/test_parallel_sharding.py；二轮后 21 项，含 logits_gather 与
+  草稿二次读独立手算 oracle）；235B manifest defer 理由已
   改指 G-D2 数据准入（分片混尺不再是阻塞）。
 - 残留：G-D2 的 moe 蒸馏准入与留出验收（数据侧，独立进行）。
 

@@ -1,11 +1,28 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-10（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-10（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录；同日 A 组二轮审计补漏见下）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（分支 `codex/forward-merge-gate`；远端公开仓库 `PiratePai/simverse`，候选分支已推送、PR [#1](https://github.com/PiratePai/simverse/pull/1) 已建；main 保护规则未配置）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（全量由外层 Codex 唯一执行；2026-11-10 hermetic 修复后本地全量 exit 0：196 passed，5.04s，1 条既有 Windows 子进程 UTF-8 解码警告；本轮 CLI 导出编码修复新增 1 项回归用例，当前收集 197，全量待外层重跑；不代表远端已通过）。
-**pytest 收集数：197**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-10；196→197 为本轮新增“非 UTF-8 stdio 导出”回归用例；最终全量结果见本轮审查记录）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-10 A 组二轮审计后本地全量 exit 0：201 passed，6.15s；此前 hermetic 修复后为 196 passed + 1 条既有 Windows 子进程 UTF-8 解码警告、编码修复后 197）。
+**pytest 收集数：201**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-10；197→201 为 A 组二轮审计新增 4 项：logits_gather 手算 oracle、草稿二次读流量手算、fused ctx-KV 未量化路径、ctx/aux 结构化临时）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**A 组二轮审计补漏（2026-11-10，R01/R02a/R02b）**：对 pinned vLLM @dc74b8cb
+逐文件复核发现并修复 4 处漏计（证据 `ev-vllm-logits-ctxkv-billing`，
+`logits_processor.py` 补入 pin，SHA256 e1fac869…）：
+① lm_head 词表行切后 logits 集合通信（logits_processor.py L185-198
+`lm_head.tp_size>1 → gather`）此前完全未计——decode/verify/草稿候选各补 1 次
+`logits_gather`（每 rank (tp−1)/tp×T×V×act 字节，单向环 (tp−1) 段延迟）；
+② DFlash 草稿 `draft_lm_head` weight_read 原 0（dflash model.py L260/L599-601
+每轮独立 GEMM）→ 补 h×(V/tp)×b_w；③ `ctx_kv_proj` 二次读（L384-387 k_ctx/
+k_noise 两次 GEMM）→ 补 2×h×kvh_rank×d×b_w；④ vLLM `_fused_kv_weight`
+全层 K/V 行 cat 驻留副本（qwen3_dflash.py L541-568，未量化路径）入 R02a 账本
+（4bit 量化走逐层回退，无副本）。结构化临时补 ctx 归一副本/融合 ctx-KV 输出
+（phase:draft）与 verify aux hidden（phase:verify）；M06 formula_ref 修正为
+`v2.capacity`。默认场景前后归因见
+[A 组二轮审计报告](validation/agroup-lmhead-ctxkv-audit-20261110.md)（M01
+baseline 112.2127→112.9161ms 等 8 项逐项归因；同卡 memory status 仍 unknown，
+两缺口不变）。
 
 **CI hermetic 修复（2026-11-10）**：`tests/test_consistency.py` 两项验收不再读取
 被 `.gitignore` 忽略的 `outputs/run_v41.json`。CSV 导出改为复核本次 `run` 新落盘的

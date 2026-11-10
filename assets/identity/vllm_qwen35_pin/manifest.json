@@ -18,7 +18,8 @@
   "qwen3_moe.py": "4710723deacd3c00e1fcd5e8b1a70474e6860d18dea9aeda2700c115795f4b40",
   "qwen3_next.py": "7b9a1fd0e159e02fc0f88bc22870f04d763c8736b917bca650cd6a19afebdec5",
   "qwen_gdn_linear_attn.py": "511093051d2ad41206add6b905d999f0c75e193672e6553056581e2a3753078a",
-  "routed_experts.py": "9fe678c296551f9da2afc4855d0fa9dee2afaefc141c6692ae560b7b01b4fc38"
+  "routed_experts.py": "9fe678c296551f9da2afc4855d0fa9dee2afaefc141c6692ae560b7b01b4fc38",
+  "logits_processor.py": "e1fac869aef80f6c398b92d61444186d1921740dab7df41b95a260b08b4c25d2"
  },
  "purpose": "R01 TP/EP 并行分片配方 pin（qwen3_5_moe/Qwen3.6 + DFlash 集成 + GDN/MoE/attention 分片）"
 }

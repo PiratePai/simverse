@@ -330,7 +330,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 return _bundle_error(scenario, cap, "unsupported_combo",
                                      "; ".join(draft_plan.errors))
             col_d = _collectives_cost(draft_model, draft_plan,
-                                      B * plan.block_size, dquant, tp_link)
+                                      B * plan.block_size, dquant, tp_link,
+                                      lm_head_tokens=B * (plan.block_size - 1))
             t_draft += col_d["t_ms"]
             verify_rows = build_model_work(model, "verify_block", B, ctx,
                                            plan.block_size, quant, dep.target_tp,
@@ -612,15 +613,19 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     return bundle
 
 
-def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike):
-    """按层通信配方（R01）：EP 开 MoE 层为 dispatch/combine，非 2×allreduce。"""
+def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,
+                      lm_head_tokens: Optional[int] = None):
+    """按层通信配方（R01）：EP 开 MoE 层为 dispatch/combine，非 2×allreduce；
+    层外 lm_head logits_gather 一次（TP>1；lm_head_tokens 默认=tokens，
+    草稿阶段传 B×(blk−1) 候选行）。"""
     if plan.tp < 2:
         return {"t_ms": 0.0, "detail": {"note": "TP1 无集合通信",
                                         "total_t_ms": 0.0}}
     top_k = next((l.moe.top_k for l in model.layers
                   if l.moe is not None and l.moe.experts), 0)
     cols = model_collectives(model, plan, model.hidden, quant["act"] / 8,
-                             tokens, link, moe_top_k=top_k)
+                             tokens, link, moe_top_k=top_k,
+                             lm_head_tokens=lm_head_tokens)
     t = sum(c.t_ms for c in cols)
     per_kind: Dict[str, int] = {}
     for c in cols:
@@ -628,8 +633,9 @@ def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike):
     return {"t_ms": t, "detail": {
         "per_layer": [c.to_json() for c in cols[:3]],
         "counts_by_kind": per_kind, "layers": len(model.layers),
-        "recipe": ("EP all2all（MoE 层）+ attn allreduce" if plan.moe_ep_enabled
-                   else "每层 attn+mlp 2 次 allreduce"),
+        "recipe": ("EP all2all（MoE 层）+ attn allreduce + logits_gather"
+                   if plan.moe_ep_enabled
+                   else "每层 attn+mlp 2 次 allreduce + logits_gather"),
         "total_t_ms": t}}
 
 
@@ -840,7 +846,7 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
             value=blk["known_peak_bytes"], unit="B", statistic=Statistic.EXACT,
             support=(Support.APPROXIMATED if conditional else Support.SUPPORTED),
             feasibility=feas,
-            formula_ref="v2.moe_routed",
+            formula_ref=FR.F_CAPACITY,
             scope=Scope(role="target" if "target" in rk or "colocated" in rk else "draft",
                         phase="steady-decode", rank=rk),
             evidence_refs=list(model.evidence_refs),

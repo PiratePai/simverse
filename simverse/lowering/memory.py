@@ -422,16 +422,40 @@ def draft_extra_allocations(draft_ir, quant: dict, tp: int,
     fc：ReplicatedLinear(len(layer_ids)·h → h)，每 rank 复制；
     hidden_norm/norm：h 复制；mask_embedding：h（vLLM 默认 0 张量占位，
     读取 mask_token_id 行时由共享 embedding 提供，此处计占位）。
+    fused ctx-KV 权重副本（2026-11-10 二轮审计补漏）：vLLM 集成把全部
+    草稿层 qkv 权重的 K/V 行 torch.cat 成 _fused_kv_weight 新驻留副本
+    （qwen3_dflash.py L541-568，非视图 cat；k_norm 权重另堆叠 L×d），
+    供上下文行融合 GEMM。未量化（dense_w≥8bit，UnquantizedLinearMethod
+    → _reads_raw_weights True）路径才有；4bit 量化走逐层回退（无副本，
+    读流量不变，见 count/draft.ctx_kv_proj）。
     """
     b_w = quant["dense_w"] / 8
     h = draft_ir.hidden
     fc_b = int(draft_ir.fc_in * h * b_w)
     norms_b = int(2 * h * b_w)
     mask_b = int(h * b_w)
-    return [Allocation(
+    allocs = [Allocation(
         f"{role}-w-dflash-fc-norms", "weights", role, fc_b + norms_b + mask_b,
         live_note=f"fc(replicated {draft_ir.fc_in}→{h}) + hidden_norm/norm "
                   f"+ mask_embedding 占位（不随 TP{tp} 缩放）")]
+    if quant["dense_w"] >= 8:
+        fused_kv_elems = 0
+        k_norm_elems = 0
+        for layer in draft_ir.layers:
+            a = layer.attn
+            if a is None:
+                continue
+            kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
+            fused_kv_elems += 2 * kv_rank * a.head_dim
+            k_norm_elems += a.head_dim
+        if fused_kv_elems:
+            allocs.append(Allocation(
+                f"{role}-w-dflash-fused-ctx-kv", "weights", role,
+                int((fused_kv_elems * h + k_norm_elems) * b_w),
+                live_note=f"_fused_kv_weight 全层 K/V 行 cat 副本 + k_norm 堆叠"
+                          f"（{fused_kv_elems}×{h}+{k_norm_elems} elem，"
+                          f"TP{tp} per-rank 分片口径；未量化路径）"))
+    return allocs
 
 
 def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
@@ -443,9 +467,14 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
     phase:draft（草稿前向，一轮内与 verify 串行）：
       * noise embedding 行 B·blk·h（act 精度）；
       * fc 输入拼接 B·E[N]·8h（act 精度）；
+      * ctx 归一化副本 B·E[N]·h + 融合 ctx-KV GEMM 输出
+        B·E[N]·L·2·kvh_rank·d（qwen3_dflash.py L665 empty_like + L680
+        F.linear 输出，2026-11-10 二轮审计补齐）；
       * 草稿 logits B·blk·(V/tp)·4B（fp32，logits_processor 输出口径）。
     phase:verify（目标块验证）：
-      * 目标 logits B·blk·(V/tp)·4B（fp32）。
+      * 目标 logits B·blk·(V/tp)·4B（fp32）；
+      * verify 辅助 hidden B·blk·n_feat·h（act；speculator
+        _store_hidden_states 的 aux 行，[:produced] 截断前全块行）。
     cross-round（跨轮存活）：
       * target_hidden 上下文特征 B·E[N]·len(target_layer_ids)·h（act 精度），
         每轮取 [:produced] 前缀保留到下轮（dflash_generate pin L308）。
@@ -456,14 +485,31 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
     h = model.hidden
     blk = block_size
     allocs: List[Allocation] = []
+    # 草稿 KV per-rank 头数（kvh≥tp 切分；kvh<tp 复制）
+    kv_rank = 0
+    d_head = 0
+    if draft_ir is not None:
+        for layer in draft_ir.layers:
+            if layer.attn is not None:
+                a = layer.attn
+                kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
+                d_head = a.head_dim
+                break
     draft_noise = int(batch * blk * h * b_a)
     fc_in = int(batch * max(1.0, e_produced) * 8 * h * b_a)
+    normed_ctx = int(batch * max(1.0, e_produced) * h * b_a)
+    n_draft_layers = len(draft_ir.layers) if draft_ir is not None else 0
+    fused_kv_out = int(batch * max(1.0, e_produced) * n_draft_layers
+                       * 2 * kv_rank * d_head * b_a)
     draft_logits = int(batch * blk * target_vocab_per_rank * 4)
     allocs.append(Allocation(
         "t-draft-buffers", "transient", "draft",
-        draft_noise + fc_in + draft_logits, lifecycle="phase:draft",
-        live_note=f"noise {draft_noise}B + fc输入 {fc_in}B + logits(fp32) "
-                  f"{draft_logits}B（B={batch} blk={blk} E[N]={e_produced:.2f}）"))
+        draft_noise + fc_in + normed_ctx + fused_kv_out + draft_logits,
+        lifecycle="phase:draft",
+        live_note=f"noise {draft_noise}B + fc输入 {fc_in}B + ctx归一副本 "
+                  f"{normed_ctx}B + 融合ctxKV输出 {fused_kv_out}B + "
+                  f"logits(fp32) {draft_logits}B"
+                  f"（B={batch} blk={blk} E[N]={e_produced:.2f}）"))
     verify_logits = int(batch * blk * target_vocab_per_rank * 4)
     allocs.append(Allocation(
         "t-verify-buffers", "transient", "target",
@@ -471,6 +517,12 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
         live_note=f"目标 logits(fp32) B·blk·(V/tp)·4（B={batch} blk={blk}）"))
     if draft_ir is not None:
         n_feat = len(draft_ir.target_layer_ids)
+        aux_hidden = int(batch * blk * n_feat * h * b_a)
+        allocs.append(Allocation(
+            "t-verify-aux-hidden", "transient", "target", aux_hidden,
+            lifecycle="phase:verify",
+            live_note=f"verify 辅助 hidden B·blk·{n_feat}·h（aux 行，"
+                      f"[:produced] 截断前）"))
         hidden_buf = int(batch * max(1.0, e_produced) * n_feat * h * b_a)
         allocs.append(Allocation(
             "t-target-hidden-ctx", "transient", "shared", hidden_buf,

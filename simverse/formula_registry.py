@@ -57,6 +57,11 @@ F_MOE_UNION_WITH_REPL = _f(
 F_LM_HEAD = _f("v2.lm_head", "FLOPs = 2·T·h·V_card", "列切分 per card", "输出头")
 F_EMBED = _f("v2.embed", "读 = T·h·B_e（查表）；容量 = h·V·B_e（untied）",
              "嵌入查表", "输入嵌入")
+F_CAPACITY = _f(
+    "v2.capacity",
+    "per-rank 对象账本：steady=常驻+每请求；峰值=steady+max(阶段临时)+跨轮"
+    "（串行配方）；共享对象零字节引用去重；未知运行时组件不填 0",
+    "lowering/memory.py（R02a/R02b 生命周期分层）", "同卡显存账本/峰值")
 
 # ---- mHC（mega hyper-connections，V4.1；证据 vllm deepseek_v41/nvidia/model.py
 #       pin @f358f057，source-checked 2026-11-10）----

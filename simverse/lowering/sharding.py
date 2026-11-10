@@ -93,6 +93,29 @@ def all2all_msg(per_rank_bytes: int, ranks: int, link: LinkLike,
     return CollectiveCost(kind, per_rank_bytes, t, FR.F_COLLECTIVE, note=note)
 
 
+def logits_gather(tokens_with_logits: int, vocab: int, tp: int,
+                  act_bytes: float, link: LinkLike) -> CollectiveCost:
+    """lm_head 词表行切后的 logits gather（TP>1 每次 lm_head 调用一次）。
+
+    证据（vLLM @dc74b8cb logits_processor.py L90-91/122-133/185-198；
+    source_map sm-vllm-lmhead-logits-gather）：lm_head.tp_size>1 时
+    _get_logits 对 head 输出（head dtype=act 精度，fp32 转换在 gather 后的
+    sampler）执行 all-gather（平台开关）或 gather-to-rank0。两条路径每 rank
+    线上最大字节同为 (tp−1)/tp × T×V×act；延迟按单向环 (tp−1) 段近似
+    （ring allreduce 的减半；已登记近似）。
+    """
+    if tp < 2:
+        return CollectiveCost("logits_gather", 0, 0.0, FR.F_COLLECTIVE,
+                              note="TP1 词表分片即全量，无 gather")
+    total = int(tokens_with_logits * vocab * act_bytes)
+    per_rank = int((tp - 1) / tp * total)
+    t = per_rank / link.bw * 1e3 + (tp - 1) * link.fixed_ms
+    return CollectiveCost(
+        "logits_gather", per_rank, t, FR.F_COLLECTIVE,
+        note=f"T={tokens_with_logits} V={vocab} 全量 {total}B；每 rank 线上"
+             f"上界 (tp−1)/tp×总量（all-gather/gather-to-rank0 同界）")
+
+
 def tp_layer_collectives(model: ModelIR, tp: int, hidden: int, act_bytes: float,
                          tokens: int, link: LinkLike
                          ) -> List[CollectiveCost]:
@@ -114,12 +137,18 @@ def tp_layer_collectives(model: ModelIR, tp: int, hidden: int, act_bytes: float,
 
 def model_collectives(model: ModelIR, plan: ParallelPlan, hidden: int,
                       act_bytes: float, tokens: int, link: LinkLike,
-                      moe_top_k: int = 0) -> List[CollectiveCost]:
+                      moe_top_k: int = 0,
+                      lm_head_tokens: Optional[int] = None
+                      ) -> List[CollectiveCost]:
     """按层通信配方（R01）：每层 attention allreduce；MLP 段——
 
       * tp_allreduce（dense FFN / EP 关 MoE）：inter 分片部分和规约；
       * ep_all2all（EP 开 MoE）：dispatch+combine，期望字节按均匀路由
-        E[ranks/token] = ep·(1−(1−1/ep)^top_k)（显式近似假设）。
+        E[ranks/token] = ep·(1−(1−1/ep)^top_k)（显式近似假设）；
+      * logits_gather（层外，TP>1）：lm_head 词表行切后每次调用 gather
+        logits（logits_processor.py pin；2026-11-10 二轮审计补漏——此前
+        draft.py 注释声称"另计"但此处未实现）。lm_head_tokens：经 lm_head
+        的行数（默认=tokens；草稿阶段为 B×(blk−1) 候选行）。
     """
     out: List[CollectiveCost] = []
     if plan.tp < 2:
@@ -146,6 +175,9 @@ def model_collectives(model: ModelIR, plan: ParallelPlan, hidden: int,
             c3 = all2all_msg(per_rank_bytes, ep, link, "ep_combine",
                              note=f"L{layer.index} 回传同量假设")
             out.extend([d, c3])
+    out.append(logits_gather(
+        lm_head_tokens if lm_head_tokens is not None else tokens,
+        model.vocab, plan.tp, act_bytes, link))
     return out
 
 

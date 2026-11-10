@@ -78,6 +78,8 @@ def test_no_phantom_draft_head_weights():
     draft_w = sum(a["bytes"] for a in rm.inventory() if a["role"] == "draft"
                   and a["kind"] == "weights")
     # 手算草稿权重 per-rank（TP8）：层权重 + fc(replicated) + norms
+    # + fused ctx-KV 副本（2026-11-10 二轮审计：qwen3_dflash.py L541-568
+    # torch.cat 全层 K/V 行新驻留 + k_norm 堆叠，未量化路径）
     h, V = 2048, 248320
     d = _draft()
     per_layer = 0
@@ -89,7 +91,10 @@ def test_no_phantom_draft_head_weights():
     per_layer += 2 * a0.head_dim                           # q/k norm
     layers_b = 6 * per_layer * 1
     final_norm = h * 1
-    expect = layers_b + draft_extra_allocations(d, Q8, 8)[0].bytes + final_norm
+    fc_norms_mask = 8 * h * h + 2 * h + h        # fc + hidden_norm/norm + mask
+    fused_ctx_kv = (6 * 2 * (a0.kv_heads // 8) * a0.head_dim * h
+                    + 6 * a0.head_dim) * 1
+    expect = layers_b + fc_norms_mask + fused_ctx_kv + final_norm
     assert draft_w == expect
 
 
@@ -129,14 +134,16 @@ def test_independent_hand_oracle_steady_bytes():
     # ⑤ KV（kvh=2<tp 复制）+ GDN 状态（per-rank 切分）
     kv = 10 * 2 * 2 * 256 * 32768 * 1
     state = 30 * ((32 // 8) * 128 * 128 * 4 + (8192 // 8) * 3 * 1)
-    # ⑥ 草稿 per rank（层权重切分 + fc(replicated)+2norm+mask + final norm）
-    #    与草稿 KV（kvh=8≥tp → 切分为 1 头/rank）
+    # ⑥ 草稿 per rank（层权重切分 + fc(replicated)+2norm+mask+final norm
+    #    + fused ctx-KV 副本/k_norm 堆叠——2026-11-10 二轮审计补漏，
+    #    qwen3_dflash.py L541-568）与草稿 KV（kvh=8≥tp → 切分 1 头/rank）
     dl = (h * (32 // 8) * 128                      # q
           + 2 * h * (8 // 8) * 128                 # k/v
           + (32 // 8) * 128 * h                    # o
           + 3 * h * (6144 // 8)                    # MLP inter/tp
           + 2 * 128)                               # q/k norm
-    draft_w = 6 * dl + (8 * h * h + 2 * h + h) + h
+    fused_ctx_kv = (6 * 2 * 1 * 128 * h + 6 * 128) * 1
+    draft_w = 6 * dl + (8 * h * h + 2 * h + h) + fused_ctx_kv + h
     dkv = 6 * 2 * 1 * 128 * 32768 * 1
     expect = target_w + kv + state + draft_w + dkv
     assert rm.steady_bytes() == expect
@@ -206,6 +213,58 @@ def test_peak_takes_phase_max_not_sum():
     assert rm.steady_bytes() == 1000
     assert rm.transient_peak_bytes() == 50 + 300      # cross + max(300,200)
     assert rm.known_peak_bytes() == 1350
+
+
+def test_fused_ctx_kv_buffer_unquantized_only():
+    """fused ctx-KV 驻留副本只在未量化路径存在（qwen3_dflash.py L529-568：
+    全层 qkv MXFP8 → ReplicatedLinear；GPU 未量化 → torch.cat 副本；
+    否则逐层回退无副本）。独立手算字节数与 TP 无关的 k_norm 堆叠。"""
+    d = _draft()
+    a0 = d.layers[0].attn
+    h = 2048
+    for tp in (1, 2, 8):
+        kv_rank = a0.kv_heads // tp if a0.kv_heads >= tp else a0.kv_heads
+        bf16 = {"dense_w": 8}
+        allocs = draft_extra_allocations(d, bf16, tp)
+        fused = [a for a in allocs if "fused-ctx-kv" in a.alloc_id]
+        assert len(fused) == 1
+        assert fused[0].bytes == int(
+            (6 * 2 * kv_rank * a0.head_dim * h + 6 * a0.head_dim) * 1)
+        # 4bit（量化）→ 逐层回退路径：无融合副本（读流量不变，另在 count 计）
+        allocs_q = draft_extra_allocations(d, {"dense_w": 4}, tp)
+        assert not any("fused-ctx-kv" in a.alloc_id for a in allocs_q)
+
+
+def test_transient_ctx_and_aux_hidden():
+    """二轮审计补齐的结构化临时（pinned 形状）：
+
+    phase:draft += ctx 归一副本 B·E[N]·h + 融合 ctx-KV 输出
+    B·E[N]·L·2·kvh_rank·d（qwen3_dflash.py L665/L680）；
+    phase:verify += aux hidden B·blk·n_feat·h（speculator _store_hidden_states，
+    [:produced] 截断前全块行）。手算与账本逐项对账。
+    """
+    from simverse.lowering.memory import transient_allocations
+    m = _qwen36()
+    d = _draft()
+    B, blk, e_n, tp = 2, 16, 3.0, 8
+    h = m.hidden
+    a0 = d.layers[0].attn
+    kv_rank = a0.kv_heads // tp        # 8/8 = 1
+    allocs = transient_allocations(m, d, Q8, Q8, B, 32768, tp, blk, e_n,
+                                   m.vocab // tp)
+    draft = next(a for a in allocs if a.alloc_id == "t-draft-buffers")
+    n_feat = len(d.target_layer_ids)
+    normed = int(B * e_n * h * 1)
+    fused_out = int(B * e_n * 6 * 2 * kv_rank * a0.head_dim * 1)
+    noise = int(B * blk * h * 1)
+    fc_in = int(B * e_n * 8 * h * 1)
+    logits = int(B * blk * (m.vocab // tp) * 4)
+    assert draft.bytes == noise + fc_in + normed + fused_out + logits
+    aux = next(a for a in allocs if a.alloc_id == "t-verify-aux-hidden")
+    assert aux.lifecycle == "phase:verify"
+    assert aux.bytes == int(B * blk * n_feat * h * 1)
+    cross = next(a for a in allocs if a.lifecycle == "cross-round")
+    assert cross.bytes == int(B * e_n * n_feat * h * 1)   # [:produced] 前缀
 
 
 def test_unknown_components_block_feasible():

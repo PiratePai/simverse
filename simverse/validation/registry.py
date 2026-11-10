@@ -131,6 +131,26 @@ _PINNED_ASSETS = [
       "（ba_proj disable_tp 等）未入配方，BF16 路径为准",
       "tp×ep 独立组合（ep∉{1,tp}）无实现配方，显式拒绝"],
      False),
+    ("ev-vllm-logits-ctxkv-billing", "source-checked",
+     "vLLM lm_head logits 集合通信与 DFlash ctx KV 二次读/融合驻留缓冲（"
+     "R01/R02a 二轮审计补漏）：LogitsProcessor._get_logits 在 lm_head."
+     "tp_size>1 时每次 lm_head 调用 gather logits（all-gather 或 gather-"
+     "to-rank0，logits_processor.py L90-91/122-133/185-198；qwen3_5.py "
+     "L345/428、qwen3_dflash.py L920-935 草稿同路径）；DFlash 草稿 ctx "
+     "行经 k_proj/v_proj 第二次 GEMM（dflash model.py L384-391），vLLM "
+     "把全层 K/V 行 torch.cat 成 _fused_kv_weight 驻留副本（qwen3_dflash.py "
+     "L529-530/541-568/617-698，BF16 未量化路径）",
+     "identity/vllm_qwen35_pin/manifest.json",
+     "vllm-project/vllm @dc74b8cbbbe3dbb9399fe369757d63defd614cc2（同 "
+     "ev-vllm-parallel-recipe pin；logits_processor.py 二轮补入，SHA256 "
+     "e1fac869aef80f6c398b92d61444186d1921740dab7df41b95a260b08b4c25d2）",
+     "R01 logits_gather 通信计费（decode/verify/草稿候选各一次）；"
+     "R02a 草稿 fused ctx-KV 驻留对象与 ctx_kv_proj/draft_lm_head 二次"
+     "读流量",
+     ["gather 平台分支（all-gather vs rank0-gather）按同一每 rank 字节"
+      "上界建模，延迟按单向环 (tp−1) 段近似；MXFP8 ctx 投影分支未建模"
+      "（场景无该精度档）；源码阅读非执行验证"],
+     False),
     ("ev-h200-tiny-distill", "measured",
      "H200 实测 profile 蒸馏集（Qwen3-30B-A3B-tiny 复制品采集：linear 6 算子 ×387 "
      "token 网格 + decode 注意力 5184 点，CUDA_EVENT median；环境 H200/driver 570.124.06/"

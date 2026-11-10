@@ -14,6 +14,10 @@ MTP 首层模板、chain 合成草稿仍是研究估计；MTP 现标 unverified�
 2026-11-10 A 组轮（R01–R03b）：TP/EP per-rank 统一配方 + 同卡对象身份
 账本 + 生命周期峰值 + 预算契约与四态判定全部落地（详见
 [validation/agroup-tp-ep-colocated-20261110.md](validation/agroup-tp-ep-colocated-20261110.md)）。
+同日**二轮审计**（[报告](validation/agroup-lmhead-ctxkv-audit-20261110.md)）：
+逐文件复核 pin 源码后修复 4 处漏计——lm_head logits 集合通信
+（logits_gather，decode/verify/草稿各 1 次）、DFlash 草稿 lm_head/ctx KV
+二次读流量、vLLM `_fused_kv_weight` 驻留副本入账本；判定链路不变。
 
 ## 已实现，但不等于真实部署已验证
 
@@ -21,8 +25,8 @@ MTP 首层模板、chain 合成草稿仍是研究估计；MTP 现标 unverified�
 |---|---|
 | 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 部分结构，Engram/CSA2/MoE/量化缺口；四栏证据见 JSON |
 | Qwen3.6+DFlash | pinned 草稿、接受律、draft/verify 解析成本、同卡与 DT 串行；非实测收益；CPU/GPU 未执行 |
-| **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head）；ep∉{1,tp} 显式拒绝 |
-| **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
+| **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
+| **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
 | **预算契约与判定（R03a/b）** | nominal/allocatable(measured/hypothesis)/额外开销分列；四态判定 unknown/oom/feasible/conditional；已知下界超标称即 OOM；假设预算不进实际部署排名 |
 | mHC | 已有源码边界映射和计数测试；Sinkhorn 操作数仍近似 |
 | DT 流水事件核 | 微批依赖、资源互斥、周期和利用率；非完整在线服务 |
@@ -64,9 +68,14 @@ MTP 首层模板、chain 合成草稿仍是研究估计；MTP 现标 unverified�
   "每层 2 次"（旧代码漏计 40×）。
 - **判定链路（R03b）**：M06 指标携带 known_peak/steady/峰值完整性；
   假设预算 → feasible-conditional 且不参与排名。
+- **二轮审计补漏（同日晚）**：lm_head logits_gather 通信（此前
+  draft.py 注释声称"另计"但未实现）、草稿 lm_head/ctx KV 二次读流量、
+  `_fused_kv_weight` 融合驻留副本、ctx 归一副本/融合输出/aux hidden 三件
+  结构化临时；4 新增独立手算 oracle（见二轮报告 §1/§3）。
 
-默认 ScenarioV2 的同卡 per-rank 稳态账本为 2,827,423,168 B（steady）+
-2,135,746 B（结构化临时峰值）= 2,829,558,914 B（known_peak，TP8/EP1、
-B1 ctx32k、W8A8+FP4 专家）；这不是用户所有场景的峰值，且不完整
+默认 ScenarioV2 的同卡 per-rank 稳态账本（二轮审计后）为
+2,830,651,584 B（steady）+ 752,704 B（结构化临时峰值）=
+2,831,404,288 B（known_peak，TP8/EP1、B1 ctx32k、W8A8+FP4 专家）；
+这不是用户所有场景的峰值，且不完整
 （workspace/graph/NCCL 池未计、非 0），不能据此证明可部署，也未超
 80GB 标称不构成 OOM。可分配预算（G-D7）与运行时池证据仍是阻塞项。

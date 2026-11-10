@@ -4,6 +4,8 @@
 > 审查修复了 shared gate、V4.1 o_a/memory 单位与草稿 B>1 口径。当前状态以
 > [两模型审查记录](two-model-forward-merge-gate-20261110.md) 与合入门禁为准，
 > 本报告数值不自动继承。
+> **同日二轮审计**（lm_head logits 通信/草稿二次读/fused 副本四项漏计修复）
+> 见 [A 组二轮审计报告](agroup-lmhead-ctxkv-audit-20261110.md)。
 
 日期：2026-11-10。本轮交付 ROADMAP A 组五项的工程实现与验证。本文是合入
 说明的证据入口；实现细节见 `simverse/lowering/parallel.py`（配方判定）与
