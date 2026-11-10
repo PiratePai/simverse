@@ -173,6 +173,10 @@ V2_DEFAULT_SCENARIO = {
     "schema_version": "0.2", "name": "cli-default",
     "model_id": "qwen36_35b_a3b", "draft_id": "dflash_qwen36_35b_a3b",
     "method_id": "dflash_v1", "k": 15, "block_size": 16,
+    # ctx-KV 执行路径是显式配方：活跃草稿 config 无 quantization_config +
+    # GPU UnquantizedLinearMethod（pinned qwen3_dflash.py L108-113）。
+    # dense_w=8 只是计价位宽，不能据此推断该路径。
+    "draft_ctx_kv_path": "fused_raw",
     "deployment": {"mode": "colocated", "target_device": "h100_sxm",
                    "target_tp": 8, "draft_device": "l40", "draft_tp": 1},
     "workload": {"batch": 1, "ctx_tokens": 32768},

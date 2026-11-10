@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-10（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录；同日 A 组二轮审计补漏见下）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（分支 `codex/forward-merge-gate`；远端公开仓库 `PiratePai/simverse`，候选分支已推送、PR [#1](https://github.com/PiratePai/simverse/pull/1) 已建；main 保护规则未配置）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-10 A 组二轮审计后本地全量 exit 0：201 passed，6.15s；此前 hermetic 修复后为 196 passed + 1 条既有 Windows 子进程 UTF-8 解码警告、编码修复后 197）。
-**pytest 收集数：201**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-10；197→201 为 A 组二轮审计新增 4 项：logits_gather 手算 oracle、草稿二次读流量手算、fused ctx-KV 未量化路径、ctx/aux 结构化临时）。
+更新：2026-11-11（两模型 forward/合入门禁轮；早前 A 组/校准段落保留为历史记录；A 组二轮审计、ctx-KV 路径修正与 k_norm dtype 复核修正见下）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（候选分支 `codex/dflash-ctx-kv-path-fix`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-11 外层 Codex 在 k_norm dtype 修正后全量 **212 passed**，exit 0；更早历史：A 组二轮 201 passed，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：212**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-11；201→212 为 ctx-KV 路径修正新增 11 项；复核轮只改测试断言/名称，收集数不变）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -15,14 +15,39 @@
 `logits_gather`（每 rank (tp−1)/tp×T×V×act 字节，单向环 (tp−1) 段延迟）；
 ② DFlash 草稿 `draft_lm_head` weight_read 原 0（dflash model.py L260/L599-601
 每轮独立 GEMM）→ 补 h×(V/tp)×b_w；③ `ctx_kv_proj` 二次读（L384-387 k_ctx/
-k_noise 两次 GEMM）→ 补 2×h×kvh_rank×d×b_w；④ vLLM `_fused_kv_weight`
-全层 K/V 行 cat 驻留副本（qwen3_dflash.py L541-568，未量化路径）入 R02a 账本
-（4bit 量化走逐层回退，无副本）。结构化临时补 ctx 归一副本/融合 ctx-KV 输出
+k_noise 两次 GEMM）→ 补按路径计的权重读；④ vLLM `_fused_kv_weight`
+全层 K/V 行 cat 驻留副本（qwen3_dflash.py L541-568）入 R02a 账本
+（仅显式 `fused_raw` 路径）。结构化临时补 ctx 归一副本/ctx 投影输出
 （phase:draft）与 verify aux hidden（phase:verify）；M06 formula_ref 修正为
 `v2.capacity`。默认场景前后归因见
 [A 组二轮审计报告](validation/agroup-lmhead-ctxkv-audit-20261110.md)（M01
 baseline 112.2127→112.9161ms 等 8 项逐项归因；同卡 memory status 仍 unknown，
 两缺口不变）。
+
+**A 组三轮 ctx-KV 路径修正（2026-11-11，R01/R02a）**：外层验收前修正两处
+确认缺陷。① `draft_extra_allocations` 原以 `dense_w≥8` 推断
+`UnquantizedLinearMethod`/`_fused_kv_weight` 副本——错误；pinned
+qwen3_dflash.py L108-113/529-568/679-697 的分支由 quant_method/平台决定，
+默认 dense_w=8 只是 fp8 计价档。现新增显式 `draft_ctx_kv_path`
+（`fused_raw` / `mxfp8_context_proj` / `per_layer_fallback`）：raw 才建
+融合 cat 副本，MXFP8 建独立 `_context_kv_proj`（packed 8bit 下界，
+block-scale 未入 pin→unknown），回退无副本；`_k_norm_weights` 的 L×d
+堆叠在三条路径都单列（4bit 回退此前漏计）。② `ctx_kv_proj` 对回退路径
+原只计 K/V；pinned L688-697 回退执行完整 qkv_proj 再切 Q。TP8/B1/E[N]=3/
+h2048/Q4 头 per rank/KV1/d128 时每层逻辑 FLOPs 由 3,145,728 修正为
+**9,437,184**，权重读含 Q 行；回退临时缓冲补逐层完整 qkv（含 Q）暂存。
+`draft_ctx_kv_path` 为场景显式输入，缺失/非法/`4bit+fused_raw` 均拒绝，
+不由位宽猜分支。默认场景（活跃草稿 config 无 `quantization_config` +
+GPU）显式取 `fused_raw`；这是**研究假设/场景配方**（config source-checked、
+未执行），不证明实际 vLLM 以 8bit unquantized 部署，`dense_w=8` 只是
+计价位宽。对象拆为 `draft-w-dflash-fused-ctx-kv` 与
+`draft-w-dflash-k-norm-stack`。
+**复核修正**：k_norm stack 改用 `DraftIR.dtype_hint`（config
+`dtype=bfloat16`→2B/elem，6×128×2=1,536 B），与 `dense_w` 4/8/16 无关；
+dtype 缺失/不支持显式拒绝，不回退位宽。默认 steady/known 因此各 +768 B。
+独立手算/负例见 `tests/test_draft_ctx_kv_paths.py`（11 项），报告
+§6 见 [A 组二轮审计报告](validation/agroup-lmhead-ctxkv-audit-20261110.md)。
+外层 Codex 已全量验收：212 passed，exit 0；远端 CI 以候选 PR 检查为准。
 
 **CI hermetic 修复（2026-11-10）**：`tests/test_consistency.py` 两项验收不再读取
 被 `.gitignore` 忽略的 `outputs/run_v41.json`。CSV 导出改为复核本次 `run` 新落盘的
@@ -67,16 +92,18 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   attention memory 的 `b_dense` 单位（BF16 曾少 2×）；Qwen3.6 shared gate 在
   IR/work/memory 计入；DFlash/MTP/chain 草稿 B>1 token 维乘一次；证据引用按
   model/draft/profile 生成；source_map 行号/未核状态校正。
-- **当前数值**：默认 Qwen3.6+DFlash 稳态
-  2,827,505,088 B（shared gate +81,920 B），known_peak 2,828,236,096 B，仍不完整；
+- **当前数值**：CLI 内置默认 Qwen3.6+DFlash（显式 `draft_ctx_kv_path=fused_raw`，α0.72、blk16）稳态
+  2,830,652,352 B（shared gate +81,920 B；含 fused ctx-KV 3,145,728 B 与
+  k_norm 堆叠 1,536 B），known_peak 2,832,959,265 B，仍不完整；
+  审计对照场景（α0.75、blk5）的 known_peak 为 2,831,405,056 B；
   V4.1 o_a TP1 每层 67,108,864 FLOPs/容量 B，40 层约 +2.35 GFLOP/token
   +2.52 GB(BF16)。详细归因/来源见
-  [两模型审查记录](validation/two-model-forward-merge-gate-20261110.md)。
+  [两模型审查记录](validation/two-model-forward-merge-gate-20261110.md)；
+  ctx-KV 路径修正见 [A 组二轮审计 §6](validation/agroup-lmhead-ctxkv-audit-20261110.md)。
 - **合入门禁**：G1–G17；`.github/workflows/merge-gate.yml` 覆盖
-  PR/push/merge_group，Windows + Node 20 + Python 3.12。required check/PR review
-  仍需仓库 ruleset 启用；2026-11-10 只读查询：仓库已公开（`isPrivate=false`），
-  main branch protection 返回 404 `Branch not protected`，rulesets 为空，
-  保护规则尚未配置。
+  PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 只读查询：
+  main branch protection 已要求 `pytest (Windows, Python 3.12)`、1 位
+  approving review，且 `enforce_admins=true`；本候选必须经 PR 门禁合入。
 - **未完成**：V4.1 Engram/CSA2/MoE 源码与执行、Qwen3.6 MTP 原生 forward、
   两款主模型 CPU/GPU 实测、DFlash 服务端集成与运行时池尺寸、真实可分配预算。
 
@@ -348,11 +375,11 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 6. **历史归档**：30B/235B/Next/V3 与 tiny fixture 只可显式注入归档目录；
    `h200_calib_*` 场景标 archived。Qwen3.8 本地身份仍 PENDING_ASSET。
 7. pi-viewer 适配器（V09b）：未建；数据通道经蒸馏已通（无需写旧仓）。
-8. 远端 required check/PR review：未配置。历史事实：私有仓库时期（2026-11-10
+8. 远端 required check/PR review：2026-11-11 已配置。历史事实：私有仓库时期（2026-11-10
    修复前）只读查询 main branch protection 与 rulesets 均返回 HTTP 403
    （需 GitHub Pro 或转为公开）。仓库现已公开；同日复查询返回 404
-   `Branch not protected`、rulesets 为空，故强制检查仍未启用。PR #1 已建，
-   其现有检查是修复前失败记录；工作流文件仅提供自动检查，不能强制阻止合入。
+   `Branch not protected`、rulesets 为空，当时强制检查尚未启用。现在 main
+   branch protection 要求 Windows pytest 和 1 位 approving review，并对管理员生效。
 9. 移动端像素观感：截图存证但本会话通道无法目检；`tmp_path` 用例在本机
    DSH 沙箱目录权限下未能完成（setup PermissionError）。历史事实：hermetic
    修复前外层本地 `196 passed` 因复用 ignored `outputs/run_v41.json`，不代表

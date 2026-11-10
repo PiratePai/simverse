@@ -38,10 +38,11 @@ def _draft():
     return build_catalog()["drafts"]["dflash_qwen36_35b_a3b"]
 
 
-def _colocated(tp=8, batch=1, ctx=32768, ep=1, rank=0, blk=16, en=3.5):
+def _colocated(tp=8, batch=1, ctx=32768, ep=1, rank=0, blk=16, en=3.5,
+               path="fused_raw"):
     return colocated_rank_memory(_qwen36(), _draft(), Q_T, Q8, tp, batch, ctx,
                                  _budget(), ep=ep, rank=rank, block_size=blk,
-                                 e_produced=en)
+                                 e_produced=en, draft_ctx_kv_path=path)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ def test_no_phantom_draft_head_weights():
     final_norm = h * 1
     fc_norms_mask = 8 * h * h + 2 * h + h        # fc + hidden_norm/norm + mask
     fused_ctx_kv = (6 * 2 * (a0.kv_heads // 8) * a0.head_dim * h
-                    + 6 * a0.head_dim) * 1
+                    + 6 * a0.head_dim * 2) * 1
     expect = layers_b + fc_norms_mask + fused_ctx_kv + final_norm
     assert draft_w == expect
 
@@ -142,7 +143,7 @@ def test_independent_hand_oracle_steady_bytes():
           + (32 // 8) * 128 * h                    # o
           + 3 * h * (6144 // 8)                    # MLP inter/tp
           + 2 * 128)                               # q/k norm
-    fused_ctx_kv = (6 * 2 * 1 * 128 * h + 6 * 128) * 1
+    fused_ctx_kv = (6 * 2 * 1 * 128 * h + 6 * 128 * 2) * 1
     draft_w = 6 * dl + (8 * h * h + 2 * h + h) + fused_ctx_kv + h
     dkv = 6 * 2 * 1 * 128 * 32768 * 1
     expect = target_w + kv + state + draft_w + dkv
@@ -215,24 +216,44 @@ def test_peak_takes_phase_max_not_sum():
     assert rm.known_peak_bytes() == 1350
 
 
-def test_fused_ctx_kv_buffer_unquantized_only():
-    """fused ctx-KV 驻留副本只在未量化路径存在（qwen3_dflash.py L529-568：
-    全层 qkv MXFP8 → ReplicatedLinear；GPU 未量化 → torch.cat 副本；
-    否则逐层回退无副本）。独立手算字节数与 TP 无关的 k_norm 堆叠。"""
+def test_fused_ctx_kv_path_and_k_norm_stack():
+    """ctx-KV 常驻对象按**显式路径**分列（qwen3_dflash.py L108-113/529-568）：
+    raw 融合副本 / MXFP8 独立投影 / 逐层回退；k_norm 堆叠三条路径都建立。
+    独立手算字节数，且 dense_w 本身不选择分支。"""
     d = _draft()
     a0 = d.layers[0].attn
     h = 2048
     for tp in (1, 2, 8):
         kv_rank = a0.kv_heads // tp if a0.kv_heads >= tp else a0.kv_heads
-        bf16 = {"dense_w": 8}
-        allocs = draft_extra_allocations(d, bf16, tp)
-        fused = [a for a in allocs if "fused-ctx-kv" in a.alloc_id]
+        # raw：_fused_kv_weight 新 cat 副本；k_norm 恒有
+        raw = draft_extra_allocations(d, {"dense_w": 8}, tp,
+                                      ctx_kv_path="fused_raw")
+        fused = [a for a in raw if "fused-ctx-kv" in a.alloc_id]
         assert len(fused) == 1
-        assert fused[0].bytes == int(
-            (6 * 2 * kv_rank * a0.head_dim * h + 6 * a0.head_dim) * 1)
-        # 4bit（量化）→ 逐层回退路径：无融合副本（读流量不变，另在 count 计）
-        allocs_q = draft_extra_allocations(d, {"dense_w": 4}, tp)
-        assert not any("fused-ctx-kv" in a.alloc_id for a in allocs_q)
+        assert fused[0].bytes == int(6 * 2 * kv_rank * a0.head_dim * h * 1)
+        kn = [a for a in raw if "k-norm-stack" in a.alloc_id]
+        assert len(kn) == 1 and kn[0].bytes == int(6 * a0.head_dim * 2)
+        # 4bit 回退：无融合副本，但 k_norm 堆叠仍在（此前漏计）；
+        # k_norm 是 BF16 参数，不随 dense_w=4 变成 0.5B/elem
+        q4 = draft_extra_allocations(d, {"dense_w": 4}, tp,
+                                     ctx_kv_path="per_layer_fallback")
+        assert not any("fused-ctx-kv" in a.alloc_id for a in q4)
+        assert not any("mxfp8-ctx-kv" in a.alloc_id for a in q4)
+        kn4 = [a for a in q4 if "k-norm-stack" in a.alloc_id]
+        assert len(kn4) == 1 and kn4[0].bytes == int(6 * a0.head_dim * 2)
+        assert "dtype_hint=bfloat16" in kn4[0].live_note
+        # MXFP8：独立 _context_kv_proj（另一物理对象），不是 raw 副本
+        mx = draft_extra_allocations(d, {"dense_w": 8}, tp,
+                                     ctx_kv_path="mxfp8_context_proj")
+        mxp = [a for a in mx if "mxfp8-ctx-kv" in a.alloc_id]
+        assert len(mxp) == 1
+        assert mxp[0].bytes == int(6 * 2 * kv_rank * a0.head_dim * h * 1)
+        assert "block-scale" in mxp[0].live_note
+        assert not any("fused-ctx-kv" in a.alloc_id for a in mx)
+        assert any("k-norm-stack" in a.alloc_id for a in mx)
+        # 未提供路径 → 显式拒绝（不按 dense_w 猜）
+        with pytest.raises(ValueError, match="路径未知"):
+            draft_extra_allocations(d, {"dense_w": 8}, tp)
 
 
 def test_transient_ctx_and_aux_hidden():
@@ -251,7 +272,7 @@ def test_transient_ctx_and_aux_hidden():
     a0 = d.layers[0].attn
     kv_rank = a0.kv_heads // tp        # 8/8 = 1
     allocs = transient_allocations(m, d, Q8, Q8, B, 32768, tp, blk, e_n,
-                                   m.vocab // tp)
+                                   m.vocab // tp, ctx_kv_path="fused_raw")
     draft = next(a for a in allocs if a.alloc_id == "t-draft-buffers")
     n_feat = len(d.target_layer_ids)
     normed = int(B * e_n * h * 1)

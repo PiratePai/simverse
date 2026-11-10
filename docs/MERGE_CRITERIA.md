@@ -124,7 +124,7 @@
 **工作流文件不能强制审查或 required check**：仓库管理员必须在
 ruleset/branch protection 中把该 job 的 check 设为 required，并启用
 “Require a pull request before merging / required approvals”。
-参考 GitHub 官方文档（2026-11-10 查阅，未在远端配置）：
+参考 GitHub 官方文档（2026-11-10 查阅；当时未在远端配置）：
 [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)、
 [branch protection rule](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule)、
 [rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)、
@@ -132,7 +132,8 @@ ruleset/branch protection 中把该 job 的 check 设为 required，并启用
 历史（2026-11-10 门禁轮记录时）：未推送、未配置远端保护。私有仓库时期
 外层 Codex 只读查询 main branch protection 与 rulesets API，均得到 HTTP 403：
 `Upgrade to GitHub Pro or make this repository public to enable this feature.`
-当前（2026-11-10 文档收口时）：仓库已公开，候选分支已推送并建 PR #1；
+当时（2026-11-10 文档收口时）：仓库已公开，候选分支已推送并建 PR #1；
 main branch protection 查询返回 404 `Branch not protected`，rulesets 为空。
-保护规则仍未配置，不能把本工作流视为 GitHub 强制 required check/PR review；
-合入审查按本文件与本地/CI 结果执行，远端强制能力待仓库管理员配置后再核。
+2026-11-11 只读复核：main branch protection 已启用 required
+`pytest (Windows, Python 3.12)`、1 位 approving review、`enforce_admins=true`。
+本轮必须经 PR 的远端检查和独立审批后合入；旧记录保留为历史状态。

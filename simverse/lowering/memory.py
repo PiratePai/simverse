@@ -29,6 +29,9 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from ..model_ir.schema import ModelIR
+from ..draft_quant import (FUSED_RAW, MXFP8_CONTEXT_PROJ, PER_LAYER_FALLBACK,
+                           dtype_bytes, path_unknown_components,
+                           require_ctx_kv_path)
 
 # R02b：无尺寸证据的运行时保留内存（不填 0；峰值完整性标志）
 UNKNOWN_RUNTIME_COMPONENTS = (
@@ -412,23 +415,32 @@ def _as_model(draft_ir) -> ModelIR:
     return ModelIR(
         id=draft_ir.id, label=draft_ir.label, family="gqa", hidden=draft_ir.hidden,
         vocab=draft_ir.vocab, layers=list(draft_ir.layers),
-        source=draft_ir.source, tie_embeddings=False)
+        source=draft_ir.source, tie_embeddings=False,
+        dtype_hint=getattr(draft_ir, "dtype_hint", ""))
 
 
 def draft_extra_allocations(draft_ir, quant: dict, tp: int,
-                            role: str = "draft") -> List[Allocation]:
+                            role: str = "draft",
+                            ctx_kv_path: str = "unknown") -> List[Allocation]:
     """DFlash 草稿的块扩散专用对象（层权重另由 target_weight_allocations 计）。
 
     fc：ReplicatedLinear(len(layer_ids)·h → h)，每 rank 复制；
     hidden_norm/norm：h 复制；mask_embedding：h（vLLM 默认 0 张量占位，
     读取 mask_token_id 行时由共享 embedding 提供，此处计占位）。
-    fused ctx-KV 权重副本（2026-11-10 二轮审计补漏）：vLLM 集成把全部
-    草稿层 qkv 权重的 K/V 行 torch.cat 成 _fused_kv_weight 新驻留副本
-    （qwen3_dflash.py L541-568，非视图 cat；k_norm 权重另堆叠 L×d），
-    供上下文行融合 GEMM。未量化（dense_w≥8bit，UnquantizedLinearMethod
-    → _reads_raw_weights True）路径才有；4bit 量化走逐层回退（无副本，
-    读流量不变，见 count/draft.ctx_kv_proj）。
+
+    ctx-KV 路径（显式 `ctx_kv_path`；dense_w 只是计价位宽，不能据此推断）：
+      * fused_raw：`_fused_kv_weight` 全层 K/V 行 `torch.cat` **新驻留副本**
+        （qwen3_dflash.py L541-568，非视图；仅 UnquantizedLinearMethod +
+        非 CPU 的 `_reads_raw_weights` 路径建立）；
+      * mxfp8_context_proj：独立 `_context_kv_proj` ReplicatedLinear，仅装
+        K/V 行（L529-531/L570-597）。MXFP8 打包权重按 1B/elem 计下界；
+        block-scale 存储布局未入 pin，缺口由调用方传播；
+      * per_layer_fallback：逐层 `qkv_proj` 回退（L688-697），**无**融合/
+        独立投影副本；
+      * `_k_norm_weights` 的 L×d `torch.stack` 在**所有**路径建立
+        （L565-568），单列为常驻对象。
     """
+    path = require_ctx_kv_path(ctx_kv_path)
     b_w = quant["dense_w"] / 8
     h = draft_ir.hidden
     fc_b = int(draft_ir.fc_in * h * b_w)
@@ -438,38 +450,61 @@ def draft_extra_allocations(draft_ir, quant: dict, tp: int,
         f"{role}-w-dflash-fc-norms", "weights", role, fc_b + norms_b + mask_b,
         live_note=f"fc(replicated {draft_ir.fc_in}→{h}) + hidden_norm/norm "
                   f"+ mask_embedding 占位（不随 TP{tp} 缩放）")]
-    if quant["dense_w"] >= 8:
-        fused_kv_elems = 0
-        k_norm_elems = 0
-        for layer in draft_ir.layers:
-            a = layer.attn
-            if a is None:
-                continue
-            kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
-            fused_kv_elems += 2 * kv_rank * a.head_dim
-            k_norm_elems += a.head_dim
-        if fused_kv_elems:
-            allocs.append(Allocation(
-                f"{role}-w-dflash-fused-ctx-kv", "weights", role,
-                int((fused_kv_elems * h + k_norm_elems) * b_w),
-                live_note=f"_fused_kv_weight 全层 K/V 行 cat 副本 + k_norm 堆叠"
-                          f"（{fused_kv_elems}×{h}+{k_norm_elems} elem，"
-                          f"TP{tp} per-rank 分片口径；未量化路径）"))
+    fused_kv_elems = 0
+    k_norm_elems = 0
+    for layer in draft_ir.layers:
+        a = layer.attn
+        if a is None:
+            continue
+        kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
+        fused_kv_elems += 2 * kv_rank * a.head_dim
+        k_norm_elems += a.head_dim
+    if k_norm_elems:
+        # k_norm 是 RMSNorm 参数：weight 在模型初始化 dtype 下创建
+        # （pinned layernorm.py L42-58 + base_loader.py L68-85），
+        # torch.stack 继承该 dtype；不能用 quant.dense_w 计。
+        b_norm = dtype_bytes(draft_ir.dtype_hint)
+        allocs.append(Allocation(
+            f"{role}-w-dflash-k-norm-stack", "weights", role,
+            int(k_norm_elems * b_norm),
+            live_note=f"_k_norm_weights L×d={k_norm_elems} elem torch.stack"
+                      f"（所有路径建立；dtype_hint={draft_ir.dtype_hint}→"
+                      f"{b_norm}B/elem，与 dense_w 计价位宽分离）"))
+    if path == FUSED_RAW and fused_kv_elems:
+        allocs.append(Allocation(
+            f"{role}-w-dflash-fused-ctx-kv", "weights", role,
+            int(fused_kv_elems * h * b_w),
+            live_note=f"_fused_kv_weight 全层 K/V 行 cat 副本："
+                      f"{fused_kv_elems}×{h} elem（TP{tp} per-rank；"
+                      f"raw/Unquantized 路径，计价位宽 b_w={b_w:g}B/elem）"))
+    elif path == MXFP8_CONTEXT_PROJ and fused_kv_elems:
+        allocs.append(Allocation(
+            f"{role}-w-dflash-mxfp8-ctx-kv", "weights", role,
+            int(fused_kv_elems * h * 1.0),
+            live_note=f"_context_kv_proj 独立 MXFP8 投影："
+                      f"{fused_kv_elems}×{h} elem（TP{tp} per-rank；"
+                      f"packed 8bit 权重下界，block-scale 字节未入 pin）"))
+    # per_layer_fallback：逐层回退不产生额外常驻副本（读流量差异在
+    # count/draft.ctx_kv_proj 计）；k_norm 堆叠已在上面单列。
     return allocs
 
 
 def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
                           batch: int, ctx: int, tp: int, block_size: int,
                           e_produced: float,
-                          target_vocab_per_rank: int) -> List[Allocation]:
+                          target_vocab_per_rank: int,
+                          ctx_kv_path: str = "unknown") -> List[Allocation]:
     """结构化临时缓冲（R02b；尺寸来自 pinned 形状，非运行时测量）。
 
     phase:draft（草稿前向，一轮内与 verify 串行）：
       * noise embedding 行 B·blk·h（act 精度）；
       * fc 输入拼接 B·E[N]·8h（act 精度）；
-      * ctx 归一化副本 B·E[N]·h + 融合 ctx-KV GEMM 输出
-        B·E[N]·L·2·kvh_rank·d（qwen3_dflash.py L665 empty_like + L680
-        F.linear 输出，2026-11-10 二轮审计补齐）；
+      * ctx 归一化副本 B·E[N]·h；ctx 投影输出按显式路径：
+          - fused_raw / mxfp8_context_proj：B·E[N]·L·2·kvh_rank·d
+            （qwen3_dflash.py L680/L685 的一次输出）；
+          - per_layer_fallback：逐层**完整** qkv 输出
+            B·E[N]·L·(q_rank+2·kvh_rank)·d（Q 随后被切掉但仍形成缓冲）
+            + stack 后的 KV 副本 B·E[N]·L·2·kvh_rank·d（L688-697）；
       * 草稿 logits B·blk·(V/tp)·4B（fp32，logits_processor 输出口径）。
     phase:verify（目标块验证）：
       * 目标 logits B·blk·(V/tp)·4B（fp32）；
@@ -481,18 +516,21 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
     kernel 内部激活工作集/workspace/graph/NCCL 池：无尺寸证据 →
     RankMemory.unknown_components（不计 0，峰值不完整标志）。
     """
+    path = require_ctx_kv_path(ctx_kv_path)
     b_a = quant["act"] / 8
     h = model.hidden
     blk = block_size
     allocs: List[Allocation] = []
-    # 草稿 KV per-rank 头数（kvh≥tp 切分；kvh<tp 复制）
+    # 草稿 KV/Q per-rank 头数（kvh≥tp 切分；kvh<tp 复制）
     kv_rank = 0
+    q_rank = 0
     d_head = 0
     if draft_ir is not None:
         for layer in draft_ir.layers:
             if layer.attn is not None:
                 a = layer.attn
                 kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
+                q_rank = a.heads // tp
                 d_head = a.head_dim
                 break
     draft_noise = int(batch * blk * h * b_a)
@@ -501,15 +539,24 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
     n_draft_layers = len(draft_ir.layers) if draft_ir is not None else 0
     fused_kv_out = int(batch * max(1.0, e_produced) * n_draft_layers
                        * 2 * kv_rank * d_head * b_a)
+    qkv_staging = 0
+    staging_note = "ctx投影输出为最终 K/V"
+    if path == PER_LAYER_FALLBACK:
+        # 逐层 qkv 输出（含 Q）在 stack 前全部存活；stack 后再产生 KV 副本。
+        qkv_staging = int(batch * max(1.0, e_produced) * n_draft_layers
+                          * (q_rank + 2 * kv_rank) * d_head * b_a)
+        staging_note = ("逐层完整 qkv 输出（含 Q，随后切掉）暂存 "
+                        f"{qkv_staging}B + stack 后 K/V {fused_kv_out}B")
     draft_logits = int(batch * blk * target_vocab_per_rank * 4)
     allocs.append(Allocation(
         "t-draft-buffers", "transient", "draft",
-        draft_noise + fc_in + normed_ctx + fused_kv_out + draft_logits,
+        draft_noise + fc_in + normed_ctx + qkv_staging + fused_kv_out
+        + draft_logits,
         lifecycle="phase:draft",
         live_note=f"noise {draft_noise}B + fc输入 {fc_in}B + ctx归一副本 "
-                  f"{normed_ctx}B + 融合ctxKV输出 {fused_kv_out}B + "
+                  f"{normed_ctx}B + {staging_note} + "
                   f"logits(fp32) {draft_logits}B"
-                  f"（B={batch} blk={blk} E[N]={e_produced:.2f}）"))
+                  f"（B={batch} blk={blk} E[N]={e_produced:.2f} path={path}）"))
     verify_logits = int(batch * blk * target_vocab_per_rank * 4)
     allocs.append(Allocation(
         "t-verify-buffers", "transient", "target",
@@ -537,15 +584,19 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                           draft_batch: Optional[int] = None, ep: int = 1,
                           rank: int = 0, block_size: int = 0,
                           e_produced: float = 0.0,
-                          with_transients: bool = True) -> RankMemory:
+                          with_transients: bool = True,
+                          draft_ctx_kv_path: str = "unknown") -> RankMemory:
     """同卡混部 per-rank 账本（R02a/R02b）。
 
     草稿与 target 同 TP 组（vLLM pin）；embed/lm_head 为 target 的物理
     分片对象，草稿以 reference 行引用（零字节，consumer 登记），不再
     重复驻留。draft_batch：草稿批（默认 = target batch B；逐请求草稿）。
+    draft_ctx_kv_path：显式 ctx-KV 实现路径（draft_quant.py 枚举）；
+    未知时拒绝，不按 dense_w 猜分支。
     """
     if draft_batch is None:
         draft_batch = batch
+    path = None
     rank_mem = RankMemory(f"colocated-r{rank}", budget.device_id, budget)
     for a in target_weight_allocations(model, quant, tp, role="target",
                                        ep=ep, rank=rank):
@@ -555,6 +606,7 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
         a.consumers = ["target"]
         rank_mem.add(a)
     if draft_ir is not None:
+        path = require_ctx_kv_path(draft_ctx_kv_path)
         draft_q = dict(quant)
         draft_q.update(draft_quant or {})
         # 草稿层权重：同 tp 切分（gqa 家族路径）
@@ -573,7 +625,8 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                 continue
             a.consumers = ["draft"]
             rank_mem.add(a)
-        for a in draft_extra_allocations(draft_ir, draft_q, tp):
+        for a in draft_extra_allocations(draft_ir, draft_q, tp,
+                                         ctx_kv_path=path):
             a.consumers = ["draft"]
             rank_mem.add(a)
         for a in kv_allocations(_as_model(draft_ir), draft_q, draft_batch, ctx,
@@ -584,9 +637,12 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
             vocab_r = model.vocab // tp if model.vocab % tp == 0 else model.vocab
             for a in transient_allocations(model, draft_ir, quant, draft_quant,
                                            batch, ctx, tp, block_size,
-                                           e_produced, vocab_r):
+                                           e_produced, vocab_r,
+                                           ctx_kv_path=path):
                 rank_mem.add(a)
     # R02b：无证据运行时组件 → 峰值不完整（缺口传播，不填 0）
     if with_transients:
         rank_mem.unknown_components = list(UNKNOWN_RUNTIME_COMPONENTS)
+        if path is not None:
+            rank_mem.unknown_components.extend(path_unknown_components(path))
     return rank_mem

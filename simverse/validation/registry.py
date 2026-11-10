@@ -133,23 +133,41 @@ _PINNED_ASSETS = [
      False),
     ("ev-vllm-logits-ctxkv-billing", "source-checked",
      "vLLM lm_head logits 集合通信与 DFlash ctx KV 二次读/融合驻留缓冲（"
-     "R01/R02a 二轮审计补漏）：LogitsProcessor._get_logits 在 lm_head."
+     "R01/R02a）：LogitsProcessor._get_logits 在 lm_head."
      "tp_size>1 时每次 lm_head 调用 gather logits（all-gather 或 gather-"
      "to-rank0，logits_processor.py L90-91/122-133/185-198；qwen3_5.py "
      "L345/428、qwen3_dflash.py L920-935 草稿同路径）；DFlash 草稿 ctx "
-     "行经 k_proj/v_proj 第二次 GEMM（dflash model.py L384-391），vLLM "
-     "把全层 K/V 行 torch.cat 成 _fused_kv_weight 驻留副本（qwen3_dflash.py "
-     "L529-530/541-568/617-698，BF16 未量化路径）",
+     "行经 k_proj/v_proj 第二次 GEMM（dflash model.py L384-391）。"
+     "qwen3_dflash.py L108-113/529-531/541-568/617-698 三分支："
+     "raw 融合 cat 副本 / MXFP8 独立 _context_kv_proj / 逐层完整 qkv "
+     "回退后切 Q；k_norm 堆叠三路径均在",
      "identity/vllm_qwen35_pin/manifest.json",
      "vllm-project/vllm @dc74b8cbbbe3dbb9399fe369757d63defd614cc2（同 "
      "ev-vllm-parallel-recipe pin；logits_processor.py 二轮补入，SHA256 "
      "e1fac869aef80f6c398b92d61444186d1921740dab7df41b95a260b08b4c25d2）",
      "R01 logits_gather 通信计费（decode/verify/草稿候选各一次）；"
-     "R02a 草稿 fused ctx-KV 驻留对象与 ctx_kv_proj/draft_lm_head 二次"
-     "读流量",
+     "R02a 草稿 ctx-KV 路径的驻留对象与二次读流量（count/draft + "
+     "lowering/memory 同一显式 draft_ctx_kv_path）",
      ["gather 平台分支（all-gather vs rank0-gather）按同一每 rank 字节"
-      "上界建模，延迟按单向环 (tp−1) 段近似；MXFP8 ctx 投影分支未建模"
-      "（场景无该精度档）；源码阅读非执行验证"],
+      "上界建模，延迟按单向环 (tp−1) 段近似；ctx-KV 路径不由 dense_w "
+      "推断；MXFP8 block-scale 布局未入 pin（只计 packed 下界并传播 "
+      "unknown）；源码阅读非执行验证"],
+     False),
+    ("ev-vllm-dflash-norm-dtype", "source-checked",
+     "DFlash 草稿 RMSNorm 参数 dtype（k_norm 堆叠字节）：RMSNorm 未传 "
+     "dtype 时以 torch.get_default_dtype() 建 weight；vLLM "
+     "BaseModelLoader 在 set_default_torch_dtype(model_config.dtype) 内"
+     "初始化草稿，故 _k_norm_weights 继承草稿 config dtype=bfloat16，"
+     "6×128×2=1,536 B，与 draft_quant.dense_w 无关",
+     "identity/vllm_qwen35_pin/dflash_utils.py",
+     "vllm-project/vllm @dc74b8cbbbe3dbb9399fe369757d63defd614cc2："
+     "layers/layernorm.py L42-58；model_loader/base_loader.py L68-85"
+     "（两文件未入本地 pin，按固定 commit + 行号登记；qwen3_dflash.py "
+     "L288-289/565-568 已在 pin）",
+     "R02a k_norm 堆叠常驻字节（lowering/memory.draft_extra_allocations）；"
+     "DraftIR.dtype_hint 来源与未知 dtype 拒绝口径",
+     ["layernorm.py/base_loader.py 未入本地 pin，未执行；Python 默认 dtype "
+      "被调用方覆盖的运行期场景未建模；源码阅读非执行验证"],
      False),
     ("ev-h200-tiny-distill", "measured",
      "H200 实测 profile 蒸馏集（Qwen3-30B-A3B-tiny 复制品采集：linear 6 算子 ×387 "

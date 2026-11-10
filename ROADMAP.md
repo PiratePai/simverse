@@ -32,7 +32,7 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 | ID | 状态 | 交付与证据 |
 |---|---|---|
 | R01 | ✅ 完成 | per-rank TP/EP 统一配方（vLLM @dc74b8cb pin，`simverse/lowering/parallel.py` ParallelPlan；count/memory/lowering 三处共用）；跨 rank 守恒 + 独立手算 oracle + 非法组合拒绝（tests/test_parallel_sharding.py）；默认场景前后差异逐项归因（验证报告 §3）。**二轮审计（同日）**：补 lm_head logits_gather 集合通信（logits_processor.py 入 pin；decode/verify/草稿各 1 次）与草稿 lm_head/ctx KV 二次读流量（[二轮报告](docs/validation/agroup-lmhead-ctxkv-audit-20261110.md)） |
-| R02a | ✅ 完成 | 同卡对象身份：共享 embed/lm_head 单一物理对象 + consumer 引用（零字节），废除草稿幻影副本与失配去重键；草稿批=target 批；per-rank 账本含 EP 余数差异与最坏 rank（tests/test_colocated_memory.py）。**二轮审计**：vLLM `_fused_kv_weight` 全层 K/V 行 cat 驻留副本入账（未量化路径；4bit 走逐层回退无副本） |
+| R02a | ✅ 完成 | 同卡对象身份：共享 embed/lm_head 单一物理对象 + consumer 引用（零字节），废除草稿幻影副本与失配去重键；草稿批=target 批；per-rank 账本含 EP 余数差异与最坏 rank（tests/test_colocated_memory.py）。**二轮审计**：vLLM `_fused_kv_weight` 全层 K/V 行 cat 驻留副本入账。**三轮修正**：改为显式 `draft_ctx_kv_path`——仅 raw 建融合副本；MXFP8 独立对象；4bit 回退无副本但 k_norm 堆叠仍按草稿 dtype（bfloat16→1,536 B）计 |
 | R02b | ✅ 完成（结构化部分） | 生命周期分列：常驻/每请求/跨轮/阶段临时（draft/verify 串行取 max）；workspace/CUDA graph/NCCL 池作为 unknown_components 缺口传播（不填 0，峰值不完整 → 判定 unknown）。**二轮审计**：补 ctx 归一副本/融合 ctx-KV 输出（phase:draft）与 verify aux hidden（phase:verify）三件 pinned 形状临时。**限制**：临时缓冲只含 pinned 形状可推导项；运行时池尺寸无证据，完整运行时峰值未验证 |
 | R03a | ✅ 完成 | 预算输入契约（nominal/allocatable(kind: measured/hypothesis)/额外开销分列、gross 语义防重复扣除、缺省 unknown 不套标称）；场景身份包含 EP/budget；CLI/API/UI/导出一致（测试 + 浏览器实测） |
 | R03b | ✅ 完成（判定链路） | 四态判定 unknown/oom/feasible/feasible-conditional + 已知下界超标称即 OOM；假设预算仅条件结论且不进实际部署排名（compare 资格排除）；负例全覆盖（tests/test_budget_feasibility.py）。**实际可部署结论仍阻塞于真实预算证据（G-D7）与峰值完整性** |

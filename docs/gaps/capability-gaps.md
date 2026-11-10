@@ -111,8 +111,12 @@
 - **同日二轮审计补漏**（[报告](../validation/agroup-lmhead-ctxkv-audit-20261110.md)）：
   lm_head 词表行切后 logits_gather 集合通信（logits_processor.py L185-198
   入 pin）、DFlash 草稿 lm_head/ctx KV 二次读流量、vLLM `_fused_kv_weight`
-  驻留副本与三件结构化临时（ctx 归一副本/融合输出/aux hidden）入账本；
-  MXFP8 ctx 投影分支维持 uncovered 登记（场景无该精度档）。
+  驻留副本与三件结构化临时（ctx 归一副本/ctx 投影输出/aux hidden）入账本；
+  **三轮修正（同日，外层验收前）**：ctx-KV 改为显式
+  `draft_ctx_kv_path`（raw/MXFP8/逐层回退），回退按完整 qkv（含 Q）计数，
+  k_norm 堆叠三路径均计；**复核修正**：k_norm 按 `DraftIR.dtype_hint`
+  （config bfloat16→2B）计，与 `dense_w` 4/8/16 无关；MXFP8 的
+  block-scale 布局仍未入 pin，按 packed 下界 + unknown 缺口登记。
 - 验收：守恒测试 ×配方×tp∈{1,2,4,8} + EP 守恒 + 复制对象不求和 + 非法组合
   拒绝（tests/test_parallel_sharding.py；二轮后 21 项，含 logits_gather 与
   草稿二次读独立手算 oracle）；235B manifest defer 理由已

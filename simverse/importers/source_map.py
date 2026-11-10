@@ -276,28 +276,70 @@ ENTRIES: List[SourceMapEntry] = [
         entry_id="sm-vllm-dflash-ctx-kv-second-read",
         model_or_method="DFlash 草稿 ctx KV 投影的第二次权重读与融合驻留缓冲",
         semantic="草稿层 K/V 投影权重每轮被读两次：noise 块 token 走 qkv_proj，"
-                 "target_hidden 上下文行单独再投影（k_ctx/v_ctx）。vLLM 集成把"
-                 "全部草稿层的 K/V 行 torch.cat 成 _fused_kv_weight（新驻留"
-                 "副本，非视图）后一次融合 GEMM；量化（MXFP8）走独立 "
-                 "ReplicatedLinear _context_kv_proj；CPU/repacked 走逐层回退",
+                 "target_hidden 上下文行单独再投影。vLLM 集成三分支："
+                 "未量化 GPU 把全层 K/V 行 torch.cat 成 _fused_kv_weight"
+                 "（新驻留副本，非视图）后一次融合 GEMM；MXFP8 走独立 "
+                 "ReplicatedLinear _context_kv_proj（仅 K/V 行，量化打包）；"
+                 "其余量化/CPU repack 逐层执行**完整** qkv_proj 后切 Q。"
+                 "k_norm 权重堆叠在三条路径都存在",
         source_pin=VLLM_PARALLEL_PIN,
         source_location="dflash/model.py:384-391（k_ctx/k_noise 两次独立 "
                         "k_proj/v_proj 调用后 cat）、models/qwen3_dflash.py:"
-                        "529-530（_context_kv_proj 条件构造）、541-568"
-                        "（_build_context_kv_buffers：torch.cat → "
-                        "_fused_kv_weight/_k_norm_weights refill_derived）、"
-                        "617-698（_project_context_kv_token_major 三分支："
-                        "fused GEMM / MXFP8 / 逐层回退）",
-        branch_predicate="全层 qkv MXFP8 → _context_kv_proj；否则 GPU 上"
-                         " UnquantizedLinearMethod → _fused_kv_weight 副本；"
-                         "否则逐层回退（无额外驻留）",
-        thresholds="草稿 dense_w ≥8bit（未量化）→ 融合副本驻留；4bit → 回退",
-        input_domain="Qwen3.6 DFlash 草稿（6 层，kvh=8）TP{1,2,4,8}",
+                        "108-113（_reads_raw_weights）、529-531（MXFP8 条件 "
+                        "_context_kv_proj）、541-568（torch.cat → "
+                        "_fused_kv_weight；k_norm 恒 stack）、617-698"
+                        "（_project_context_kv_token_major 三分支）",
+        branch_predicate="显式 draft_ctx_kv_path：fused_raw ← GPU 且全层 "
+                         "UnquantizedLinearMethod；mxfp8_context_proj ← 全层 "
+                         "qkv 为 ModelOptMxFp8Config 且非未量化；"
+                         "per_layer_fallback ← 其余（量化打包/CPU repack）",
+        thresholds="不由 dense_w 推断：dense_w 是计价位宽，不决定 quant_method；"
+                   "路径缺失/未知显式拒绝；fused_raw 与 dense_w<8 在场景校验拒绝",
+        input_domain="Qwen3.6 DFlash 草稿（6 层，kvh=8）TP{1,2,4,8}；"
+                     "默认场景草稿 config 无 quantization_config → fused_raw",
         both_sides_covered=True,
-        uncovered_domain=["MXFP8 路径的 checkpoint 行重复装载细节未建模"
-                          "（本仓场景无 MXFP8 精度档）"],
-        note="R01/R02a 补漏（2026-11-10 二轮审计）：ctx_kv_proj 行 weight_read"
-             " 原为 0（漏二次读）；_fused_kv_weight 驻留副本原不在账本"),
+        uncovered_domain=["MXFP8 _context_kv_proj 的 block-scale 存储布局"
+                          "（modelopt.py 未入 pin）：权重/驻留只计 packed "
+                          "8bit 下界，scale 缺口显式传播",
+                          "量化 qkv 的 scale/zero 元数据与 CPU repack 细节未建模"],
+        note="R01/R02a 二轮补漏（ctx_kv_proj 二次读/fused 副本）；"
+             "三轮修正：回退按完整 qkv（含 Q）计 FLOPs/权重读/临时缓冲，"
+             "k_norm 堆叠三路径均计，路径改显式输入"),
+    SourceMapEntry(
+        entry_id="sm-vllm-dflash-norm-dtype",
+        model_or_method="DFlash 草稿 RMSNorm 参数 dtype 与 k_norm 堆叠字节",
+        semantic="`_k_norm_weights = torch.stack([a.k_norm.weight.data ...])`"
+                 " 继承草稿模型 dtype；RMSNorm 未显式传 dtype 时以"
+                 " torch.get_default_dtype() 建 weight，而 vLLM "
+                 "BaseModelLoader.load_model 在 "
+                 "set_default_torch_dtype(model_config.dtype) 内初始化草稿。"
+                 "因此 k_norm stack 是 6×128×2=1,536 B（bfloat16），"
+                 "不是按 draft_quant.dense_w 的 768/384 B",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/model_executor/layers/layernorm.py L42-58"
+                        "（weight_dtype = dtype or torch.get_default_dtype()）、"
+                        "vllm/model_executor/model_loader/base_loader.py"
+                        " L68-85（set_default_torch_dtype(model_config.dtype)"
+                        " 包住 create_model/load_weights）、"
+                        "assets/identity/vllm_qwen35_pin/dflash_utils.py L51-54"
+                        "（get_model(..., model_config=draft_model_config)）、"
+                        "qwen3_dflash.py L288-289（RMSNorm 未传 dtype）、"
+                        "L565-568（torch.stack 继承 weight dtype）、"
+                        "assets/config/qwen36_35b_a3b_dflash__config.json"
+                        "（\"dtype\": \"bfloat16\"）",
+        branch_predicate="RMSNorm(dtype=None) → torch.get_default_dtype()；"
+                         "草稿 get_model 的参数初始化由 draft_model_config.dtype "
+                         "决定，与 Linear quant_method/dense_w 无关",
+        thresholds="bfloat16/float16→2B/elem；float32→4B；未知 dtype 显式拒绝，"
+                   "不得回退到 dense_w",
+        input_domain="活跃 DFlash 草稿 config dtype=bfloat16；"
+                     "draft_quant.dense_w=4/8/16 均不改变 k_norm 字节",
+        both_sides_covered=True,
+        uncovered_domain=["layernorm.py/base_loader.py 未入本地 pin（固定 commit "
+                          "与行号登记，未执行）；Python 默认 dtype 的运行期覆盖"
+                          "（如调用方另设）未建模"],
+        note="复核轮补登记（2026-11-10）：修正 k_norm 计数为 6×128×2=1,536 B；"
+             "DraftIR.dtype_hint 由 config dtype/torch_dtype 解析"),
 ]
 
 

@@ -336,7 +336,7 @@ def test_draft_second_read_traffic():
     m = _qwen36()
     draft = _draft()
     rows = dflash_round_rows("draft_block", draft, m.vocab, 3.0, 512, Q8,
-                             1.0, tp=8, batch=1)
+                             1.0, tp=8, batch=1, ctx_kv_path="fused_raw")
     lm = next(r for r in rows if r.op == "draft_lm_head")
     assert lm.weight_read == 2048 * (m.vocab // 8) * 1
     assert lm.weight_capacity == 0        # 容量归 target 物理对象（账本去重）

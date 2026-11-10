@@ -14,6 +14,7 @@ from .contracts import (CapabilityReport, Evidence, Feasibility, Metric,
 from .count import build_model_work, totals
 from .count.draft import chain_step_rows, dflash_round_rows, mtp_step_rows
 from .devices import DEVICES, LINKS  # v0.1 设备注册表（v0.2 沿用数值+分层预算）
+from .draft_quant import MXFP8_CONTEXT_PROJ
 from .cost.t0 import dtype_route, price_rows, stage_total
 from .cost.calibrated import CalibratedPricer
 from .cost.profile_store import load_profile_set, profile_model_id
@@ -319,7 +320,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             draft_tp = dep.target_tp if dep.mode == "colocated" else dep.draft_tp
             draft_rows = dflash_round_rows(
                 "draft_block", draft, model.vocab, e_n, ctx, dquant,
-                quant["act"] / 8, tp=draft_tp, batch=B)
+                quant["act"] / 8, tp=draft_tp, batch=B,
+                ctx_kv_path=scenario.draft_ctx_kv_path)
             d_gemm, d_ew = dtype_route(dquant)
             d_dev = target_dev if dep.mode == "colocated" else draft_dev
             d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew)
@@ -364,6 +366,13 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                     "DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；"
                     "时间线以显式 0 占位，仅为已建模阶段下界",
                     affected_metrics=["M01 TPOT", "M02 加速比", "M04 轮分解"])
+            if scenario.draft_ctx_kv_path == MXFP8_CONTEXT_PROJ:
+                cap.add(
+                    "draft_ctx_kv_weight_bytes", "unknown",
+                    "MXFP8 _context_kv_proj 的 block-scale 存储布局"
+                    "（modelopt.py 未入 pin）：ctx_kv_proj.weight_read 与驻留"
+                    "字节只计 packed 8bit 权重下界，未含 scale",
+                    affected_metrics=["M04 轮分解", "M06 显存"])
             work["draft_block"] = _rows_json(draft_rows)
             work["verify_block"] = _rows_json(verify_rows)
             cost["draft_block"] = {"t_ms": t_draft, "device": d_dev.id,
@@ -513,7 +522,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         quant, dquant, dep, B, ctx, cap, plan=pplan,
         block_size=(plan.block_size
                     if scenario.method_id == "dflash_v1" and e_n is not None else 0),
-        e_produced=(e_n if e_n is not None else 0.0))
+        e_produced=(e_n if e_n is not None else 0.0),
+        draft_ctx_kv_path=scenario.draft_ctx_kv_path)
 
     cost["memory"] = memory       # R02a：per-rank 对象清单与判定入册（导出/UI 共用）
 
@@ -668,7 +678,8 @@ def _rows_json(rows):
 
 
 def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
-                  plan=None, block_size: int = 0, e_produced: float = 0.0):
+                  plan=None, block_size: int = 0, e_produced: float = 0.0,
+                  draft_ctx_kv_path: str = "unknown"):
     """容量块（R02a/b：per-rank 对象身份 + 生命周期峰值；R03a/b：预算判定）。
 
     colocated：草稿与 target 同 TP 组，全部 rank 各建一份账本（EP 余数
@@ -689,7 +700,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
             rank_mem = colocated_rank_memory(
                 model, draft_ir, quant, dquant, tp, B, ctx,
                 _device_budget(dep.target_device, dep.budget),
-                ep=ep, rank=r, block_size=block_size, e_produced=e_produced)
+                ep=ep, rank=r, block_size=block_size, e_produced=e_produced,
+                draft_ctx_kv_path=draft_ctx_kv_path)
             rep = rank_mem.peak_vs_budget()
             rep["inventory"] = rank_mem.inventory()
             ranks.append(rep)
@@ -733,7 +745,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                 if "embed" in a.alloc_id or "lm_head" in a.alloc_id:
                     a.live_note += "；独立组无共享配方：按全量副本口径（保守）"
                 drm.add(a)
-            for a in draft_extra_allocations(draft_ir, dq, dep.draft_tp):
+            for a in draft_extra_allocations(draft_ir, dq, dep.draft_tp,
+                                             ctx_kv_path=draft_ctx_kv_path):
                 a.consumers = ["draft"]
                 drm.add(a)
             for a in kv_allocations(dm, dq, B, ctx, role="draft",

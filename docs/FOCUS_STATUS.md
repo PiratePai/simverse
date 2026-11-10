@@ -18,6 +18,10 @@ MTP 首层模板、chain 合成草稿仍是研究估计；MTP 现标 unverified�
 逐文件复核 pin 源码后修复 4 处漏计——lm_head logits 集合通信
 （logits_gather，decode/verify/草稿各 1 次）、DFlash 草稿 lm_head/ctx KV
 二次读流量、vLLM `_fused_kv_weight` 驻留副本入账本；判定链路不变。
+**同日三轮修正**：ctx-KV 路径显式化（`fused_raw`/`mxfp8_context_proj`/
+`per_layer_fallback`），4bit 回退按完整 qkv（含 Q）计 FLOPs/权重读；
+k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
+与 dense_w 4/8/16 无关；dense_w 不再用于选分支。
 
 ## 已实现，但不等于真实部署已验证
 
@@ -73,9 +77,10 @@ MTP 首层模板、chain 合成草稿仍是研究估计；MTP 现标 unverified�
   `_fused_kv_weight` 融合驻留副本、ctx 归一副本/融合输出/aux hidden 三件
   结构化临时；4 新增独立手算 oracle（见二轮报告 §1/§3）。
 
-默认 ScenarioV2 的同卡 per-rank 稳态账本（二轮审计后）为
-2,830,651,584 B（steady）+ 752,704 B（结构化临时峰值）=
-2,831,404,288 B（known_peak，TP8/EP1、B1 ctx32k、W8A8+FP4 专家）；
+审计对照场景（TP8/EP1、B1 ctx32k、α0.75、blk5、W8A8+FP4 专家）的
+同卡 per-rank 账本为 2,830,652,352 B（steady）+ 752,704 B
+（结构化临时峰值）= 2,831,405,056 B（known_peak）。CLI 内置默认
+（α0.72、blk16）重放的 known_peak 为 2,832,959,265 B；
 这不是用户所有场景的峰值，且不完整
 （workspace/graph/NCCL 池未计、非 0），不能据此证明可部署，也未超
 80GB 标称不构成 OOM。可分配预算（G-D7）与运行时池证据仍是阻塞项。

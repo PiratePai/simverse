@@ -64,7 +64,8 @@ _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-dflash-round-protocol", "sm-dflash-cross-attention",
-                   "sm-vllm-dflash-colocated-sharing"),
+                   "sm-vllm-dflash-colocated-sharing",
+                   "sm-vllm-dflash-norm-dtype"),
     unverified_paths=(
         "serving_integration: SGLang DFLASH / vLLM PR#40898 未逐行核对（pending asset）",
         "rejection_sampling_cost: 拒绝采样/KV 回退/hidden 提取无独立耗时，"
@@ -198,7 +199,8 @@ def _dflash_draft() -> DraftIR:
         full_config=cfg)
     return replace(ir, evidence=_DFLASH_EVIDENCE,
                    evidence_refs=("ev-qwen36-dflash-config", "ev-dflash-impl",
-                                  "ev-dflash-readme"))
+                                  "ev-dflash-readme",
+                                  "ev-vllm-dflash-norm-dtype"))
 
 
 def _qwen3_30b() -> ModelIR:
