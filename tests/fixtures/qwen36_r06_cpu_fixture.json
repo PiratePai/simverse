@@ -1,0 +1,724 @@
+{
+ "schema_version": "1",
+ "kind": "qwen36-r06-cpu-fixture",
+ "environment": {
+  "python": "3.12.10",
+  "torch": "2.15.0+cpu",
+  "transformers": "5.22.1",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "date": "2026-11-12"
+ },
+ "pinned": {
+  "modeling_sha256": "1311a17431d7c232515823e517c2b405164a206ff4456de19d0fc21f910f824a",
+  "configuration_sha256": "554e363a32b1a8c20cc2eb5304138477694b5ae30595e3de510614083c41faba"
+ },
+ "fixture_config": {
+  "vocab_size": 64,
+  "hidden_size": 32,
+  "num_hidden_layers": 2,
+  "layer_types": [
+   "linear_attention",
+   "full_attention"
+  ],
+  "num_attention_heads": 4,
+  "num_key_value_heads": 2,
+  "head_dim": 8,
+  "linear_num_key_heads": 2,
+  "linear_num_value_heads": 4,
+  "linear_key_head_dim": 8,
+  "linear_value_head_dim": 8,
+  "linear_conv_kernel_dim": 4,
+  "moe_intermediate_size": 16,
+  "shared_expert_intermediate_size": 16,
+  "num_experts_per_tok": 2,
+  "num_experts": 4,
+  "rope_parameters": {
+   "rope_type": "default",
+   "partial_rotary_factor": 0.25,
+   "rope_theta": 10000.0
+  }
+ },
+ "seed": 20261112,
+ "layer_kinds": [
+  "linear_attention",
+  "full_attention"
+ ],
+ "phases": {
+  "prefill": {
+   "B": 1,
+   "S": 0,
+   "Q": 5,
+   "T": 5,
+   "gemms": [
+    {
+     "layer": 0,
+     "module": "in_proj_qkv",
+     "ic": 32,
+     "oc": 64,
+     "tokens": 5,
+     "flops": 20480
+    },
+    {
+     "layer": 0,
+     "module": "in_proj_z",
+     "ic": 32,
+     "oc": 32,
+     "tokens": 5,
+     "flops": 10240
+    },
+    {
+     "layer": 0,
+     "module": "in_proj_b",
+     "ic": 32,
+     "oc": 4,
+     "tokens": 5,
+     "flops": 1280
+    },
+    {
+     "layer": 0,
+     "module": "in_proj_a",
+     "ic": 32,
+     "oc": 4,
+     "tokens": 5,
+     "flops": 1280
+    },
+    {
+     "layer": 0,
+     "module": "out_proj",
+     "ic": 32,
+     "oc": 32,
+     "tokens": 5,
+     "flops": 10240
+    },
+    {
+     "layer": 0,
+     "module": "gate_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 0,
+     "module": "up_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 0,
+     "module": "down_proj",
+     "ic": 16,
+     "oc": 32,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 0,
+     "module": "shared_expert_gate",
+     "ic": 32,
+     "oc": 1,
+     "tokens": 5,
+     "flops": 320
+    },
+    {
+     "layer": 1,
+     "module": "q_proj",
+     "ic": 32,
+     "oc": 64,
+     "tokens": 5,
+     "flops": 20480
+    },
+    {
+     "layer": 1,
+     "module": "k_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 1,
+     "module": "v_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 1,
+     "module": "o_proj",
+     "ic": 32,
+     "oc": 32,
+     "tokens": 5,
+     "flops": 10240
+    },
+    {
+     "layer": 1,
+     "module": "gate_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 1,
+     "module": "up_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 1,
+     "module": "down_proj",
+     "ic": 16,
+     "oc": 32,
+     "tokens": 5,
+     "flops": 5120
+    },
+    {
+     "layer": 1,
+     "module": "shared_expert_gate",
+     "ic": 32,
+     "oc": 1,
+     "tokens": 5,
+     "flops": 320
+    },
+    {
+     "layer": -1,
+     "module": "lm_head",
+     "ic": 32,
+     "oc": 64,
+     "tokens": 5,
+     "flops": 20480
+    }
+   ],
+   "conv": [
+    {
+     "layer": 0,
+     "conv_dim": 64,
+     "kernel": 4,
+     "tokens": 5,
+     "flops": 2560,
+     "path": "pad_conv"
+    }
+   ],
+   "gdn": {
+    "nv": 4,
+    "nk": 2,
+    "head_k_dim": 8,
+    "head_v_dim": 8,
+    "k_heads_after_repeat": 4,
+    "key_dim": 16,
+    "value_dim": 32,
+    "state_elems": 256,
+    "recurrent_state_shape": [
+     1,
+     4,
+     8,
+     8
+    ],
+    "core_attn_out_shape": [
+     1,
+     5,
+     4,
+     8
+    ],
+    "chunk_or_recurrent": "chunk",
+    "chunk_size": 64,
+    "tokens": 5,
+    "initial_state_shape": null,
+    "query_shape": [
+     1,
+     5,
+     4,
+     8
+    ],
+    "g_shape": [
+     1,
+     5,
+     4
+    ],
+    "beta_shape": [
+     1,
+     5,
+     4
+    ]
+   },
+   "attn": {
+    "heads": 4,
+    "kv_heads": 2,
+    "head_dim": 8,
+    "q_proj_out": 64,
+    "q_proj_out_shape": [
+     1,
+     5,
+     64
+    ],
+    "gate_shape": [
+     1,
+     5,
+     32
+    ],
+    "rotary_dim": 2,
+    "attn_weights_shape": [
+     1,
+     4,
+     5,
+     5
+    ],
+    "causal_pairs": 15,
+    "kv_cache_rows_after": 5
+   },
+   "moe": {
+    "E": 4,
+    "k": 2,
+    "inter": 16,
+    "shared_inter": 16,
+    "router_logits_shape": [
+     5,
+     4
+    ],
+    "router_flops": 1280,
+    "per_layer": [
+     {
+      "router": {
+       "layer": 0,
+       "router_logits_shape": [
+        5,
+        4
+       ],
+       "E": 4,
+       "hidden": 32,
+       "router_flops": 1280
+      },
+      "experts": {
+       "layer": 0,
+       "assignment_shape": [
+        5,
+        2
+       ],
+       "assignment_total": 10,
+       "distinct_experts": 4,
+       "per_expert_tokens": [
+        2,
+        3,
+        2,
+        3
+       ]
+      }
+     },
+     {
+      "router": {
+       "layer": 1,
+       "router_logits_shape": [
+        5,
+        4
+       ],
+       "E": 4,
+       "hidden": 32,
+       "router_flops": 1280
+      },
+      "experts": {
+       "layer": 1,
+       "assignment_shape": [
+        5,
+        2
+       ],
+       "assignment_total": 10,
+       "distinct_experts": 4,
+       "per_expert_tokens": [
+        2,
+        3,
+        2,
+        3
+       ]
+      }
+     }
+    ],
+    "assignment_total": 20,
+    "per_expert_tokens": [
+     [
+      2,
+      3,
+      2,
+      3
+     ],
+     [
+      2,
+      3,
+      2,
+      3
+     ]
+    ],
+    "distinct_experts": [
+     4,
+     4
+    ],
+    "routed_flops": 61440
+   },
+   "shapes": {
+    "logits_shape": [
+     1,
+     5,
+     64
+    ],
+    "shared_expert_gate_shape": [
+     32,
+     1
+    ],
+    "norm_widths": {
+     "rmsnorm_gated": 8,
+     "attn_norm": 32,
+     "mlp_norm": 32,
+     "q_norm": 8,
+     "k_norm": 8,
+     "final_norm": 32
+    }
+   }
+  },
+  "decode": {
+   "B": 1,
+   "S": 5,
+   "Q": 1,
+   "T": 1,
+   "gemms": [
+    {
+     "layer": 0,
+     "module": "in_proj_qkv",
+     "ic": 32,
+     "oc": 64,
+     "tokens": 1,
+     "flops": 4096
+    },
+    {
+     "layer": 0,
+     "module": "in_proj_z",
+     "ic": 32,
+     "oc": 32,
+     "tokens": 1,
+     "flops": 2048
+    },
+    {
+     "layer": 0,
+     "module": "in_proj_b",
+     "ic": 32,
+     "oc": 4,
+     "tokens": 1,
+     "flops": 256
+    },
+    {
+     "layer": 0,
+     "module": "in_proj_a",
+     "ic": 32,
+     "oc": 4,
+     "tokens": 1,
+     "flops": 256
+    },
+    {
+     "layer": 0,
+     "module": "out_proj",
+     "ic": 32,
+     "oc": 32,
+     "tokens": 1,
+     "flops": 2048
+    },
+    {
+     "layer": 0,
+     "module": "gate_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 0,
+     "module": "up_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 0,
+     "module": "down_proj",
+     "ic": 16,
+     "oc": 32,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 0,
+     "module": "shared_expert_gate",
+     "ic": 32,
+     "oc": 1,
+     "tokens": 1,
+     "flops": 64
+    },
+    {
+     "layer": 1,
+     "module": "q_proj",
+     "ic": 32,
+     "oc": 64,
+     "tokens": 1,
+     "flops": 4096
+    },
+    {
+     "layer": 1,
+     "module": "k_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 1,
+     "module": "v_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 1,
+     "module": "o_proj",
+     "ic": 32,
+     "oc": 32,
+     "tokens": 1,
+     "flops": 2048
+    },
+    {
+     "layer": 1,
+     "module": "gate_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 1,
+     "module": "up_proj",
+     "ic": 32,
+     "oc": 16,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 1,
+     "module": "down_proj",
+     "ic": 16,
+     "oc": 32,
+     "tokens": 1,
+     "flops": 1024
+    },
+    {
+     "layer": 1,
+     "module": "shared_expert_gate",
+     "ic": 32,
+     "oc": 1,
+     "tokens": 1,
+     "flops": 64
+    },
+    {
+     "layer": -1,
+     "module": "lm_head",
+     "ic": 32,
+     "oc": 64,
+     "tokens": 1,
+     "flops": 4096
+    }
+   ],
+   "conv": [
+    {
+     "layer": 0,
+     "conv_dim": 64,
+     "kernel": 4,
+     "tokens": 1,
+     "state_len": 4,
+     "flops": 512,
+     "path": "update"
+    }
+   ],
+   "gdn": {
+    "nv": 4,
+    "nk": 2,
+    "head_k_dim": 8,
+    "head_v_dim": 8,
+    "k_heads_after_repeat": 4,
+    "key_dim": 16,
+    "value_dim": 32,
+    "state_elems": 256,
+    "recurrent_state_shape": [
+     1,
+     4,
+     8,
+     8
+    ],
+    "core_attn_out_shape": [
+     1,
+     1,
+     4,
+     8
+    ],
+    "chunk_or_recurrent": "recurrent",
+    "chunk_size": null,
+    "tokens": 1,
+    "initial_state_shape": [
+     1,
+     4,
+     8,
+     8
+    ],
+    "query_shape": [
+     1,
+     1,
+     4,
+     8
+    ],
+    "g_shape": [
+     1,
+     1,
+     4
+    ],
+    "beta_shape": [
+     1,
+     1,
+     4
+    ]
+   },
+   "attn": {
+    "heads": 4,
+    "kv_heads": 2,
+    "head_dim": 8,
+    "q_proj_out": 64,
+    "q_proj_out_shape": [
+     1,
+     1,
+     64
+    ],
+    "gate_shape": [
+     1,
+     1,
+     32
+    ],
+    "rotary_dim": 2,
+    "attn_weights_shape": [
+     1,
+     4,
+     1,
+     6
+    ],
+    "causal_pairs": 6,
+    "kv_cache_rows_after": 6
+   },
+   "moe": {
+    "E": 4,
+    "k": 2,
+    "inter": 16,
+    "shared_inter": 16,
+    "router_logits_shape": [
+     1,
+     4
+    ],
+    "router_flops": 256,
+    "per_layer": [
+     {
+      "router": {
+       "layer": 0,
+       "router_logits_shape": [
+        1,
+        4
+       ],
+       "E": 4,
+       "hidden": 32,
+       "router_flops": 256
+      },
+      "experts": {
+       "layer": 0,
+       "assignment_shape": [
+        1,
+        2
+       ],
+       "assignment_total": 2,
+       "distinct_experts": 2,
+       "per_expert_tokens": [
+        1,
+        0,
+        1,
+        0
+       ]
+      }
+     },
+     {
+      "router": {
+       "layer": 1,
+       "router_logits_shape": [
+        1,
+        4
+       ],
+       "E": 4,
+       "hidden": 32,
+       "router_flops": 256
+      },
+      "experts": {
+       "layer": 1,
+       "assignment_shape": [
+        1,
+        2
+       ],
+       "assignment_total": 2,
+       "distinct_experts": 2,
+       "per_expert_tokens": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    ],
+    "assignment_total": 4,
+    "per_expert_tokens": [
+     [
+      1,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      1
+     ]
+    ],
+    "distinct_experts": [
+     2,
+     2
+    ],
+    "routed_flops": 12288
+   },
+   "shapes": {
+    "logits_shape": [
+     1,
+     1,
+     64
+    ],
+    "shared_expert_gate_shape": [
+     32,
+     1
+    ],
+    "norm_widths": {
+     "rmsnorm_gated": 8,
+     "attn_norm": 32,
+     "mlp_norm": 32,
+     "q_norm": 8,
+     "k_norm": 8,
+     "final_norm": 32
+    }
+   }
+  }
+ }
+}

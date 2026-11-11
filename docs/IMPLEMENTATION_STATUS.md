@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R05 mHC/Sinkhorn 修正；此前两模型门禁/R04/A组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（本轮本地分支 `codex/v41-mhc-r05`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R05 全量 **252 passed**，exit 0；此前 R04 236、PR #3 合入时234、k_norm修正后212等为历史轮次）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：252**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R05；236→252 为 mHC pin、独立算术/数值 oracle、字节/派生缓冲守恒与 R04 冻结回归新增 16 项）。
+更新：2026-11-12（R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到同日先合入的 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（本轮候选分支 `codex/qwen36-forward-r06`，基线含 R05 `codex/v41-mhc-r05`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R06（基线含 R05）全量 **262 passed**，exit 0；历史：R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：262**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R06（基线含 R05）；236→252 为 R05 mHC pin/独立 oracle/守恒与冻结回归新增 16 项，252→262 为 R06 新增 10 项 hermetic+live 对账）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -84,6 +84,25 @@ tp=7/9/16 拒绝、逐行手算绝对值、开/关账本差=精确新增、count
 (validation/v41-engram-20261111.md)；证据 ev-vllm-v41-engram；G-C1
 单机算子解除（DP 交换/cpu_offload 运行时/amd 变体仍登记未覆盖）。
 
+**2026-11-12 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照（D 组 R06）**：
+探针 `tools/probe_qwen36_forward_r06.py`（独立于本仓，不 import simverse）
+以 pin 官方 forward（transformers @b6401d66，torch 2.15.0+cpu，
+seed 20261112）执行 h=32/2 层（GDN+FullAttn）/4E top-2 随机权重 fixture，
+prefill T=5 + decode T=1，落盘 `tests/fixtures/qwen36_r06_cpu_fixture.json`
+（逐 GEMM/conv/递推形状/因果对/MoE assignment 全录）。对账
+`tests/test_qwen36_forward_r06.py` 10 项（hermetic 9 + live 1）：本仓
+`parse_qwen3_5_moe(同一 config)` → `build_model_work(tp=1)` 逐算子**精确
+相等**（对账表见报告 §4）。**修正一处漏计**：full-attn 输出门控逐元素行
+（官方 L802 sigmoid(gate)·attn_out）补 `attn_output_gate` 行 + 公式
+`v2.attn_output_gate` + source_map note——默认场景前后：decode +10,240
+FLOPs（10 层×1024）、verify +163,840、draft 不变、M01 +0.00002ms（报告
+§5）。披露不修：gdn_recurrence 4 ops/elem（官方参考≈7）；HF DynamicCache
+conv state 宽 = kernel 列（本仓按 vLLM kernel−1 计容量，差 1 列）。
+证据 `ev-qwen36-cpu-fixture-r06`（numeric-checked）入 registry 并挂
+qwen36 evidence_refs；**模型级 cpu_forward 仍 not-run**，部署排名门禁
+不变。报告：[docs/validation/qwen36-gdn-moe-cpu-fixture-r06.md]
+(validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
+
 **CI hermetic 修复（2026-11-10）**：`tests/test_consistency.py` 两项验收不再读取
 被 `.gitignore` 忽略的 `outputs/run_v41.json`。CSV 导出改为复核本次 `run` 新落盘的
 RunResult；固定场景重放改用纳入版本库、带 provenance 的历史快照
@@ -117,18 +136,25 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   `config_coverage_complete`、`forward_evidence_complete`、`structure_complete`
   分开。完整 config（含嵌套叶键）逐项登记，未知键不得默认 ignored。
   - Qwen3.6：config 覆盖完整；GDN/full-attn gate/MoE router+shared gate/TP-EP
-    分片 source-checked；MTP 只有 config+目标首层模板 → **unverified**；
-    forward 仍不完整，不能参与部署排名。
+    分片 source-checked；R06（2026-11-12）fixture 级小尺寸 CPU forward
+    数值对照已执行（ev-qwen36-cpu-fixture-r06，GDN+MoE+full-attn 载体逐
+    算子精确对账）；MTP 只有 config+目标首层模板 → **unverified**；
+    forward 仍不完整、模型级 cpu_forward 仍 not-run，不能参与部署排名。
   - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
     DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2/MoE、
     candidate、swiglu、quantization_config 仍为缺口；mHC 仅
     source-checked；CPU/GPU 均未执行。
   - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成未核、拒绝采样/KV
     回退/hidden 提取仍 0 占位；CPU/GPU 未执行。
-- **本轮修复**：V4.1 `o_a_proj` 分组在 work/memory 同步乘 `ng`，并补 V4.1
-  attention memory 的 `b_dense` 单位（BF16 曾少 2×）；Qwen3.6 shared gate 在
-  IR/work/memory 计入；DFlash/MTP/chain 草稿 B>1 token 维乘一次；证据引用按
-  model/draft/profile 生成；source_map 行号/未核状态校正。
+- **本轮修复**（2026-11-12 R06）：full-attn 输出门控逐元素行
+  `attn_output_gate`（官方 L802 sigmoid(gate)·attn_out；此前只计 q_proj
+  2× GEMM 消费）——默认场景 decode +10,240 FLOPs、verify +163,840、
+  draft 不变（归因见 R06 报告 §5）。
+  早前（2026-11-10 两模型轮）：V4.1 `o_a_proj` 分组在 work/memory 同步乘
+  `ng`，并补 V4.1 attention memory 的 `b_dense` 单位（BF16 曾少 2×）；
+  Qwen3.6 shared gate 在 IR/work/memory 计入；DFlash/MTP/chain 草稿 B>1
+  token 维乘一次；证据引用按 model/draft/profile 生成；source_map
+  行号/未核状态校正。
 - **当前数值**：CLI 内置默认 Qwen3.6+DFlash（显式 `draft_ctx_kv_path=fused_raw`，α0.72、blk16）稳态
   2,830,652,352 B（shared gate +81,920 B；含 fused ctx-KV 3,145,728 B 与
   k_norm 堆叠 1,536 B），known_peak 2,832,959,265 B，仍不完整；
@@ -384,7 +410,7 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 | 验证 | 状态 | 证据 |
 |---|---|---|
 | V01 身份与协议 | 通过 | test_negative_v02（digest 全长/大整数/NaN/null+reason）|
-| V02 结构与 forward | 部分 | 层序/覆盖/源码 pin+分支映射（source_map）；Qwen 固定源码两层随机权重 CPU shape probe 已做，真实 checkpoint/完整 forward 仍缺 |
+| V02 结构与 forward | 部分 | 层序/覆盖/源码 pin+分支映射（source_map）；Qwen 固定源码两层随机权重 CPU shape probe 已做，R06 又做 GDN+MoE fixture 级数值对照（ev-qwen36-cpu-fixture-r06，逐算子精确对账），真实 checkpoint/完整 forward 仍缺 |
 | V03 独立数学 oracle | 通过 | golden/oracles_v02 + test_model_ir/test_negative |
 | V04 lowering 与守恒 | 大部分 | per-rank 统一配方（A组 R01）+ 跨 rank 守恒/复制对象不求和断言（test_parallel_sharding）；EP all2all/按层通信配方 |
 | V05 方法、协议与状态 | 部分 | 接受律/端点/未知传播/DFlash 计划绑定；事件级 transition trace 未做（M3）|
@@ -410,8 +436,10 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 4. **设备可分配预算/价格**：无来源 → feasible=unknown、成本 null+reason。
    H200 两闭环绑定已归档的 30B-tiny/235B，不能跨模型使用。G-D7/G-D9。
 5. **CPU/GPU 执行**：Qwen 固定 HF 源码两层随机权重 CPU shape probe 已执行；
-   两款真实主模型仍无完整 forward 或 GPU/部署实测。V02 数值语义保持
-   source-checked/未执行，不冒充模型级 shape/numeric-checked。
+   R06（2026-11-12）追加 GDN+MoE fixture 级数值对照（h=32/2 层/4E 随机权重，
+   逐 GEMM/conv/router 与本仓 tp=1 账本精确相等，ev-qwen36-cpu-fixture-r06）；
+   两款真实主模型仍无完整 forward 或 GPU/部署实测，模型级 cpu_forward 保持
+   not-run，不冒充模型级 shape/numeric-checked。
 6. **历史归档**：30B/235B/Next/V3 与 tiny fixture 只可显式注入归档目录；
    `h200_calib_*` 场景标 archived。Qwen3.8 本地身份仍 PENDING_ASSET。
 7. pi-viewer 适配器（V09b）：未建；数据通道经蒸馏已通（无需写旧仓）。

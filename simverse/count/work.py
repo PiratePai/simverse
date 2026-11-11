@@ -120,6 +120,17 @@ def gqa_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
         formula=FR.F_ATTN_CORE,
         shape=f"pairs={pairs} heads(card)={heads_c} kv(card)={kv_heads_c}"
               f"{'（复制）' if kv_replicated else ''} {f_id}"))
+    # 输出门控逐元素行（R06 CPU fixture 对照补齐）：官方 L802
+    # attn_output = attn_output * torch.sigmoid(gate)——q_proj 输出 2× 的
+    # 门控分支消费由 q_proj GEMM 覆盖，但 sigmoid+乘的逐元素算量未计。
+    if attn.output_gated:
+        hd = heads_c * attn.head_dim
+        rows.append(OpRow(stage, li, "attn_output_gate", flops=2 * T * hd,
+                          act_read=int(2 * T * hd * b_a),
+                          act_write=int(T * hd * b_a),
+                          formula=FR.F_ATTN_OUT_GATE,
+                          shape=f"sigmoid(gate)·attn_out 逐元素 {hd} elem"
+                                f"（q_proj 2× 门控分支消费；R06 fixture 修正）"))
     rows.append(gemm("o_proj", attn.heads * attn.head_dim // tp, h))
     # q/k head-norm + RoPE
     if attn.qk_head_norm:
