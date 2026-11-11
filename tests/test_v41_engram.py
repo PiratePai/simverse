@@ -28,6 +28,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from simverse.count.work import build_model_work, engram_rows, totals  # noqa: E402
+from simverse.cost.t0 import price_row  # noqa: E402
+from simverse.devices import DEVICES  # noqa: E402
 from simverse.lowering.memory import (DeviceBudget, RankMemory,  # noqa: E402
                                       engram_allocations,
                                       engram_staged_allocations,
@@ -291,6 +293,39 @@ def test_engram_rows_token_scaling_g13():
             [r.weight_capacity for r in rows_b])
 
 
+def test_lookup_rank_shard_and_bf16_bytes_independent_of_act_bits():
+    """源码 lookup 仅处理本 rank 的 3 heads，输出与 wkv 输入固定 bf16。"""
+    for rank in (0, 3, 7):
+        rows = engram_rows("decode", 1, 2, 5120, _spec(), Q8, tp=8,
+                           rank=rank)
+        lookup = next(r for r in rows if r.op == "engram_lookup")
+        wkv = next(r for r in rows if r.op == "engram_wkv")
+        assert lookup.flops == 2 * 3 * 256
+        assert lookup.weight_read_expected == 2 * 3 * 264.0
+        assert lookup.act_read == 2 * 3 * 4
+        assert lookup.act_write == 2 * 3 * 256 * 2
+        assert wkv.act_read == 2 * 6144 * 2
+        assert wkv.act_write == 2 * 3200 * 2
+        post = next(r for r in rows if r.op == "engram_post_wkv")
+        assert post.act_read == 2 * (4 + 5) * 5120 * 2 + 2
+        assert post.act_write == 2 * 4 * 5120 * 2
+        table = engram_allocations(_spec(), 5120, Q8, 8, 1,
+                                   rank=rank)[0]
+        assert lookup.weight_capacity == table.bytes
+
+
+def test_cpu_offload_lookup_is_not_priced_as_gpu_hbm():
+    row = next(r for r in engram_rows("decode", 1, 1, 5120, _spec(), Q8,
+                                      tp=8) if r.op == "engram_lookup")
+    gpu = price_row(row, DEVICES["h100_sxm"], engram_lookup_host=False)
+    host = price_row(row, DEVICES["h100_sxm"], engram_lookup_host=True)
+    assert gpu["bytes_expected"] == 3 * 264.0
+    assert gpu["bytes_host_expected"] == 0.0
+    assert host["bytes_expected"] == 0.0
+    assert host["bytes_host_expected"] == 3 * 264.0
+    assert host["t_ms"] <= gpu["t_ms"]
+
+
 def test_real_model_engram_rows_only_on_engram_layers():
     """真实 V4.1：非 engram 层无 engram 行；layer_ids=[] → 无任何 engram 行。"""
     m = _model()
@@ -362,7 +397,8 @@ def test_ledger_delta_is_exactly_engram_rows():
     """整模型开/关 engram：逐字段差 == 7 行 engram 的独立求和（精确）。
 
     V4.1 TP8/Q16/B=1/ctx=1024 独立手算（b_w=b_a=2，part=3，oc=3200）：
-      L1+L14 各层：lookup flops 6144 / wre 6336.0 / ar 96 / aw 12288；
+      L1+L14 各层：lookup 本 rank 3 heads，flops 768 / wre 792.0 /
+      ar 12 / aw 1536（固定 bf16）；
       wkv flops 2·6144·3200=39,321,600 / wr=cap 6144·3200·2=39,321,600；
       post flops 4·(10·5120+5)=204,820 / wr=cap 2·4·5120·2=81,920 /
       ar (4·5120+5·5120)·2+1=92,161 / aw 4·5120·2=40,960；
@@ -387,14 +423,16 @@ def test_ledger_delta_is_exactly_engram_rows():
             == pytest.approx(sum(r.weight_read_expected or 0.0
                                  for r in delta_rows)))
     # 独立手算（TP8，b_w=b_a=2）
-    per_common = (6144 + 2 * 6144 * 3200 + 4 * (10 * 5120 + 5))
+    per_common = (3 * 256 + 2 * 6144 * 3200 + 4 * (10 * 5120 + 5))
     assert t_on["flops"] - t_off["flops"] == 2 * per_common + 112
     assert t_on["weight_read"] - t_off["weight_read"] == \
         2 * (6144 * 3200 * 2 + 81920)
     assert t_on["act_read"] - t_off["act_read"] == \
-        2 * (96 + 6144 * 2 + (4 * 5120 + 5 * 5120) * 2 + 1) + 4   # +1=mask/层
+        2 * (3 * 4 + 6144 * 2 + (4 * 5120 + 5 * 5120) * 2 + 1) + 4
     assert t_on["act_write"] - t_off["act_write"] == \
-        2 * (12288 + 3200 * 2 + 40960) + 192
+        2 * (3 * 256 * 2 + 3200 * 2 + 40960) + 192
+    assert t_on["weight_read_expected"] - t_off["weight_read_expected"] \
+        == pytest.approx(2 * 3 * 264.0)
     assert t_on["kv_read"] == t_off["kv_read"]
     assert t_on["kv_write"] == t_off["kv_write"]
 
@@ -477,6 +515,10 @@ def test_scenario_engram_table_placement_validation():
     inv = [a for a in r0["inventory"] if "engram" in a["alloc_id"]]
     assert {a["placement"] for a in inv if "table" in a["alloc_id"]} == \
         {"cpu_offload"}
+    assert j["capability"]["checks"]["engram_host_lookup_latency"]["status"] \
+        == "unknown"
+    assert j["metrics"]["M01_tpot_analytical"]["support"] == "approximated"
+    assert "host" in j["metrics"]["M01_tpot_analytical"]["reason"]
 
 
 def test_staged_allocations_lower_bound():
@@ -493,7 +535,7 @@ def test_staged_allocations_lower_bound():
 # ---------------------------------------------------------------------------
 
 def test_engram_gathers_per_rank_bytes():
-    """per-rank 接收 = (tp−1)/tp×T×width×act（logits_gather 同式）：
+    """per-rank 接收 = (tp−1)/tp×T×width×bf16（源码固定 2B）：
     wkv width=25600；head width=24×256=6144；TP1 无行。"""
     from simverse.devices import LINKS
     from simverse.lowering.sharding import LinkLike
@@ -504,8 +546,8 @@ def test_engram_gathers_per_rank_bytes():
     wkv = [c for c in cols if c.kind == "engram_wkv_gather"]
     head = [c for c in cols if c.kind == "engram_head_gather"]
     assert len(wkv) == 2 and len(head) == 2       # 层 1/14 各一次
-    assert all(c.bytes_on_wire == int(7 / 8 * 1 * 25600 * 1.0) for c in wkv)
-    assert all(c.bytes_on_wire == int(7 / 8 * 1 * 6144 * 1.0) for c in head)
+    assert all(c.bytes_on_wire == int(7 / 8 * 25600 * 2) for c in wkv)
+    assert all(c.bytes_on_wire == int(7 / 8 * 6144 * 2) for c in head)
     plan1 = validate_parallel(m, 1, 1)
     cols1 = model_collectives(m, plan1, m.hidden, 1.0, tokens=1, link=link)
     assert not any(c.kind.startswith("engram_") for c in cols1)

@@ -101,8 +101,9 @@ F_ENGRAM_HASH = _f(
     "Engram 批级 n-gram 哈希（整批一次，挂首 engram 层行）")
 F_ENGRAM_LOOKUP = _f(
     "v2.engram_lookup",
-    "FLOPs = T·24·256（FP8→bf16 dequant 逐元素 1 乘）；"
-    "weight_read_expected = T·24·264（表行读期望流量，不去重保守）；"
+    "per-rank FLOPs = T·part_n_hash_cols·256（FP8→bf16 dequant 逐元素 1 乘）；"
+    "weight_read_expected = T·part_n_hash_cols·264（表行读期望流量，不去重保守）；"
+    "输出 = T·part_n_hash_cols·256·2B（固定 bf16）；"
     "容量 = per-rank 行数·264（素数桶 head 分片，非 num_embeddings/tp）",
     "engram.py L642-732 _engram_lookup_kernel（ue8m0 byte<<23 即 fp32 指数，"
     "L726-731）；264 B/行 = FP8 256 + E8M0 256/32（L968-969/L1151-1161）；"
@@ -111,7 +112,8 @@ F_ENGRAM_LOOKUP = _f(
 F_ENGRAM_WKV = _f(
     "v2.engram_wkv",
     "FLOPs = 2·T·6144·(25600/tp)；weight/容量 = 6144·(25600/tp)·B_w（列切）；"
-    "act_write = T·(25600/tp)·B_a；gather_output=True → all-gather 见通信行",
+    "act_read = T·6144·2B；act_write = T·(25600/tp)·2B（固定 bf16）；"
+    "gather_output=True → all-gather 见通信行",
     "engram.py L1719-1733 ColumnParallelLinear(n_hash_cols·head_dim=6144 → "
     "hidden·(hc_mult+1)=25600, bias=False, gather_output=True)；"
     "无 sequence parallel 时输出列切",
@@ -119,7 +121,8 @@ F_ENGRAM_WKV = _f(
 F_ENGRAM_POST_WKV = _f(
     "v2.engram_post_wkv",
     "FLOPs = T·hc_mult·(10·d+5)（乘 6d + 加 3(d−1)+d + 标量≈8；d=hidden）；"
-    "weight/容量 = 2·hc·d·2（q/k_weight bf16 每 rank 复制）",
+    "weight/容量 = 2·hc·d·2（q/k_weight bf16 每 rank 复制）；"
+    "hidden/kv 输入与 output 按 pinned bf16 2B/元素",
     "engram.py L1334-1422 _fused_engram_post_wkv_kernel（每 (token,hc)："
     "ρ=(Σ hidden·q·k·key)·rsqrt(mean h²+eps)·rsqrt(mean key²+eps)·rsqrt(d)；"
     "gate=sigmoid(sign(ρ)·sqrt(clamp|ρ|,1e-6))；out=hidden+gate·value）；"

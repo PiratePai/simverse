@@ -31,22 +31,28 @@ def row_dtype(row: OpRow, gemm_dtype: str, ew_dtype: str) -> str:
 
 
 def price_row(row: OpRow, device: DeviceSpec, gemm_dtype: str = "fp8",
-              ew_dtype: str = "fp8") -> Dict[str, float]:
-    """单行 T0 计价。期望字节（weight_read_expected）按期望值进入（不取整）。"""
+              ew_dtype: str = "fp8", engram_lookup_host: bool = False
+              ) -> Dict[str, float]:
+    """单行 T0 计价；host Engram 表读取不套用 GPU HBM 带宽。"""
     bytes_exact = (row.weight_read + row.act_read + row.act_write + row.kv_read
                    + row.kv_write + row.state_read + row.state_write)
-    bytes_expected = row.weight_read_expected or 0.0
+    host_expected = ((row.weight_read_expected or 0.0)
+                     if engram_lookup_host and row.op == "engram_lookup" else 0.0)
+    bytes_expected = (row.weight_read_expected or 0.0) - host_expected
     est = roofline_ms(row.flops, bytes_exact + bytes_expected, device,
                       dtype=row_dtype(row, gemm_dtype, ew_dtype))
     est["bytes_exact"] = float(bytes_exact)
     est["bytes_expected"] = float(bytes_expected)
+    est["bytes_host_expected"] = float(host_expected)
     est["formula"] = FR.F_ROOFLINE
     return est
 
 
 def price_rows(rows: List[OpRow], device: DeviceSpec, gemm_dtype: str = "fp8",
-               ew_dtype: str = "fp8") -> List[Dict[str, float]]:
-    return [price_row(r, device, gemm_dtype, ew_dtype) for r in rows]
+               ew_dtype: str = "fp8", engram_lookup_host: bool = False
+               ) -> List[Dict[str, float]]:
+    return [price_row(r, device, gemm_dtype, ew_dtype, engram_lookup_host)
+            for r in rows]
 
 
 def stage_total(prices: List[Dict[str, float]]) -> float:

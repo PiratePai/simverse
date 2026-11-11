@@ -2,8 +2,8 @@
 
 更新：2026-11-11（两模型 forward/合入门禁轮 + R04 Engram 建模；早前 A 组/校准段落保留为历史记录；A 组二轮审计、ctx-KV 路径修正与 k_norm dtype 复核修正见下）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（候选分支 `codex/dflash-ctx-kv-path-fix`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-11 R04 轮全量 **234 passed**，exit 0；更早历史：k_norm 修正后 212 passed，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：234**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-11 R04 轮；212→234 为 V4.1 Engram 新增 tests/test_v41_engram.py 22 项）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-11 R04 验收修正后全量 **236 passed**，exit 0；更早历史：PR #3 合入时 234，k_norm 修正后 212 passed，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：236**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-11 R04 验收；212→234 为 V4.1 Engram 新增 22 项，审计追加 2 项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -60,13 +60,13 @@ memory 三对象/层 + staged 下界（表默认 **cpu_offload 研究假设**，
 显式 engram_table_placement 输入，host 驻留不进 GPU 峰值单列
 host_resident_bytes；显式 gpu → TP8 合计超标称如实 OOM）；TP>1 补
 head/wkv 两次 all-gather 通信行。独立 oracle：tests/test_v41_engram.py
-22 项（自写 Miller-Rabin 层桶和 == engram_num_embeddings 精确相等
+24 项（自写 Miller-Rabin 层桶和 == engram_num_embeddings 精确相等
 384,006,168/384,016,682、首 8 素数硬编码、TP1 表 202,758,032,400 B、
 tp=7/9/16 拒绝、逐行手算绝对值、开/关账本差=精确新增、count↔memory
 对账、blob sha1 防漂移）。门禁随事实更新（G9/G10/test_model_ir_v02
 断言归因见报告 §8，剩余缺口不变仍在阻断）。默认 V4.1 replay 前后
-逐项归因：decode FLOPs 7,067,478,214→7,146,543,454、TPOT
-113.34→116.15ms、GPU steady +39,485,440B（仅 wkv+qk）、host 表
+逐项归因：decode FLOPs 7,067,478,214→7,146,532,702、GPU 侧解析耗时下界
+113.34→116.15ms（host 查表/预取时延未知）、GPU steady +39,485,440B（仅 wkv+qk）、host 表
 25,344,443,520B、行 909→916；structure_complete 仍 False（CSA2/MoE/
 量化缺口不变）。报告：[docs/validation/v41-engram-20261111.md]
 (validation/v41-engram-20261111.md)；证据 ev-vllm-v41-engram；G-C1
