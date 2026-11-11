@@ -472,7 +472,7 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
 
 def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
                 quant: dict, tp: int = 1,
-                first_engram_layer: bool = False) -> List[OpRow]:
+                first_engram_layer: bool = False, rank: int = 0) -> List[OpRow]:
     """Engram 注入算子（v41_csa2 专用；per-rank 口径）。
 
     证据（vllm models/deepseek_v41/common/engram.py pin @f358f057，
@@ -499,20 +499,27 @@ def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
     e_max = int(engram_spec["max_ngram_size"])
     n_heads = int(engram_spec["n_heads"])
     layer_ids = list(engram_spec["layer_ids"])
-    b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
+    b_w = quant["dense_w"] / 8
     # TP 合法性：镜像源码断言 (shards−1)·part < n_hash_cols（L1096-1099）。
+    if tp < 1:
+        raise ValueError("Engram TP 必须为正整数")
     part = -(-cols // tp)
-    if tp < 1 or (tp - 1) * part >= cols:
+    if (tp - 1) * part >= cols:
         legal = [t for t in range(1, cols + 2)
                  if (t - 1) * (-(-cols // t)) < cols]
         raise ValueError(
             f"Engram TP{tp} 非法：{cols} 个哈希头 ceil 切分 part={part}，"
             f"(tp−1)·part={(tp - 1) * part} ≥ {cols}（engram.py L1096 断言；"
             f"合法 tp = {legal}）")
-    # 本层素数桶（rank=0 均匀假设：前 part 个 head 的桶长之和）
+    if not 0 <= rank < tp:
+        raise ValueError(f"Engram rank {rank} 不在 TP{tp} 范围内")
+    # 源码 lookup 只处理本 rank 的 part_n_hash_cols；gather 后才有全量列。
+    head_start = rank * part
+    local_cols = min(part, cols - head_start)
+    # 本层素数桶容量与同一 rank 的查表流量对齐。
     primes = engram_bucket_primes(int(engram_spec["vocab_size"]), len(layer_ids),
                                   e_max, n_heads)
-    rank_rows = sum(primes[layer_ids.index(li)][:part])
+    rank_rows = sum(primes[layer_ids.index(li)][head_start:head_start + local_cols])
     rows: List[OpRow] = []
     if first_engram_layer:
         rows.append(OpRow(
@@ -528,16 +535,16 @@ def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
                   f"每 head 1 mod+1 add ×{e_max - 1}×{n_heads}"))
     rows.append(OpRow(
         stage, li, "engram_lookup",
-        flops=T * cols * d_v,
+        flops=T * local_cols * d_v,
         weight_read=0,
-        weight_read_expected=float(T * cols * row_b),
-        act_read=int(T * cols * 4), act_write=int(T * cols * d_v * b_a),
+        weight_read_expected=float(T * local_cols * row_b),
+        act_read=int(T * local_cols * 4), act_write=int(T * local_cols * d_v * 2),
         weight_capacity=int(rank_rows * row_b),
         formula=FR.F_ENGRAM_LOOKUP, statistic="expectation",
-        shape=f"[T,{cols}] int32 ids → [T,{cols},{d_v}] bf16（dequant 逐元素 "
-              f"1 乘，L726-731）；表行读 {T * cols}×{row_b}B 为数据依赖期望"
+        shape=f"[T,{cols}] int32 ids → 本 rank [T,{local_cols},{d_v}] bf16"
+              f"（dequant 逐元素 1 乘，L726-731）；表行读 {T * local_cols}×{row_b}B 为数据依赖期望"
               f"流量（weight_read_expected；重复 n-gram 不去重保守上界），"
-              f"weight_read=0；表容量另计（rank0 分片 {rank_rows} 行×{row_b}B）"))
+              f"weight_read=0；表容量另计（rank{rank} 分片 {rank_rows} 行×{row_b}B）"))
     wkv_in = cols * d_v                            # 6144（L1703-1705）
     wkv_out = h * (int(engram_spec["hc_mult"]) + 1)  # 25600（L1726）
     if wkv_out % tp:
@@ -549,7 +556,7 @@ def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
         stage, li, "engram_wkv",
         flops=2 * T * wkv_in * oc_r,
         weight_read=int(wkv_in * oc_r * b_w), weight_capacity=int(wkv_in * oc_r * b_w),
-        act_read=int(T * wkv_in * b_a), act_write=int(T * oc_r * b_a),
+        act_read=int(T * wkv_in * 2), act_write=int(T * oc_r * 2),
         formula=FR.F_ENGRAM_WKV, statistic="exact",
         shape=f"[{T},{wkv_in}]@[{wkv_in},{oc_r}]（列切 25600/tp={oc_r}，"
               f"gather_output=True → 全宽 [T,{wkv_out}] all-gather 见通信行）"))
@@ -558,8 +565,8 @@ def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
         stage, li, "engram_post_wkv",
         flops=T * hc * (10 * h + 5),
         weight_read=int(2 * hc * h * 2), weight_capacity=int(2 * hc * h * 2),
-        act_read=int(T * hc * h * b_a + T * (hc + 1) * h * b_a + T),
-        act_write=int(T * hc * h * b_a),
+        act_read=int(T * hc * h * 2 + T * (hc + 1) * h * 2 + T),
+        act_write=int(T * hc * h * 2),
         formula=FR.F_ENGRAM_POST_WKV, statistic="exact",
         shape=f"grid (T×{hc},)（L1879）：ρ=(Σ hidden·q·k·key)·rsqrt(mean h²+eps)"
               f"·rsqrt(mean key²+eps)·rsqrt(d)，gate=sigmoid(sign(ρ)·"
@@ -597,7 +604,7 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                      quant: dict, tp: int = 1, prefill: bool = False,
                      role: str = "target", ep: int = 1, rank: int = 0,
                      plan=None) -> List[OpRow]:
-    """整模型一个阶段的逻辑账本（**per-rank 口径**，rank=0 均匀假设）。
+    """整模型一个阶段的逻辑账本（**per-rank 口径**，默认 rank=0）。
 
     decode/verify：ctx=查询前缓存长度 S；queries=新查询数 Q。
     prefill：S=0、queries=ctx（Q=整段）。
@@ -648,7 +655,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         if (engram_spec and li in engram_spec.get("layer_ids", ())
                 and layer.kind == MLA_CSA2):
             rows += engram_rows(stage, li, T, h, engram_spec, quant, tp,
-                                first_engram_layer=(li == engram_spec["layer_ids"][0]))
+                                first_engram_layer=(li == engram_spec["layer_ids"][0]),
+                                rank=rank)
     rows += head_rows(stage, model, B * Q, quant, tp)
     for r in rows:
         r.role = role

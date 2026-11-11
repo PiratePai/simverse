@@ -267,6 +267,8 @@ def engram_allocations(engram_spec: dict, hidden: int, quant: dict, tp: int,
     layer_ids = list(engram_spec["layer_ids"])
     if layer_id not in layer_ids:
         raise ValueError(f"层 {layer_id} 不在 engram_layer_ids {layer_ids}")
+    if tp < 1 or not 0 <= rank < tp:
+        raise ValueError(f"Engram rank {rank} / TP{tp} 非法")
     idx = layer_ids.index(layer_id)
     primes = engram_bucket_primes(int(engram_spec["vocab_size"]),
                                   len(layer_ids),

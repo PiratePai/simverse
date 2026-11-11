@@ -6,9 +6,10 @@ engram 8 键 → mapped；count 新增 engram_hash/lookup/wkv/post_wkv 四行
 （层 1/14，批级哈希一次）；memory 新增表/wkv/qk 对象 + staged 下界
 （表默认 **cpu_offload 研究假设**，场景显式 engram_table_placement 输入，
 host 驻留不进 GPU 峰值）；TP>1 补 head/wkv 两次 all-gather。独立 oracle
-tests/test_v41_engram.py 22 项（素数桶和 == engram_num_embeddings 精确
+tests/test_v41_engram.py 24 项（素数桶和 == engram_num_embeddings 精确
 相等、TP1 表 202,758,032,400 B、tp=7/9/16 拒绝）。默认 V4.1 replay：
-TPOT 113.34→116.15ms、GPU steady +39.5MB（表在 host 25.3GB 另列）；
+GPU 侧解析耗时下界 113.34→116.15ms（host 查表时延未知）、GPU steady +39.5MB
+（表在 host 25.3GB 另列）；
 structure_complete 仍 False（CSA2/MoE/量化缺口不变）。详见
 [validation/v41-engram-20261111.md](validation/v41-engram-20261111.md)。
 

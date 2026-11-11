@@ -216,6 +216,16 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
 
     # ---- 部署合法性（R01：统一 ParallelPlan；非法组合显式拒绝）----
     dep = scenario.deployment
+    engram_lookup_host = (bool((model.extras or {}).get("engram"))
+                          and dep.engram_table_placement == "cpu_offload")
+    if engram_lookup_host:
+        cap.add("engram_host_lookup_latency", "unknown",
+                "Engram 表在 host pinned memory：UVA 查表时延与预取重叠未实测；"
+                "仅计算 GPU 侧解析耗时下界，不用 GPU HBM 带宽给 host 读计时",
+                affected_metrics=["M01 TPOT", "M02 加速比", "M04 轮分解"])
+        cap.add("stage_cost_complete", "unknown",
+                "Engram host 查表与预取时延未知；阶段耗时仅为 GPU 侧解析下界",
+                affected_metrics=["M01 TPOT", "M02 加速比", "M04 轮分解"])
     pplan = validate_parallel(model, dep.target_tp, dep.target_ep,
                               draft if (draft is not None
                                         and scenario.method_id == "dflash_v1"
@@ -257,7 +267,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     base_rows = build_model_work(model, "target_decode", B, ctx, 1, quant,
                                  dep.target_tp, role="target", ep=dep.target_ep,
                                  plan=pplan)
-    base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt)
+    base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt,
+                             engram_lookup_host)
     t_base = stage_total(base_prices)
     roofline_points = _roofline_points(base_rows, base_prices, target_dev, gemm_dt)
     # 通信（R01 按层配方：attn allreduce 恒有；MLP 段 TP allreduce 或 EP all2all）
@@ -339,7 +350,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            plan.block_size, quant, dep.target_tp,
                                            role="target", ep=dep.target_ep,
                                            plan=pplan)
-            v_prices = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
+            v_prices = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
+                                  engram_lookup_host)
             t_verify = stage_total(v_prices)
             col_v = _collectives_cost(model, pplan, B * plan.block_size,
                                       quant, tp_link)
@@ -388,7 +400,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            plan.k_effective + 1, quant,
                                            dep.target_tp, role="target",
                                            ep=dep.target_ep, plan=pplan)
-            v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
+            v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
+                                    engram_lookup_host)
             t_verify = stage_total(v_prices_m)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
                                       quant, tp_link)
@@ -416,7 +429,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 weight = (1 - p_full if j == 0 else 1.0)
                 rows = chain_step_rows(f"draft_step_{j}", draft_model, m, ctx,
                                        dquant, 1, batch=B)
-                t = stage_total(price_rows(rows, target_dev, gemm_dt, ew_dt))
+                t = stage_total(price_rows(rows, target_dev, gemm_dt, ew_dt,
+                                           engram_lookup_host))
                 t_draft += t * (weight if j == 0 else 1.0) + (
                     p_full * t if j == 0 else 0.0)
                 rows_all += rows
@@ -424,7 +438,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            plan.k_effective + 1, quant,
                                            dep.target_tp, role="target",
                                            ep=dep.target_ep, plan=pplan)
-            v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt)
+            v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
+                                    engram_lookup_host)
             t_verify = stage_total(v_prices_c)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
                                       quant, tp_link)
@@ -530,6 +545,13 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     # ---- 指标 ----
     metrics = _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                              base_rows, memory, cap, model, draft)
+    if engram_lookup_host:
+        for key in ("M01_tpot_analytical", "M01_tpot_baseline"):
+            metric = metrics.get(key)
+            if isinstance(metric, Metric) and metric.value is not None:
+                metric.support = Support.APPROXIMATED
+                metric.reason = ("仅 GPU 侧解析耗时下界；Engram host 表查找与预取"
+                                 "时延未计，不能作为完整 TPOT")
     if calibrated_tpot is not None:
         metrics["M01_tpot_profile_calibrated"] = metric_from(
             calibrated_tpot, "ms", "profile:" + scenario.cost_profile,

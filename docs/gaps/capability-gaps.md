@@ -16,7 +16,7 @@
   staged 对象计入 memory（表默认 cpu_offload 研究假设，host 驻留不进 GPU 峰值；
   场景显式 engram_table_placement 输入），TP>1 补 head/wkv 两次 all-gather
   通信行；测试 tests/test_v41_engram.py（独立 Miller-Rabin/首 8 素数/表字节/
-  手算锚点/守恒/负例，22 项）。公式 v2.engram_* 四条；证据 ev-vllm-v41-engram。
+  手算锚点/守恒/负例，24 项）。公式 v2.engram_* 四条；证据 ev-vllm-v41-engram。
 - **2026-11-10 进展**：**hc（mHC 混合流）三键已建模解除**——每层 2 次边界算子
   （post 流更新+系数 GEMM+sinkhorn+collapse+RMSNorm 融合核；首层 hc_expand 广播；
   FP32 权重每卡复制）计入 count（hc_* 行，替代该族通用 norm/add 行防重复计费）
