@@ -67,25 +67,36 @@ F_CAPACITY = _f(
 #       pin @f358f057，source-checked 2026-11-10）----
 F_MHC_MIX = _f(
     "v2.mhc_mix",
-    "coeff GEMM FLOPs = 2·T·IC·mix_hc；IC=hc_dim=m·h（首层 attn 侧 IC=h），"
-    "mix_hc=(2+m)·m；权重 FP32（hc_*_fn 参数 dtype=float32）",
-    "model.py hc_attn_fn/hc_ffn_fn 形状 (mix_hc, hc_dim)、hc_post_alpha 常数 2.0",
-    "mHC 边界系数生成（每层 attn/ffn 各一次）")
+    "ops = T·[2·IC·mix + 2·IC + mix+3]；IC=mh（首层 attn IC=h）；"
+    "mix=2m+m²；GEMM MAC=IC·mix；split=s 时另加 (s−1)(mix+1)；"
+    "weight_read=mix·IC·4，fn capacity=mix·mh·4，L0 broadcast=mix·h·4 另列",
+    "vllm @f358f057 tilelang_kernels.py L904-912（GEMM/sqrsum）；"
+    "L383-390（prenorm 合并与缩放）；model.py L1530-1543（派生 broadcast）",
+    "unfused/split=1 参考；算术 op 精确，rsqrt=1；不含设备归约/冗余指令")
 F_MHC_SINKHORN = _f(
     "v2.mhc_sinkhorn",
-    "ops ≈ T·mix_hc·iters·5（每迭代每系数约 5 OP：减/幂/行和/列和/归一）",
-    "iters=hc_sinkhorn_iters 精确（model.py sinkhorn_repeat=hc_sinkhorn_iters）；"
-    "每迭代 OP 数为解析近似（tilelang kernel 未 pin）→ 行标 approximated",
-    "mHC 系数 sinkhorn 归一化（FP32 系数）")
+    "ops = T·{8m+2m²+[2m(m−1)+4m²]+(2·iters−1)[m(m−1)+m+m²]}；"
+    "m=4,iters=20 → 1400/token；仅 comb m×m 做 Sinkhorn",
+    "vllm @f358f057 tilelang_kernels.py L395-443（无 norm 变体 L215-265）；"
+    "torch.py L108-123：gates、行 softmax+eps、列归一、iters−1×(行,列)",
+    "有限输入/save_pre_mix=True；exact 算术 op 公式：max 比较/exp/sigmoid "
+    "各计 1 op，归约 n−1 次加，分母 eps 按轴复用；非指令数/实测 FLOPs")
 F_MHC_POST_PRE = _f(
     "v2.mhc_post_pre",
-    "FLOPs = 4·T·hc_dim（post 流更新 + collapse 各 2·T·hc_dim）"
-    "+ T·(4h+2)（融合 RMSNorm，norm_weight=attn_norm/ffn_norm）",
-    "model.py forward：常规路径 mhc_shifted_post_pre 融合前一子层 post 与本侧 "
-    "pre（else 分支）；Engram 层为 mhc_post_tilelang + engram + mhc_pre 分立",
-    "mHC 流折叠/展开边界（含残差与 norm；v41 层不再另计通用 norm/add 行）")
-F_MHC_EXPAND = _f("v2.mhc_expand", "写 = T·m·h（首层嵌入广播到 m 流）",
-                  "model.py 首层 hc_expand(x, hc_mult)", "首层流广播")
+    "ops = T·{[mh+2m²h]post + 2mh collapse + (4h+2)norm}；"
+    "首层 attn 无 post；hc_exit_post 仅取 post 项，末层无后继边界",
+    "vllm @f358f057 tilelang_kernels.py L766-769/L856-859（post），"
+    "L447-450/L478-481（首层 one-hot/collapse），L491-524（norm）；"
+    "model.py L1273（exit post）",
+    "post/collapse 算术精确；norm 沿用 4h+2 近似惯例（非 kernel 指令数）；"
+    "unfused/split=1 逻辑访问参考，保留每层 2 边界三行，无通用 norm/add 重计")
+F_MHC_EXIT_COLLAPSE = _f(
+    "v2.mhc_exit_collapse", "ops = 2·T·m·h（零初始化累加）；数学最简 (2m−1)·T·h",
+    "vllm @f358f057 triton.py L96-109（acc=0; acc+=pre*x），L144-145 "
+    "enable_fp_fusion=False；model.py L1187-1192；无 learned hc_head",
+    "exit post 归 F_MHC_POST_PRE 的 post 项；既有 final_norm 行不变")
+F_MHC_EXPAND = _f("v2.mhc_expand", "ops=0；读=T·h·b，写=T·m·h·b（首层广播）",
+                  "ops/mhc.py L326-355：一次 load，各流 store，无浮点算术", "首层流广播")
 
 # ---- Engram（DeepSeek-V4.1-Flash；证据 vllm/models/deepseek_v41/common/
 #       engram.py pin @f358f057 blob sha1 ba4ceea6，source-checked 2026-11-11

@@ -1,5 +1,14 @@
 # 重点模型与功能状态（2026-11-10；2026-11-11 R04 增补）
 
+2026-11-12 R05（V4.1 mHC/Sinkhorn 修正）：14 文件 blob SHA1 对 tree、SHA256
+pin 后补齐 sqrsum/prenorm、comb post、首层无 post、出口两行；Sinkhorn gates+
+m×m 归一由2400修为1400 op/token（算术 op 公式精确，exp/sigmoid/rsqrt=1，
+非指令数），norm 4h+2 仍为近似惯例。首层 broadcast 派生常驻缓冲491,520B单列。
+默认 replay op +14,657,520、known_peak +491,520B；Engram 原行/公式冻结。
+新增16测试，全量252通过；证据 ev-vllm-v41-mhc 仅 source-checked，kernel/CPU/GPU
+未执行，部署变体/实际 split/物理 HBM 未验证，structure_complete 仍 False。
+[R05 报告（含与任务书出入）](validation/v41-mhc-kernels-20261112.md)。
+
 2026-11-11 R04（V4.1 Engram 建模）：common/engram.py pin（vllm @f358f057，
 blob sha1 ba4ceea6 对 vllm-tree.json 校验）后单副本路径 Engram 落地——
 engram 8 键 → mapped；count 新增 engram_hash/lookup/wkv/post_wkv 四行
@@ -45,7 +54,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 | **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
 | **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
 | **预算契约与判定（R03a/b）** | nominal/allocatable(measured/hypothesis)/额外开销分列；四态判定 unknown/oom/feasible/conditional；已知下界超标称即 OOM；假设预算不进实际部署排名 |
-| mHC / Engram | mHC 已有源码边界映射和计数测试（Sinkhorn 操作数仍近似）；Engram 素数桶表/哈希/查表/wkv/门控已建模（R04；表位置 cpu_offload 为研究假设，DP 分片交换未覆盖） |
+| mHC / Engram | mHC kernel 源已 pin，Sinkhorn 算术公式精确、norm 惯例近似（R05；部署变体/物理执行未覆盖）；Engram 素数桶表/哈希/查表/wkv/门控已建模（R04；表位置 cpu_offload 为研究假设，DP 分片交换未覆盖） |
 | DT 流水事件核 | 微批依赖、资源互斥、周期和利用率；非完整在线服务 |
 | 接受律与比较 | 显式假设、未知传播、资格门禁；不从平均接受长度推造完整概率律 |
 | CLI/Web/导出/扫描 | 共用生产结果、精度选择、EP 选择、预算输入、独立运行身份 |

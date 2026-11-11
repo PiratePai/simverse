@@ -125,6 +125,17 @@ _PINNED_ASSETS = [
       "研究假设配方（场景 engram_table_placement，默认 cpu_offload）",
       "kernel 内部 op 数（哈希/门控常数 10d+5 等）为解析近似计数"],
      False, "2026-11-11"),
+    ("ev-vllm-v41-mhc", "source-checked",
+     "R05 pinned TileLang mHC：GEMM/sqrsum/prenorm、gates/Sinkhorn m×m、"
+     "post comb 流更新、首层无 post/broadcast 派生缓冲、出口 post/collapse",
+     str(REFS / "vllm" / "mhc-pin.json"),
+     "https://github.com/vllm-project/vllm/tree/"
+     "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；14 文件 blob SHA1 + SHA256",
+     "V4.1 mHC 有限输入；unfused/split=1 逻辑访问与算术 op 参考配方",
+     ["源码阅读 source-checked；所有 kernel/CPU forward 未执行，非 GPU measured",
+      "transcendental=1 op，RMSNorm 4h+2 惯例近似；非指令数/物理 HBM",
+      "split-k 运行时值及 overlap/mega/fused-AR/ROCm/CPU/XPU 部署变体未建模；"
+      "capture_aux 仅 speculative，流均值工作未建模"], False, "2026-11-12"),
     ("ev-vllm-v41-dspark", "source-checked",
      "vLLM V4.1 DSpark speculator：num_reqs 批处理、复用 V4 decoder 的事实",
      str(REFS / "vllm" / "vllm" / "v1" / "worker" / "gpu" / "spec_decode" / "dspark" / "speculator.py"),
