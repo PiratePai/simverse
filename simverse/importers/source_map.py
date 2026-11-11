@@ -63,7 +63,9 @@ ENTRIES: List[SourceMapEntry] = [
         input_domain="全部 full attention 层（attn_output_gate 家族默认）",
         both_sides_covered=True,
         note="ModelIR AttentionIR.output_gated=True → q_out=2·heads·d（已进计数）；"
-             "原 source_map 747-772 未覆盖 L802 gate 乘，2026-11-10 修正"),
+             "原 source_map 747-772 未覆盖 L802 gate 乘，2026-11-10 修正；"
+             "L802 逐元素 sigmoid·乘已另计 attn_output_gate 行（R06 CPU fixture "
+             "对照补齐，2026-11-12）"),
     SourceMapEntry(
         entry_id="sm-qwen35-moe-router",
         model_or_method="qwen3_5_moe MoE",

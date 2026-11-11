@@ -218,6 +218,24 @@ _PINNED_ASSETS = [
       "不是 Qwen3.6-35BA3B+DFlash 场景的真实性证据；无端到端实测对照；"
       "本会话未做新的硬件测量"],
      True),
+    ("ev-qwen36-cpu-fixture-r06", "numeric-checked",
+     "Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照（R06）：pin 官方 forward 随机权重"
+     "执行（GDN prefill/decode + FullAttn + 256→4E MoE 缩比），逐 GEMM/conv/router "
+     "计数与本仓 build_model_work(tp=1) 精确对账；关键张量形状/递推状态几何/"
+     "因果对数/无放回 top-k assignment 核验",
+     "tests/fixtures/qwen36_r06_cpu_fixture.json",
+     "HF pin modeling/configuration_qwen3_5_moe @b6401d66（in-repo "
+     "assets/identity/hf_transformers）+ torch 2.15.0+cpu / transformers 5.22.1 "
+     "/ py3.12 本机执行",
+     "fixture 维度 h=32,2L(GDN+Full),4E top-2, nv/nk=4/2, dk=dv=8, conv4；"
+     "不外推真实 35B 尺寸",
+     ["随机权重小尺寸 fixture，不覆盖真实 checkpoint/MTP/视觉塔/mrope 位置 id/"
+      "融合 kernel（fla/causal-conv1d 未装，走 PyTorch 参考实现）",
+      "gdn_recurrence 4·state_elems 是注册 approximated 口径（官方参考递推 "
+      "≈7 ops/elem，报告披露），本轮未改",
+      "CPU 执行为 fixture 级证据；模型级 cpu_forward 保持 not-run，"
+      "不构成完整 forward 或部署验证"],
+     True, "2026-11-12"),
     ("ev-h200-235b-distill", "measured",
      "H200 Qwen3-235B-A22B TP2/8 算子级 profile 蒸馏集（历史归档）",
      "profiles/h200_qwen3_235b_a22b/manifest.json",
@@ -282,7 +300,10 @@ def build_registry() -> Dict[str, EvidenceRecord]:
         (ev_id, kind, claim, rel, source, domain, limits, executed) = entry[:8]
         # 可选第 9 元素：登记日期（缺省 2026-11-09，与既有记录一致）
         captured = entry[8] if len(entry) > 8 else "2026-11-09"
-        path = (ASSETS / rel) if not rel.startswith("docs") else ROOT / rel
+        # docs/ 与 tests/ 相对仓根解析（ev-vllm-* 用 docs/ 前缀先例；
+        # R06 fixture 证据绑定 tests/fixtures/ 下落盘产物）
+        path = (ASSETS / rel) if not rel.startswith(("docs", "tests")) \
+            else ROOT / rel
         sha = _sha256_file(path)
         if not sha:
             # 资产缺失：登记为缺口而不是跳过（如实标注原则）

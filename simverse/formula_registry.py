@@ -28,6 +28,11 @@ F_SWA_PAIRS = _f("v2.swa_pairs", "pairs_layer = causal(n,1,win) − causal(start
                  "原理 §3：滑窗层可见对", "sliding attention 层")
 F_ATTN_CORE = _f("v2.attn_core", "FLOPs = pairs·H_card·(4d+5)",
                  "QK 2d + AV 2d + scale/softmax ≈5（v0.1 同约定）", "逐头注意力核")
+F_ATTN_OUT_GATE = _f("v2.attn_output_gate",
+                     "flops = 2·T·(heads·d)（sigmoid+乘，逐元素）",
+                     "hf modeling_qwen3_5_moe Qwen3_5MoeAttention L802"
+                     "（R06 CPU fixture 对照发现）",
+                     "qwen3_5_moe full-attn 层")
 F_ROPE = _f("v2.rope", "ops = 3·T·heads·rotary_dim（每旋转元素 3 OP）",
             "v0.1 rope() 约定；部分旋转只转 rotary_dim", "RoPE 层")
 F_RMSNORM = _f("v2.rmsnorm", "ops = T·(4·w+2)；rsqrt 记 1 OP",
