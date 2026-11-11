@@ -415,18 +415,13 @@ def norm_add_rows(stage: str, li: int, T: int, h: int, quant: dict) -> List[OpRo
 
 def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
                      quant: dict, first_layer: bool = False) -> List[OpRow]:
-    """mHC（mega hyper-connections）边界算子（v41_csa2 专用）。
+    """mHC 全宽复制边界：pinned TileLang 算术 op，未执行 kernel。
 
-    证据（vllm models/deepseek_v41/nvidia/model.py pin @f358f057；
-    source-checked 2026-11-10）：
-      * 每层 2 次边界（attn 侧 hc_attn_fn / ffn 侧 hc_ffn_fn），常规路径为
-        mhc_shifted_post_pre 融合核 = 前一子层 post（流更新）+ 本侧系数 GEMM
-        + sinkhorn(hc_sinkhorn_iters) + collapse + RMSNorm（norm_weight 即
-        attn_norm/ffn_norm）→ v41 层**不再**另计通用 norm/add 行（防重复计费）；
-      * hc_dim = hc_mult·h 为全宽流：mHC 边界不随 TP 切分（attention 内部自行
-        分片；hc 权重每卡复制，见 lowering/memory），本函数不除 tp；
-      * 首层输入为广播嵌入：attn 侧系数 GEMM IC=h（非 hc_dim），另有
-        hc_expand 广播行（model.py `residual = hc_expand(x, hc_mult)`）；
+    字节为 unfused、n_splits=1 逻辑访问参考配方，非实测 HBM；映射见
+    docs/validation/v41-mhc-kernels-20261112.md。mix 行拥有 GEMM/sqrsum
+    及 prenorm 归并；sinkhorn 行拥有 gates/comb；post_pre 行拥有前一
+    子层 post 和当前 collapse/norm。首层 attn 无 post、无 pre_mix_in 读。
+    FMA=2，exp/sigmoid/rsqrt=1；norm 沿用 4h+2 近似惯例并单列标记。
       * Engram 层（extras.hc.engram_layer_ids）post/pre 分立执行 + Engram 注入
         ——注入算子已由 engram_rows 建模（2026-11-11 R04，common/engram.py
         pin @f358f057 blob ba4ceea6）；本函数边界算子构成与常规层相同
@@ -440,34 +435,67 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
     rows: List[OpRow] = []
     if first_layer:
         rows.append(OpRow(
-            stage, li, "hc_expand", flops=T * hc_dim,
+            stage, li, "hc_expand", flops=0,
             act_read=int(T * h * b_a), act_write=int(T * hc_dim * b_a),
-            formula=FR.F_MHC_EXPAND, shape=f"嵌入广播 {m} 流 × h"))
+            formula=FR.F_MHC_EXPAND, shape=f"嵌入广播 {m} 流 × h；拷贝无浮点运算"))
     for side, fn in (("attn", "hc_attn_fn"), ("ffn", "hc_ffn_fn")):
-        ic = h if (first_layer and side == "attn") else hc_dim
+        entry = first_layer and side == "attn"
+        ic = h if entry else hc_dim
         rows.append(OpRow(
-            stage, li, f"hc_{side}_mix", flops=2 * T * ic * mix,
-            weight_read=int(mix * hc_dim * 4),          # FP32（源码 dtype）
+            stage, li, f"hc_{side}_mix",
+            flops=T * (2 * ic * mix + 2 * ic + mix + 3),
+            weight_read=int(mix * ic * 4),             # L0 读派生 broadcast
             weight_capacity=int(mix * hc_dim * 4),
-            act_read=int(T * ic * b_a), act_write=int(T * mix * 4),
+            act_read=int(T * ic * b_a), act_write=int(T * (mix + 1) * 4),
             formula=FR.F_MHC_MIX,
-            shape=f"[{T},{ic}]@[{ic},{mix}]·{fn}（fp32，每卡复制）"))
+            shape=f"[{T},{ic}]@[{ic},{mix}]·{fn}；GEMM + sqrsum 2IC + "
+                  f"prenorm {mix}+3 op/token；split=1 参考，FP32 每卡复制；"
+                  f"L0 broadcast 派生缓冲容量另列"))
+        axis_ops = m * (m - 1) + m + m * m
+        gate_sinkhorn_ops = (8 * m + 2 * m * m
+                             + 2 * m * (m - 1) + 4 * m * m
+                             + (2 * iters - 1) * axis_ops)
         rows.append(OpRow(
-            stage, li, f"hc_{side}_sinkhorn", flops=T * mix * iters * 5,
-            act_read=int(T * mix * 4), act_write=int(T * mix * 4),
-            formula=FR.F_MHC_SINKHORN, statistic="approximated",
-            shape=f"{T}×{mix} 系数 × {iters} 迭代（FP32；每迭代 OP 数近似）"))
+            stage, li, f"hc_{side}_sinkhorn", flops=T * gate_sinkhorn_ops,
+            weight_read=T * (mix + 3) * 4, weight_capacity=(mix + 3) * 4,
+            act_read=int(T * (mix + 1) * 4), act_write=int(T * mix * 4),
+            formula=FR.F_MHC_SINKHORN, statistic="exact",
+            shape=f"gates + {m}×{m} comb；行 softmax+eps → 列归一 → "
+                  f"{iters - 1}×(行,列)；{gate_sinkhorn_ops} op/token；"
+                  f"算术 op 精确（exp/sigmoid=1，非指令数），有限输入"))
         norm_ops = T * (4 * h + 2)
+        post_read = 0 if entry else T * ((m * m + m) * 4
+                                         + (hc_dim + h) * b_a)
+        post_write = 0 if entry else T * hc_dim * b_a
+        pre_read = 0 if entry else T * m * 4
         rows.append(OpRow(
             stage, li, f"hc_{side}_post_pre",
-            flops=4 * T * hc_dim + norm_ops,
-            weight_read=int(h * b_a),
-            act_read=int((T * hc_dim + T * h) * b_a),
-            act_write=int((T * hc_dim + T * h) * b_a),
-            formula=FR.F_MHC_POST_PRE,
-            shape=f"post 流更新+collapse（各 2·T·{hc_dim}）+ RMSNorm(h={h})；"
-                  f"含残差（流上）"))
+            flops=(0 if entry else T * (m * h + 2 * m * m * h))
+                  + 2 * T * hc_dim + norm_ops,
+            weight_read=int(T * h * b_a),
+            act_read=int(post_read + T * hc_dim * b_a + pre_read),
+            act_write=int(post_write + T * h * b_a),
+            formula=FR.F_MHC_POST_PRE, statistic="approximated",
+            shape=f"{'首层无 post；one-hot collapse' if entry else '前一子层 post mh+2m²h；collapse'}"
+                  f" 2mh + RMSNorm 4h+2（惯例近似，源码另有归约）；"
+                  f"unfused/split=1 逻辑字节，b=act/8，非实测 HBM"))
     return rows
+
+
+def hc_exit_rows(stage: str, T: int, h: int, hc: dict, quant: dict) -> List[OpRow]:
+    """末层 post + carried pre_mix collapse；无 learned hc_head。"""
+    m, b = hc["mult"], quant["act"] / 8
+    return [
+        OpRow(stage, -1, "hc_exit_post", flops=T * (m * h + 2 * m * m * h),
+              act_read=int(T * ((m * m + m) * 4 + (m + 1) * h * b)),
+              act_write=int(T * m * h * b), formula=FR.F_MHC_POST_PRE,
+              shape="仅末层 FFN post；无 collapse/norm；mh+2m²h，unfused 逻辑字节"),
+        OpRow(stage, -1, "hc_exit_collapse", flops=2 * T * m * h,
+              act_read=int(T * (m * h * b + m * 4)),
+              act_write=int(T * h * b), formula=FR.F_MHC_EXIT_COLLAPSE,
+              shape="Triton 从零 acc+=pre*x，2mh op；数学最简归约 (2m−1)h；"
+                    "final_norm 由既有行拥有"),
+    ]
 
 
 def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
@@ -657,6 +685,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
             rows += engram_rows(stage, li, T, h, engram_spec, quant, tp,
                                 first_engram_layer=(li == engram_spec["layer_ids"][0]),
                                 rank=rank)
+    if hc_spec and any(layer.kind == MLA_CSA2 for layer in model.layers):
+        rows += hc_exit_rows(stage, B * Q, h, hc_spec, quant)
     rows += head_rows(stage, model, B * Q, quant, tp)
     for r in rows:
         r.role = role

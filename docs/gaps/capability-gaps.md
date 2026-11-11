@@ -22,14 +22,19 @@
   FP32 权重每卡复制）计入 count（hc_* 行，替代该族通用 norm/add 行防重复计费）
   与 memory（-w-mhc 分配）；测试 tests/test_v41_hc.py（手算锚点/整模型复算/TP
   不变性/复制守恒/权重守恒）。公式 v2.mhc_* 四条。
+- **2026-11-12 R05 进展**：14 kernel 文件 blob SHA1/SHA256 已 pin，prenorm/
+  comb post、首层/出口与 broadcast 派生容量已修正；Sinkhorn 算术 op 公式
+  m4/iters20=1400，norm 4h+2 仍为近似惯例；源码阅读仅 source-checked。
+  未执行 kernel/CPU/GPU；部署变体/实际 split 与物理流量仍缺。
+  [逐项复验、差异与 replay](../validation/v41-mhc-kernels-20261112.md)。
 - **仍缺（G-C1 剩余）**：Engram **DP 分片交换**（all-to-all/EngramPeerExchange/
   symmetric memory/DPSharedEngramStorage）与 EngramBatch MXFP8 打包路径未建模
   （本仓默认单副本路径不启用，登记未覆盖）；cpu_offload 运行时行为（预取流/
   TLB/GB200 排序阈值 36864/4096）未建模；amd/engram.py 变体未 pin；mhc
-  tilelang kernel 源码仍未入评审包。CSA2/MoE scoring、量化映射、swiglu clamp、
+  kernel/CPU/GPU 执行、实际 split-k 与部署变体未验证（源码已由 R05 pin 入册）。CSA2/MoE scoring、量化映射、swiglu clamp、
   candidate block、compress_ratios 尾部为独立缺口（不在 G-C1 内）。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
-  mhc tilelang kernel 源；structure_complete 还需 CSA2/MoE/量化缺口闭环。
+  mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需 CSA2/MoE/量化缺口闭环。
 - **当前降级**：structure gate 拦截（capability 可见；Engram 单机/hc 部分已不再缺）。
 - **优先级**：P0（必需模型场景）。
 

@@ -168,6 +168,48 @@ ENTRIES: List[SourceMapEntry] = [
              "sharding engram gathers；CSA2/MoE/量化缺口仍阻断 "
              "structure_complete=False，不冒充"),
     SourceMapEntry(
+        entry_id="sm-v41-mhc-kernels",
+        model_or_method="deepseek_v41_flash mHC",
+        semantic="每层 attn/ffn 两边界；首层无 post + broadcast GEMM；"
+                 "末层 exit post + carried pre_mix collapse；无 learned hc_head",
+        source_pin=VLLM_PIN,
+        source_location="kernels/mhc/tilelang.py:60-213,256-484；"
+                        "tilelang_kernels.py:79-115（融合选择）,383-443"
+                        "（prenorm/gates/Sinkhorn）,447-524（collapse/norm），"
+                        "692-810（fused GEMM）,813-863（post）,866-1042（GEMM）；"
+                        "warmup.py:18-21；torch.py:108-123；triton.py:76-147；"
+                        "models/deepseek_v41/nvidia/ops/mhc.py:45-73,99-355；"
+                        "ops/mega_mhc.py:16-44；ops/cute_dsl/all_reduce_mhc.py:1185-1766；"
+                        "nvidia/model.py:523-534,583-600,1187-1192,1259-1279,1530-1543；"
+                        "layers/mhc.py:16-94,346-553；amd/mhc.py:16-26",
+        branch_predicate="无 overlap stream/mega/fused-AR → TileLang；"
+                         "T<=32 and h%128==0 → fused（SM100+ h=4096,T<=4 "
+                         "另有 single-pass）；否则 post+GEMM；deep_gemm 可用 "
+                         "→ bucket split∈{1,4,16}，fallback split=1；"
+                         "fused split 自选（V4.1 h=5120 时 8）；overlap 需 "
+                         "SM100 family/deep_gemm/K%64/N%8/0<N<=32/非 ubatching，"
+                         "并限 FULL graph capture、非 piecewise；"
+                         "Engram 注入层 attn post/pre 强制分立；"
+                         "fused-AR 需 TP4、非 EP、h5120/m4、MNNVL；"
+                         "mega 需 capability family100、h%1024==0、m4、"
+                         "deep_gemm 符号存在、pre_mix/norm、非 capture_aux、T<=2**20；"
+                         "ROCm gfx942 torch/triton，gfx950 可用 aiter 优先，"
+                         "其他 ROCm 可走 TileLang；CPU/XPU 独立分派",
+        thresholds="NVIDIA overlap<=16 token；ROCm overlap<=128；fused<=32；"
+                   "split 归并额外 (s−1)(mix+1) op/token；NaN 行跳过余下循环",
+        input_domain="有限输入；save_pre_mix=True；逻辑 unfused/split=1 参考配方",
+        both_sides_covered=False,
+        uncovered_domain=["所有 kernel 与 CPU forward 未执行，非 measured",
+                          "overlap/mega/fused-AR/ROCm/CPU/XPU 部署变体未建模",
+                          "split-k 运行时值/设备 SM 数未知；fused 重复 post、"
+                          "padding/warp 归约不作物理执行计数；fused 流量未降低",
+                          "capture_aux 仅 speculative 配置；流均值工作未建模",
+                          "RMSNorm 4h+2 与 act 位宽为账本惯例；kernel 固定 BF16；"
+                          "逻辑字节非 HBM 实测"],
+        note="R05；14 文件 blob SHA1 对 tree，SHA256 清单 mhc-pin.json；"
+             "算术 op 公式 exact（transcendental=1），norm 惯例 approximated；"
+             "source-checked，不能据此解除完整结构/执行门禁"),
+    SourceMapEntry(
         entry_id="sm-v41-csa2-moe-unverified",
         model_or_method="deepseek_v41_flash CSA2/MoE",
         semantic="CSA2 注意力/投影为 v0.1 移植；MoE sqrtsoftplus/noaux_tc/"

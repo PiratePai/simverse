@@ -48,13 +48,15 @@ _QWEN36_EVIDENCE = ModelEvidence(
 _V41_EVIDENCE = ModelEvidence(
     forward_source="partial-source",
     cpu_forward="not-run", gpu_measurement="none",
-    checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch"),
+    checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch",
+                   "sm-v41-mhc-kernels"),
     unverified_paths=(
         "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与"
         "EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；"
         "cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子"
         "已 source-checked（ev-vllm-v41-engram，R04）",
-        "mhc_tilelang_kernel: mHC 边界计数为 source-checked+近似，tilelang 核未执行",
+        "mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；"
+        "RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模",
         "csa2_attention_projection: CSA2 注意力/投影为 v0.1 移植，非独立 forward 证据",
         "csa2_moe_routing: sqrtsoftplus/noaux_tc/分组路由未建模",
         "candidate_publish: 候选块发布/消费语义未独立核验",
@@ -177,7 +179,8 @@ def _v41() -> ModelIR:
         "DeepSeek-V4.1-Flash (MLA+CSA2, 全层 MoE, Engram/hc 已建模/CSA2-MoE 缺口)",
         full_config=full, text_prefix="text_config")
     return replace(ir, evidence=_V41_EVIDENCE,
-                   evidence_refs=("ev-v41-config", "ev-vllm-v41-model",
+                   evidence_refs=("ev-v41-config", "ev-vllm-v41-mhc",
+                                  "ev-vllm-v41-model",
                                   "ev-vllm-v41-engram"))
 
 

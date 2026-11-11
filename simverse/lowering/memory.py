@@ -414,6 +414,13 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             allocs.append(Allocation(
                 f"{role}-w-mhc-L{li}", "weights", role, int(hc_b),
                 live_note="常驻 fp32 每卡复制（hc_attn_fn/hc_ffn_fn）"))
+            if li == model.layers[0].index:
+                allocs.append(Allocation(
+                    f"{role}-w-mhc-broadcast-L{li}", "weights", role,
+                    int(mix * model.hidden * 4),
+                    live_note="派生自 hc_attn_fn.view(mix,m,h).sum(1)，"
+                              "finalize_mhc_broadcast_weights 时生成；"
+                              "FP32 每卡复制，非独立参数（model.py L1530-1543）"))
         engram_spec = (model.extras or {}).get("engram") \
             if fam == "v41_csa2" else None
         if engram_spec and li in engram_spec.get("layer_ids", ()):

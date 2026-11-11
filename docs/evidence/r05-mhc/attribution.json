@@ -1,0 +1,419 @@
+{
+  "before_sha256": "740afbbe4e69a33fb3014c4be698bd9c4998c22432850b0fd84c49811c4efdbb",
+  "scenario_sha256": "9b23b67565292038f64748975561e46fafbea8a36e8254715a08cc7f6f80bf14",
+  "before": {
+    "flops": 7146532702,
+    "weight_read": 1551736064,
+    "weight_read_expected": 530843184.0,
+    "act_read": 7419934,
+    "act_write": 4817888,
+    "kv_read": 39858816,
+    "kv_write": 33408,
+    "state_read": 0,
+    "state_write": 0,
+    "rows": 916
+  },
+  "after": {
+    "flops": 7161190222,
+    "weight_read": 1550270144,
+    "weight_read_expected": 530843184.0,
+    "act_read": 9086814,
+    "act_write": 4823328,
+    "kv_read": 39858816,
+    "kv_write": 33408,
+    "state_read": 0,
+    "state_write": 0,
+    "rows": 918
+  },
+  "delta": {
+    "flops": 14657520,
+    "weight_read": -1465920,
+    "weight_read_expected": 0.0,
+    "act_read": 1666880,
+    "act_write": 5440,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0,
+    "rows": 2
+  },
+  "by_op": {
+    "hc_attn_mix": {
+      "before": {
+        "flops": 38584320,
+        "weight_read": 78643200,
+        "weight_read_expected": 0.0,
+        "act_read": 803840,
+        "act_write": 3840,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 40193080,
+        "weight_read": 77168640,
+        "weight_read_expected": 0.0,
+        "act_read": 803840,
+        "act_write": 4000,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 1608760,
+        "weight_read": -1474560,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 160,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "t_ms_delta": -0.000439956819862284
+    },
+    "hc_attn_post_pre": {
+      "before": {
+        "flops": 4096080,
+        "weight_read": 204800,
+        "weight_read_expected": 0.0,
+        "act_read": 1024000,
+        "act_write": 1024000,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 9646160,
+        "weight_read": 204800,
+        "weight_read_expected": 0.0,
+        "act_read": 1821344,
+        "act_write": 1003520,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 5550080,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 797344,
+        "act_write": -20480,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "t_ms_delta": 0.00023246059891547817
+    },
+    "hc_attn_sinkhorn": {
+      "before": {
+        "flops": 96000,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 3840,
+        "act_write": 3840,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 56000,
+        "weight_read": 4320,
+        "weight_read_expected": 0.0,
+        "act_read": 4000,
+        "act_write": 3840,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": -40000,
+        "weight_read": 4320,
+        "weight_read_expected": 0.0,
+        "act_read": 160,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "t_ms_delta": 1.3332709871561852e-06
+    },
+    "hc_exit_collapse": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 40960,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 20496,
+        "act_write": 5120,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "delta": {
+        "flops": 40960,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 20496,
+        "act_write": 5120,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "t_ms_delta": 7.650706628555052e-06
+    },
+    "hc_exit_post": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 184320,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 25680,
+        "act_write": 20480,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "delta": {
+        "flops": 184320,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 25680,
+        "act_write": 20480,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "t_ms_delta": 1.3797732067303704e-05
+    },
+    "hc_expand": {
+      "before": {
+        "flops": 20480,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 5120,
+        "act_write": 20480,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "after": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 5120,
+        "act_write": 20480,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "delta": {
+        "flops": -20480,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "t_ms_delta": -2.069732187972968e-09
+    },
+    "hc_ffn_mix": {
+      "before": {
+        "flops": 39321600,
+        "weight_read": 78643200,
+        "weight_read_expected": 0.0,
+        "act_read": 819200,
+        "act_write": 3840,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 40961080,
+        "weight_read": 78643200,
+        "weight_read_expected": 0.0,
+        "act_read": 819200,
+        "act_write": 4000,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 1639480,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 160,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "t_ms_delta": 2.1344891510191588e-07
+    },
+    "hc_ffn_post_pre": {
+      "before": {
+        "flops": 4096080,
+        "weight_read": 204800,
+        "weight_read_expected": 0.0,
+        "act_read": 1024000,
+        "act_write": 1024000,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 9830480,
+        "weight_read": 204800,
+        "weight_read_expected": 0.0,
+        "act_read": 1847040,
+        "act_write": 1024000,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 5734400,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 823040,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "t_ms_delta": 0.0002462631071021849
+    },
+    "hc_ffn_sinkhorn": {
+      "before": {
+        "flops": 96000,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 3840,
+        "act_write": 3840,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 56000,
+        "weight_read": 4320,
+        "weight_read_expected": 0.0,
+        "act_read": 4000,
+        "act_write": 3840,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": -40000,
+        "weight_read": 4320,
+        "weight_read_expected": 0.0,
+        "act_read": 160,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "t_ms_delta": 1.3332709871561852e-06
+    }
+  },
+  "t_ms_delta": 6.309324599840238e-05,
+  "before_memory": {
+    "steady_bytes": 35662849472,
+    "transient_peak_bytes": 3072,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "after_memory": {
+    "steady_bytes": 35663340992,
+    "transient_peak_bytes": 3072,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "before_known_peak": 35662852544,
+  "after_known_peak": 35663344064,
+  "execution": "analytical replay only; no CPU forward or kernel execution"
+}

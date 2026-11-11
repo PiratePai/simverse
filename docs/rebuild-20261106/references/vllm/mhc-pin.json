@@ -1,0 +1,93 @@
+{
+  "repo": "https://github.com/vllm-project/vllm",
+  "commit": "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+  "checked_at": "2026-11-12",
+  "evidence_kind": "source-checked",
+  "executed": false,
+  "files": [
+    {
+      "path": "vllm/model_executor/kernels/mhc/__init__.py",
+      "size": 926,
+      "blob_sha1": "6fc49199891eb3e4a61f406946e4e561775764b1",
+      "sha256": "b1aac23563953599c1dabe33e38d6a4c17cb72653409850854324c233ee8f5ab"
+    },
+    {
+      "path": "vllm/model_executor/kernels/mhc/aiter.py",
+      "size": 12594,
+      "blob_sha1": "f102143ab08fa11c5c31f765a4c7834243cef13e",
+      "sha256": "5cd6198258aec24bcd402a69ceefdb4267dc2f8bd680e9f0a243d8bc7d37f233"
+    },
+    {
+      "path": "vllm/model_executor/kernels/mhc/cpu.py",
+      "size": 3345,
+      "blob_sha1": "d12b0eae1851da6c43372b6d99b57126550ce7f0",
+      "sha256": "7245039d88c8e34f747e410428086466b2ce0c5c094bde71d832454992905a1b"
+    },
+    {
+      "path": "vllm/model_executor/kernels/mhc/tilelang.py",
+      "size": 37600,
+      "blob_sha1": "5a291b9c320feca2e2b23bb170f52b3d571c9865",
+      "sha256": "cf75da24521424fbe07ff8228e18c8272b7878bd80bc2dcefc1d99a598d117fb"
+    },
+    {
+      "path": "vllm/model_executor/kernels/mhc/tilelang_kernels.py",
+      "size": 69229,
+      "blob_sha1": "d79f7f42ab6e8f0c23c5230fb61216c149f52fb8",
+      "sha256": "1cf58ea6d51dd56f886b0a9571dc0ad9d75a0a908fd68b1c2d6d28234bd13d55"
+    },
+    {
+      "path": "vllm/model_executor/kernels/mhc/torch.py",
+      "size": 5356,
+      "blob_sha1": "eb4de35e7c752ffd858b72724608dabc78080668",
+      "sha256": "3697085aa6f0070e165c145f9c337ca3fe0623623c8265d29e50c43467e49985"
+    },
+    {
+      "path": "vllm/model_executor/kernels/mhc/triton.py",
+      "size": 15479,
+      "blob_sha1": "0e6c47b52dfae6cc45db2655f69da865dc17a466",
+      "sha256": "8f61199e55adf03d8072b7e51f76daf584a89ba0e7d6312fda254668f7f2370c"
+    },
+    {
+      "path": "vllm/model_executor/kernels/mhc/warmup.py",
+      "size": 3546,
+      "blob_sha1": "deb1cf429a0c14967659ea0a5bc35d8324906980",
+      "sha256": "feee09b7e0444e24b53c9619d7621467848b707b97b7ad81ff42b7824803a38c"
+    },
+    {
+      "path": "vllm/model_executor/layers/mhc.py",
+      "size": 30990,
+      "blob_sha1": "19e8b427b494bb28876a811e456673aa5a5b0d37",
+      "sha256": "433d750a4d669ad468679b1faf0a3f1e846410198fb4a1eeee2d14cfe55e6a55"
+    },
+    {
+      "path": "vllm/models/deepseek_v41/amd/mhc.py",
+      "size": 4434,
+      "blob_sha1": "bee13f5d502325c54659d94085053fab66665c81",
+      "sha256": "9be806b5fb84bee3ce3f874e118a9697e3b788e06f9ac5b91a48e4c90060cdfa"
+    },
+    {
+      "path": "vllm/models/deepseek_v41/nvidia/ops/cute_dsl/all_reduce_mhc.py",
+      "size": 76037,
+      "blob_sha1": "166efc56ff7686f5797da8737d73877be433b303",
+      "sha256": "9203d5c62634a4858e28350f20599dc29964eab901e771185fd5fd321a2469d7"
+    },
+    {
+      "path": "vllm/models/deepseek_v41/nvidia/ops/mega_mhc.py",
+      "size": 3022,
+      "blob_sha1": "bdb5b95bbeb94d5f8dd4c45c1d7ff450f4ccd8b4",
+      "sha256": "4b4af8b71c20d929303b15bf770eeff25a875046f08dc698ca8c47bb51b4fb9c"
+    },
+    {
+      "path": "vllm/models/deepseek_v41/nvidia/ops/mhc.py",
+      "size": 11647,
+      "blob_sha1": "a2207d1c4d7051c1ff11e55ae31a6d53d651a74b",
+      "sha256": "e7c3f0ae3cbfe54f41ad2718600b47906571008719fb9da1de86cd7da97636d5"
+    },
+    {
+      "path": "vllm/models/deepseek_v41/nvidia/ops/cute_dsl/__init__.py",
+      "size": 315,
+      "blob_sha1": "03d8a11e0bc205ef5b8cc48648fd000af8db5981",
+      "sha256": "a70e7952fea2ea51d1165caa7b2a723eed03f0446a58bd0b60ce7310ca300551"
+    }
+  ]
+}

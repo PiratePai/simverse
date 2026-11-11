@@ -1,11 +1,23 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-11（两模型 forward/合入门禁轮 + R04 Engram 建模；早前 A 组/校准段落保留为历史记录；A 组二轮审计、ctx-KV 路径修正与 k_norm dtype 复核修正见下）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（候选分支 `codex/dflash-ctx-kv-path-fix`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-11 R04 验收修正后全量 **236 passed**，exit 0；更早历史：PR #3 合入时 234，k_norm 修正后 212 passed，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：236**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-11 R04 验收；212→234 为 V4.1 Engram 新增 22 项，审计追加 2 项）。
+更新：2026-11-12（R05 mHC/Sinkhorn 修正；此前两模型门禁/R04/A组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（本轮本地分支 `codex/v41-mhc-r05`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R05 全量 **252 passed**，exit 0；此前 R04 236、PR #3 合入时234、k_norm修正后212等为历史轮次）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：252**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R05；236→252 为 mHC pin、独立算术/数值 oracle、字节/派生缓冲守恒与 R04 冻结回归新增 16 项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-12 R05 mHC/Sinkhorn**：14 文件完整 blob SHA1 对 pinned tree、SHA256
+清单入册，新增 sm-v41-mhc-kernels/ev-vllm-v41-mhc（source-checked，executed=False）。
+补齐 prenorm/sqrsum、comb post；Sinkhorn 仅 m×m，m4/iters20=1400 op/token；
+首层无 post、expand为拷贝零 FLOPs；末层出口 post+collapse两行（layer=-1），
+Triton零累加collapse=2mh，数学最简(2m−1)h另列；norm仍保留4h+2近似惯例。
+L0新增491,520B broadcast派生缓冲，非参数；原 Engram 行/函数/公式未动。
+默认TP8/B1/ctx32768 replay：op 7,146,532,702→7,161,190,222，权重读
+−1,465,920B、激活读+1,666,880B，GPU解析下界116.152651919→116.152715012ms；
+known_peak +491,520B，预算/峰值完整性unknown不变。新增16项独立 oracle/回归，
+G7/G11语义未改。未执行kernel/CPU forward/GPU，部署变体、实际split与物理HBM
+仍未建模。[报告与任务书差异](validation/v41-mhc-kernels-20261112.md)。
 
 **A 组二轮审计补漏（2026-11-10，R01/R02a/R02b）**：对 pinned vLLM @dc74b8cb
 逐文件复核发现并修复 4 处漏计（证据 `ev-vllm-logits-ctxkv-billing`，
