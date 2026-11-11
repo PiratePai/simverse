@@ -168,6 +168,84 @@ ENTRIES: List[SourceMapEntry] = [
              "sharding engram gathers；CSA2/MoE/量化缺口仍阻断 "
              "structure_complete=False，不冒充"),
     SourceMapEntry(
+        entry_id="sm-v41-mhc-kernels",
+        model_or_method="deepseek_v41_flash mHC kernels",
+        semantic="一次 mHC 边界 kernel 分支表与操作计数（R05，2026-11-12）："
+                 "B5 默认路径 mhc_fused_post_pre_delayed_tilelang（T≤32 且 "
+                 "h%128==0 时 _MHC_FUSED_TILELANG_KERNEL 融合核把 post 折入 "
+                 "prenorm GEMM；T>32 时 _MHC_POST_TILELANG_KERNEL + prenorm "
+                 "GEMM，DeepGEMM TF32 split-K 或 tilelang FP32，FLOPs 相同；"
+                 "model 路径 norm_weight 恒非 None → MHC_PRE_NORM_KERNEL "
+                 "epilogue）；系数 epilogue = 门+affine+softmax+sinkhorn(R−1 "
+                 "次行/列交替)；首层 attn 侧 IC=h 读 hc_attn_fn_broadcast + "
+                 "hc_expand；Engram 层（1/14）post/pre 分立不改变总量；"
+                 "模型出口 = 末层 FFN post + hc_collapse_triton 终折叠 + "
+                 "final RMSNorm（另计）。计数约定：初等运算各 1 op、超越函数 "
+                 "1 op、归约 n−1（公式 v2.mhc_* 六条）",
+        source_pin=VLLM_PIN,
+        source_location="vllm/model_executor/kernels/mhc/tilelang.py:256-486"
+                        "（mhc_fused_post_pre_delayed_tilelang 分支）、"
+                        "778-798（mhc_post_tilelang）、685-775"
+                        "（mhc_pre_broadcast_tilelang）；kernels/mhc/"
+                        "tilelang_kernels.py:63-115（fused config：T≤32 且 "
+                        "h%128==0；T<16→(2,8,128)、T∈[16,32]→(6,8,128)；"
+                        "single-pass 需 SM100 且 h==4096）、319-527"
+                        "（mhc_pre_big_fuse_with_norm_tilelang：sinkhorn "
+                        "L383-441、迭代 (R−1) L433-440、NaN 守卫 L432、"
+                        "collapse L478-502、两遍 RMSNorm L457-524）、"
+                        "693-811（mhc_fused_tilelang：post 折入+核内 sqrsum "
+                        "L772-775）、813-863（mhc_post_tilelang L856-861）、"
+                        "867-948（hc_prenorm_gemm_tilelang：sqrsum L911-912）；"
+                        "kernels/mhc/triton.py:75-147（hc_collapse_triton，"
+                        "enable_fp_fusion=False）；models/deepseek_v41/nvidia/"
+                        "ops/mhc.py:45-57（supports_mhc_overlap）、60-73"
+                        "（supports_mhc_all_reduce）、192-323"
+                        "（mhc_shifted_post_pre dispatch）、326-355"
+                        "（hc_expand）；ops/mega_mhc.py:16-44（can_use_"
+                        "mega_mhc：SM100+DeepGEMM+h%1024==0+m==4）；"
+                        "nvidia/model.py:524-655（forward 分支）、543-560"
+                        "（首层 hc_expand+fn_broadcast）、583-614（engram 层"
+                        "分立）、1259-1279（_collapse 出口 post）、1187-1192"
+                        "（终折叠+final norm）、1530-1544"
+                        "（finalize_mhc_broadcast_weights 派生张量）、"
+                        "388-391（hc_eps/hc_post_alpha=2.0）",
+        branch_predicate="B1 融合 all-reduce：TP4 且非 EP 且 h==5120 且 m==4 "
+                         "且 MNNVL multicast（ops/mhc.py L60-73）→ 当前设备"
+                         "注册表（H100/H200/L40）无 MNNVL，TP8 场景不适用；"
+                         "B2/B3 overlap 流：SM100 家族 + DeepGEMM + mix≤32 + "
+                         "FULL graph + T≤16（supports_mhc_overlap L45-57 + "
+                         "model.py L524-531）→ 不适用；B4 mega：SM100+"
+                         "DeepGEMM+h%1024==0+m==4（mega_mhc.py L16-28）→ "
+                         "不适用；B5 默认融合/分立路径（本仓主路径）；"
+                         "B6 首层、B7 engram 层分立、B8 模型出口（均计）；"
+                         "B9 write_kv/decoder_replay/specialized_decode、SP "
+                         "gather、amd aiter → 域外未建模",
+        thresholds="融合核 T≤32 且 h%128==0（tilelang_kernels.py L89-115）；"
+                   "single-pass 变体 T≤4 且 h==4096 且 SM100 → V4.1 h=5120 "
+                   "不适用；sinkhorn 循环 R−1 次（R=hc_sinkhorn_iters=20）",
+        input_domain="V4.1（h=5120, m=4, R=20, eps=1e-6, 40 层, engram 层 "
+                     "1/14）decode/prefill 的 mHC 边界与出口",
+        both_sides_covered=False,
+        uncovered_domain=["源码阅读（source-checked）非执行；未运行任何 kernel",
+                          "SM100 分支（mega_mhc/overlap 流/single-pass）/"
+                          "MNNVL TP4 融合 all-reduce/write_kv+decoder_replay/"
+                          "specialized_decode/SP gather/amd aiter（kernels/"
+                          "mhc/aiter.py + amd/mhc.py）域外未建模，只登记",
+                          "split-K 跨片规约 (n_splits−1)·(mix+1)/token 依赖"
+                          "设备 SM 数（compute_num_split），未入账",
+                          "中间缓冲（mixes/sqrsum splits 维）HBM 往返与 T≤32 "
+                          "融合路径寄存器喂入的流量节省未细分：act 流量字段"
+                          "保留解析近似",
+                          "计数为文档约定（超越函数 1 op、归约 n−1、NaN 守卫/"
+                          "split-K 不计），非 kernel 指令数"],
+        note="R05（2026-11-12）：mHC 从『仅 model.py source-checked + 解析"
+             "近似』升级为 kernel 源码级 source-checked 精确整数计数；"
+             "12+3 pin 文件 blob sha1 对 vllm-tree.json 校验"
+             "（tests/test_v41_mhc_kernels.py）；count hc_* 行 sinkhorn/"
+             "post_pre 改精确、新增 hc_exit_* 两行与 -w-mhc-broadcast-L0 "
+             "派生张量驻留；sm-v41-engram-hc 保留（Engram 侧证据不变）",
+    ),
+    SourceMapEntry(
         entry_id="sm-v41-csa2-moe-unverified",
         model_or_method="deepseek_v41_flash CSA2/MoE",
         semantic="CSA2 注意力/投影为 v0.1 移植；MoE sqrtsoftplus/noaux_tc/"

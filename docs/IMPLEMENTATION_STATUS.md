@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-11（两模型 forward/合入门禁轮 + R04 Engram 建模；早前 A 组/校准段落保留为历史记录；A 组二轮审计、ctx-KV 路径修正与 k_norm dtype 复核修正见下）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（候选分支 `codex/dflash-ctx-kv-path-fix`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-11 R04 验收修正后全量 **236 passed**，exit 0；更早历史：PR #3 合入时 234，k_norm 修正后 212 passed，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：236**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-11 R04 验收；212→234 为 V4.1 Engram 新增 22 项，审计追加 2 项）。
+更新：2026-11-12（R05 mHC/Sinkhorn kernel 计数修正；2026-11-11 两模型 forward/合入门禁轮 + R04 Engram 建模；早前 A 组/校准段落保留为历史记录；A 组二轮审计、ctx-KV 路径修正与 k_norm dtype 复核修正见下）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（候选分支 `dsh/v41-mhc-r05`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R05 全量 **247 passed**，exit 0；更早历史：R04 验收修正后 236，PR #3 合入时 234，k_norm 修正后 212 passed，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：247**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R05 验收；236→247 为 V4.1 mHC kernel 计数新增 11 项 tests/test_v41_mhc_kernels.py）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -72,6 +72,39 @@ tp=7/9/16 拒绝、逐行手算绝对值、开/关账本差=精确新增、count
 (validation/v41-engram-20261111.md)；证据 ev-vllm-v41-engram；G-C1
 单机算子解除（DP 交换/cpu_offload 运行时/amd 变体仍登记未覆盖）。
 
+**2026-11-12 R05：V4.1 mHC/Sinkhorn kernel 计数修正（B 组 R05 交付）**：
+上游 kernel 源码由主控 pin 入仓（vLLM @f358f057；kernels/mhc/{tilelang,
+tilelang_kernels,triton,torch,warmup,__init__}.py + layers/mhc.py +
+nvidia/ops/{mhc,mega_mhc}.py + cute_dsl/all_reduce_mhc.py + amd/mhc.py +
+utils/deep_gemm.py 共 12 核心文件 + 同批 aiter/cpu/cute_dsl__init__ 3 文件，
+git blob sha1 逐项对 references/vllm-tree.json 校验；全部 source-checked
+未执行）。落地：hc_* 边界行从解析近似升级为逐式精确整数——mix 补核内
+sqrsum 2·T·IC（hc_prenorm_gemm_tilelang L911-912）；sinkhorn =
+T·[m²(4R+6)+6m+mix+3]（mhc_pre_big_fuse_with_norm_tilelang L383-441 逐式：
+门 2×4m、affine 2m²、softmax 6m²−2m、列归一 2m²、循环 (R−1)·4m²、rms 3；
+statistic 改 exact）；post_pre = T·[h(2m²+3m+5)+2]（post 核+collapse+
+两遍 RMSNorm）；新增模型出口 hc_exit_post/hc_exit_collapse 两行
+（layer=-1，末层 FFN post + hc_collapse_triton 终折叠，final_norm 不重复
+计）；首层 attn mix weight_read 修正为 broadcast 派生张量 mix·h·4=491,520B
+（finalize_mhc_broadcast_weights L1530-1544，非 checkpoint 参数）并新增
+`-w-mhc-broadcast-L0` 驻留对象（每 rank 复制）；公式 v2.mhc_* 六条更新
+（计数约定：超越函数 1 op、归约 n−1、split-K/NaN 守卫不计）。行数
+241→243（40×6+expand 1+exit 2）。独立 oracle：tests/test_v41_mhc_kernels.py
+11 项（15 文件 blob sha1 防漂移、m=2/h=8/R=3/T=5 逐行手算 720/475/770/400/
+160、R=1 循环 0 次差恰 4m²·T、TP 逐字段相等、count↔memory 守恒、整模型
+101,582,480 复算）。默认 V4.1 replay 前后归因：decode FLOPs
+7,146,532,702→7,161,804,622（hc 86,310,560→101,582,480）、行 916→918、
+GPU steady +491,520B（broadcast）、GPU 侧解析耗时下界 116.1527→116.1522ms
+微降（首层 attn mix 权重读改小 1,474,560B/步）。与主控推导的记录差异
+（以源码为准）：sinkhorn/post_pre 的 rsqrt(x/numel+eps) 按约定计 3 op，
+主控分解漏 eps 加法（+2→+3、5h→5h+2；主控预计 101,591,968 未复现，其
+逐式复算应为 101,582,240，源码计数 101,582,480）。剩余：SM100 分支
+（mega/overlap/single-pass）/MNNVL TP4/replay(write_kv)/SP/amd aiter 域外
+登记；split-K 规约与中间缓冲流量未细分。报告：
+[docs/validation/v41-mhc-sinkhorn-20261112.md]
+(validation/v41-mhc-sinkhorn-20261112.md)；证据 ev-vllm-v41-mhc-kernels +
+sm-v41-mhc-kernels；mHC 升级为 kernel 源码级 source-checked（未执行）。
+
 **CI hermetic 修复（2026-11-10）**：`tests/test_consistency.py` 两项验收不再读取
 被 `.gitignore` 忽略的 `outputs/run_v41.json`。CSV 导出改为复核本次 `run` 新落盘的
 RunResult；固定场景重放改用纳入版本库、带 provenance 的历史快照
@@ -108,9 +141,11 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
     分片 source-checked；MTP 只有 config+目标首层模板 → **unverified**；
     forward 仍不完整，不能参与部署排名。
   - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
-    DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2/MoE、
-    candidate、swiglu、quantization_config 仍为缺口；mHC 仅
-    source-checked；CPU/GPU 均未执行。
+    DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；mHC 已 kernel
+    源码级 source-checked（R05，2026-11-12，kernels/mhc/* pin + 精确整数
+    计数 + 出口两行；SM100/MNNVL/replay/SP/amd 分支域外登记，未执行）；
+    CSA2/MoE、candidate、swiglu、quantization_config 仍为缺口；
+    CPU/GPU 均未执行。
   - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成未核、拒绝采样/KV
     回退/hidden 提取仍 0 占位；CPU/GPU 未执行。
 - **本轮修复**：V4.1 `o_a_proj` 分组在 work/memory 同步乘 `ng`，并补 V4.1
@@ -390,7 +425,9 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
    剩余：DP 分片交换/EngramBatch MXFP8/cpu_offload 运行时行为/amd 变体，
    G-C1）；CSA2/MoE
    scoring/top-k/分组路由、candidate block、swiglu clamp、quantization_config
-   仍为显式缺口；mHC 仅 source-checked、tilelang kernel 未执行。G-C1。
+   仍为显式缺口；mHC 已 kernel 源码级 source-checked（R05，2026-11-12，
+   tilelang/triton kernel pin + 精确计数；SM100/MNNVL/replay/SP/amd 分支
+   域外登记、split-K 规约与中间缓冲流量未细分、未执行）。G-C1。
 2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
    丢弃 `mtp.` → method status=unverified，不进入部署排名。
 3. **DFlash**：服务端集成（SGLang DFLASH/vLLM PR#40898）未逐行核对；拒绝采样/

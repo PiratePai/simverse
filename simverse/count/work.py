@@ -8,7 +8,9 @@
   * MLA（V3）按压缩布局计 KV（kv_lora+rope），展开式/吸收式 recipe 差异
     在 lowering 登记，本层给默认展开投影集；
   * V4.1 CSA2 沿用已对账的闭式（v0.1 移植 attention_structure，100% 对齐）；
-    mHC 边界（hc_*，2026-11-10 按 vLLM pin 源码建模，替代该族通用 norm/add 行）
+    mHC 边界（hc_*，2026-11-10 按 vLLM pin 源码建模，替代该族通用 norm/add 行；
+    2026-11-12 R05 按 kernels/mhc/* tilelang kernel 源码 pin 升级为逐式精确
+    整数计数 + 模型出口 hc_exit_post/hc_exit_collapse 两行）
     与 Engram 注入（engram_*，2026-11-11 R04 按 common/engram.py pin
     @f358f057 blob ba4ceea6 建模：批级哈希/查表/wkv/门控四行）同源 extras。
 """
@@ -417,57 +419,124 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
                      quant: dict, first_layer: bool = False) -> List[OpRow]:
     """mHC（mega hyper-connections）边界算子（v41_csa2 专用）。
 
-    证据（vllm models/deepseek_v41/nvidia/model.py pin @f358f057；
-    source-checked 2026-11-10）：
+    证据（vllm @f358f057；model.py 源码 source-checked 2026-11-10；R05
+    2026-11-12 按 kernel 源码 pin（model_executor/kernels/mhc/*，见
+    ev-vllm-v41-mhc-kernels）从解析近似升级为逐式整数计数）：
       * 每层 2 次边界（attn 侧 hc_attn_fn / ffn 侧 hc_ffn_fn），常规路径为
         mhc_shifted_post_pre 融合核 = 前一子层 post（流更新）+ 本侧系数 GEMM
         + sinkhorn(hc_sinkhorn_iters) + collapse + RMSNorm（norm_weight 即
         attn_norm/ffn_norm）→ v41 层**不再**另计通用 norm/add 行（防重复计费）；
       * hc_dim = hc_mult·h 为全宽流：mHC 边界不随 TP 切分（attention 内部自行
         分片；hc 权重每卡复制，见 lowering/memory），本函数不除 tp；
-      * 首层输入为广播嵌入：attn 侧系数 GEMM IC=h（非 hc_dim），另有
-        hc_expand 广播行（model.py `residual = hc_expand(x, hc_mult)`）；
+      * 首层输入为广播嵌入：attn 侧系数 GEMM IC=h（非 hc_dim），读派生张量
+        hc_attn_fn_broadcast [mix,h] fp32（finalize_mhc_broadcast_weights，
+        model.py L1530-1544，非 checkpoint 参数；驻留见 lowering/memory），
+        另有 hc_expand 广播行（model.py L546 `residual = hc_expand(...)`，
+        nvidia/ops/mhc.py L326-355 triton 拷贝核：读一次 T·h 写 T·m·h）；
       * Engram 层（extras.hc.engram_layer_ids）post/pre 分立执行 + Engram 注入
         ——注入算子已由 engram_rows 建模（2026-11-11 R04，common/engram.py
         pin @f358f057 blob ba4ceea6）；本函数边界算子构成与常规层相同
-        （post+pre 总量不变，分立不改变计数）。
+        （post+pre 总量不变，分立不改变计数；model.py L583-614）。
+
+    计数口径（formula_registry v2.mhc_*；初等运算各计 1 op，归约求和 n 元素
+    计 n−1 加、归约 max 计 n−1 比较；split-K 跨片规约与 NaN 守卫分支不计入，
+    见证据 limits）：
+      * mix：GEMM 2·T·ic·mix + 核内 sqrsum 2·T·ic（每 k 元素乘+加，
+        hc_prenorm_gemm_tilelang L911-912 / mhc_fused_tilelang L772-775）；
+      * sinkhorn 系数 epilogue（mhc_pre_big_fuse_with_norm_tilelang
+        L383-441）：m²·(4R+6) + 6m + mix + 3 /token（精确整数分解见
+        formula_registry）；
+      * post_pre：post 核 h·(2m²+m)（mhc_post_tilelang L856-861）+ 折叠
+        2mh（L478-502）+ 两遍 RMSNorm 5h+2（L457-524，save_pre_mix 下先
+        round bf16 再算 sumsq）。
     """
     m = hc["mult"]
     iters = hc["sinkhorn_iters"]
     mix = (2 + m) * m                     # mix_hc（hc_attn_fn/hc_ffn_fn 行数）
     hc_dim = m * h
     b_a = quant["act"] / 8
+    first_attn = first_layer
     rows: List[OpRow] = []
     if first_layer:
         rows.append(OpRow(
             stage, li, "hc_expand", flops=T * hc_dim,
             act_read=int(T * h * b_a), act_write=int(T * hc_dim * b_a),
-            formula=FR.F_MHC_EXPAND, shape=f"嵌入广播 {m} 流 × h"))
+            formula=FR.F_MHC_EXPAND,
+            shape=f"嵌入广播 {m} 流 × h（triton 拷贝核，flops 按写元素数计；"
+                  f"nvidia/ops/mhc.py L326-355）"))
     for side, fn in (("attn", "hc_attn_fn"), ("ffn", "hc_ffn_fn")):
-        ic = h if (first_layer and side == "attn") else hc_dim
+        ic = h if (first_attn and side == "attn") else hc_dim
+        # 首层 attn 读 broadcast 派生张量 [mix,h]·4B；容量仍登记 fn 参数本体
+        w_read = int((mix * ic if (first_attn and side == "attn")
+                      else mix * hc_dim) * 4)
         rows.append(OpRow(
-            stage, li, f"hc_{side}_mix", flops=2 * T * ic * mix,
-            weight_read=int(mix * hc_dim * 4),          # FP32（源码 dtype）
+            stage, li, f"hc_{side}_mix",
+            flops=T * (2 * ic * mix + 2 * ic),
+            weight_read=w_read,                           # FP32（源码 dtype）
             weight_capacity=int(mix * hc_dim * 4),
             act_read=int(T * ic * b_a), act_write=int(T * mix * 4),
-            formula=FR.F_MHC_MIX,
-            shape=f"[{T},{ic}]@[{ic},{mix}]·{fn}（fp32，每卡复制）"))
+            formula=FR.F_MHC_MIX, statistic="exact",
+            shape=f"[{T},{ic}]@[{ic},{mix}]·{fn} + 核内 sqrsum 2·T·{ic}"
+                  f"（fp32，每卡复制；{'首层读 hc_attn_fn_broadcast 派生张量' if (first_attn and side == 'attn') else 'fn 参数本体'}）"))
+        sink = m * m * (4 * iters + 6) + 6 * m + mix + 3
         rows.append(OpRow(
-            stage, li, f"hc_{side}_sinkhorn", flops=T * mix * iters * 5,
+            stage, li, f"hc_{side}_sinkhorn", flops=T * sink,
             act_read=int(T * mix * 4), act_write=int(T * mix * 4),
-            formula=FR.F_MHC_SINKHORN, statistic="approximated",
-            shape=f"{T}×{mix} 系数 × {iters} 迭代（FP32；每迭代 OP 数近似）"))
-        norm_ops = T * (4 * h + 2)
+            formula=FR.F_MHC_SINKHORN, statistic="exact",
+            shape=f"系数 epilogue（mhc_pre_big_fuse_with_norm_tilelang "
+                  f"L383-441）：R={iters} 迭代（首轮 softmax+列归一 + (R−1)×"
+                  f"(行+列归一)，L433-440）、门 2×4m、comb affine 2m²、"
+                  f"rms 3（÷rms_numel+eps+rsqrt）+mix 次乘；"
+                  f"NaN 守卫 L432 只跳过 padding 行不计；"
+                  f"={m}²·(4·{iters}+6)+6·{m}+{mix}+3={sink}/token"))
+        pp = h * (2 * m * m + 3 * m + 5) + 2
         rows.append(OpRow(
-            stage, li, f"hc_{side}_post_pre",
-            flops=4 * T * hc_dim + norm_ops,
+            stage, li, f"hc_{side}_post_pre", flops=T * pp,
             weight_read=int(h * b_a),
             act_read=int((T * hc_dim + T * h) * b_a),
             act_write=int((T * hc_dim + T * h) * b_a),
-            formula=FR.F_MHC_POST_PRE,
-            shape=f"post 流更新+collapse（各 2·T·{hc_dim}）+ RMSNorm(h={h})；"
-                  f"含残差（流上）"))
+            formula=FR.F_MHC_POST_PRE, statistic="exact",
+            shape=f"post 核 h·(2m²+m)（mhc_post_tilelang L856-861，或 T≤32 "
+                  f"融合核折入 prenorm GEMM）+ collapse 2mh（L478-502）+ "
+                  f"两遍 RMSNorm 5h+2（L457-524）={pp}/token；含残差（流上）"))
     return rows
+
+
+def hc_exit_rows(stage: str, T: int, h: int, hc: dict,
+                 quant: dict) -> List[OpRow]:
+    """模型出口 mHC 行（layer=-1，每 forward 一次；仅 v41_csa2 有 hc_spec）。
+
+    证据（vllm model.py @f358f057 source-checked；R05 2026-11-12 kernel
+    源码 pin，ev-vllm-v41-mhc-kernels）：末层 FFN 输出无后继边界折入——
+    _collapse（model.py L1259-1279）单独执行 mhc_post_tilelang，随后主
+    forward L1187-1192 以末层 ffn pre_mix 执行 hc_collapse_triton
+    （kernels/mhc/triton.py L75-147，enable_fp_fusion=False）+ final
+    RMSNorm（final_norm 行已另计，勿重复）。final RMSNorm 前置于本组行。
+    """
+    m = hc["mult"]
+    mix = (2 + m) * m
+    hc_dim = m * h
+    b_a = quant["act"] / 8
+    return [
+        OpRow(
+            stage, -1, "hc_exit_post",
+            flops=T * h * (2 * m * m + m),
+            act_read=int((T * hc_dim + T * h) * b_a),
+            act_write=int(T * hc_dim * b_a),
+            formula=FR.F_MHC_EXIT_POST, statistic="exact",
+            shape=f"末层 FFN 输出 post（mhc_post_tilelang，model.py _collapse "
+                  f"L1259-1279；末层 FFN 无后继边界）：h·(2m²+m)="
+                  f"{h * (2 * m * m + m)}/token"),
+        OpRow(
+            stage, -1, "hc_exit_collapse",
+            flops=T * 2 * m * h,
+            act_read=int(T * hc_dim * b_a + T * m * 4),
+            act_write=int(T * h * b_a),
+            formula=FR.F_MHC_EXIT_COLLAPSE, statistic="exact",
+            shape=f"hc_collapse_triton × 末层 ffn pre_mix（主 forward "
+                  f"L1187-1192；triton.py L75-147，fp 融合关闭 → 逐流 m·"
+                  f"(乘+加)=2mh={2 * m * h}/token）"),
+    ]
 
 
 def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
@@ -630,6 +699,7 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         base, rem = divmod(layer.moe.experts, ep)
         return base + (1 if rank < rem else 0)
 
+    has_hc = False
     for layer in model.layers:
         li = layer.index
         if layer.kind in (FULL, SLIDING) and layer.attn:
@@ -646,6 +716,7 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                                 local_experts=_local_experts(layer))
         if layer.kind == MLA_CSA2 and hc_spec:
             # mHC 边界核融合 norm+残差（F_MHC_POST_PRE）：不再另计通用 norm/add 行
+            has_hc = True
             rows += hc_boundary_rows(stage, li, T, h, hc_spec, quant,
                                      first_layer=(li == first_layer_index))
         else:
@@ -657,6 +728,10 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
             rows += engram_rows(stage, li, T, h, engram_spec, quant, tp,
                                 first_engram_layer=(li == engram_spec["layer_ids"][0]),
                                 rank=rank)
+    # mHC 模型出口（R05）：末层 FFN post + 终折叠（final_norm 行在其后由
+    # head_rows 产生，不重复计）
+    if has_hc:
+        rows += hc_exit_rows(stage, B * Q, h, hc_spec, quant)
     rows += head_rows(stage, model, B * Q, quant, tp)
     for r in rows:
         r.role = role

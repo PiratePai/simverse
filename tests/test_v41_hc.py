@@ -1,7 +1,11 @@
-"""V4.1 mHC（mega hyper-connections）语义与计数（2026-11-10 补齐轮）。
+"""V4.1 mHC（mega hyper-connections）语义与计数（2026-11-10 补齐轮；
+R05 2026-11-12 按 mHC kernel 源码 pin 升级为精确计数，归因更新见下）。
 
 证据链：vllm models/deepseek_v41/nvidia/model.py pin @f358f057
-（source-checked；hc 参数几何/FP32/每层 2 边界/首层 hc_expand/Engram 层分立）。
+（source-checked；hc 参数几何/FP32/每层 2 边界/首层 hc_expand/Engram 层分立）
++ R05 kernels/mhc/* kernel 源码 pin（ev-vllm-v41-mhc-kernels；逐式精确
+计数与模型出口 hc_exit_* 两行，独立 oracle 见 tests/test_v41_mhc_kernels.py，
+该文件同时记录与主控分解的 rsqrt-eps 差异 +1/+2）。
 测试分层：
   * 单元手算锚点（小尺寸独立推导，不 import 生产公式）；
   * 真实 V4.1 配置的整模型独立复算；
@@ -36,7 +40,13 @@ def _model():
 # ---------------------------------------------------------------------------
 
 def test_hc_boundary_rows_hand_anchor():
-    """m=2, h=8, iters=3, T=5（mix=8, hc_dim=16）逐行手算。"""
+    """m=2, h=8, iters=3, T=5（mix=8, hc_dim=16）逐行手算。
+
+    R05 精确计数：mix 含核内 sqrsum 2·T·IC；sinkhorn =
+    T·(m²(4R+6)+6m+mix+3)（源码 rsqrt(x/numel+eps) 计 3 op，主控分解为 2
+    ——按源码为准，见 tests/test_v41_mhc_kernels.py docstring）；post_pre =
+    T·(h(2m²+3m+5)+2)。
+    """
     hc = {"mult": 2, "sinkhorn_iters": 3, "eps": 1e-6, "post_alpha": 2.0,
           "engram_layer_ids": []}
     rows = hc_boundary_rows("decode", 0, 5, 8, hc, Q16, first_layer=True)
@@ -44,19 +54,20 @@ def test_hc_boundary_rows_hand_anchor():
     # 首层：hc_expand 广播 2 流
     e = by_op["hc_expand"]
     assert e.flops == 5 * 16 and e.act_write == int(5 * 16 * 2)
-    # 首层 attn 侧系数 GEMM：IC=h=8（广播嵌入）→ 2·5·8·8=640；权重 FP32 8×16×4
+    # 首层 attn 侧系数 GEMM：IC=h=8（广播嵌入）→ GEMM 2·5·8·8=640
+    # + 核内 sqrsum 2·5·8=80；权重读 = broadcast 派生张量 [mix,h] fp32 = 256
     a = by_op["hc_attn_mix"]
-    assert a.flops == 2 * 5 * 8 * 8
-    assert a.weight_read == 8 * 16 * 4 and a.weight_capacity == 8 * 16 * 4
-    # ffn 侧（及非首层 attn 侧）：IC=hc_dim=16 → 2·5·16·8=1280
+    assert a.flops == 5 * (2 * 8 * 8 + 2 * 8)
+    assert a.weight_read == 8 * 8 * 4 and a.weight_capacity == 8 * 16 * 4
+    # ffn 侧（及非首层 attn 侧）：IC=hc_dim=16 → 5·(2·16·8+2·16)=1440
     f = by_op["hc_ffn_mix"]
-    assert f.flops == 2 * 5 * 16 * 8
-    # sinkhorn：T·mix·iters·5 = 5·8·3·5；标 approximated
+    assert f.flops == 5 * (2 * 16 * 8 + 2 * 16)
+    # sinkhorn：m²(4R+6)+6m+mix+3 = 4·18+12+8+3 = 95/token（精确）
     s = by_op["hc_attn_sinkhorn"]
-    assert s.flops == 5 * 8 * 3 * 5 and s.statistic == "approximated"
-    # post+pre：4·T·hc_dim + T·(4h+2) = 320 + 170
+    assert s.flops == 5 * 95 and s.statistic == "exact"
+    # post+pre：h(2m²+3m+5)+2 = 8·19+2 = 154/token
     p = by_op["hc_attn_post_pre"]
-    assert p.flops == 4 * 5 * 16 + 5 * (4 * 8 + 2)
+    assert p.flops == 5 * 154
     # 每层 2 边界 ×（mix+sinkhorn+post_pre）= 6 行 + 首层 expand = 7
     assert len(rows) == 7
 
@@ -67,7 +78,9 @@ def test_hc_rows_non_first_layer_no_expand():
     rows = hc_boundary_rows("decode", 3, 4, 8, hc, Q16, first_layer=False)
     assert len(rows) == 6 and all(r.op != "hc_expand" for r in rows)
     by_op = {r.op: r for r in rows}
-    assert by_op["hc_attn_mix"].flops == 2 * 4 * 16 * 8   # IC=hc_dim（非首层）
+    # IC=hc_dim（非首层）：GEMM 2·4·16·8 + sqrsum 2·4·16
+    assert by_op["hc_attn_mix"].flops == 4 * (2 * 16 * 8 + 2 * 16)
+    assert by_op["hc_attn_mix"].weight_read == 8 * 16 * 4   # fn 参数本体
 
 
 # ---------------------------------------------------------------------------
@@ -78,21 +91,24 @@ def test_v41_hc_totals_independently_recomputed():
     m = _model()
     rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1)
     hc_rows = [r for r in rows if r.op.startswith("hc_")]
-    # 独立复算（不 import 生产公式）：
+    # 独立复算（不 import 生产公式；R05 精确计数，逐式见
+    # tests/test_v41_mhc_kernels.py 的源码推导）：
     h, mm, iters, L = 5120, 4, 20, 40
     mix, hc_dim = (2 + mm) * mm, mm * h          # 24, 20480
     T = 1
     flops = 0
     for li in range(L):
         ic_a = h if li == 0 else hc_dim          # 首层 attn 侧读广播嵌入
-        flops += 2 * T * ic_a * mix              # attn mix
-        flops += 2 * T * hc_dim * mix            # ffn mix
-        flops += 2 * (T * mix * iters * 5)       # sinkhorn ×2
-        flops += 2 * (4 * T * hc_dim + T * (4 * h + 2))   # post_pre ×2
+        flops += T * (2 * ic_a * mix + 2 * ic_a)     # attn mix（GEMM+sqrsum）
+        flops += T * (2 * hc_dim * mix + 2 * hc_dim)  # ffn mix
+        flops += 2 * (T * (mm * mm * (4 * iters + 6) + 6 * mm + mix + 3))  # sinkhorn ×2
+        flops += 2 * (T * (h * (2 * mm * mm + 3 * mm + 5) + 2))   # post_pre ×2
     flops += T * hc_dim                          # 首层 expand
-    assert sum(r.flops for r in hc_rows) == flops
-    # 行数：40 层 ×6 + expand 1 = 241
-    assert len(hc_rows) == 6 * L + 1
+    flops += T * h * (2 * mm * mm + mm)          # hc_exit_post（末层 FFN）
+    flops += T * 2 * mm * h                      # hc_exit_collapse（终折叠）
+    assert sum(r.flops for r in hc_rows) == flops == 101_582_480
+    # 行数：40 层 ×6 + expand 1 + exit 2 = 243
+    assert len(hc_rows) == 6 * L + 3
     # Engram 层（1/14）边界算子构成与常规层相同（分立执行不改变总量）。
     # 归因更新（2026-11-11 R04）：Engram 注入已建模（engram.py pin），engram
     # 层额外出现 engram_* 行——首 engram 层 L1 挂 4 行（hash/lookup/wkv/
@@ -144,14 +160,20 @@ def test_hc_rows_tp_invariant_full_width_stream():
 
 
 def test_hc_weights_replicated_under_tp():
-    """hc 权重 FP32 每卡复制：tp=1 与 tp=8 的 mhc 分配字节相等。"""
+    """hc 权重 FP32 每卡复制：tp=1 与 tp=8 的 mhc 分配字节相等。
+
+    R05：另加 broadcast 派生张量分配（-w-mhc-broadcast-L0，mix·h·4）。
+    """
     m = _model()
-    def hc_bytes(tp):
+    def hc_bytes(tp, suffix="-w-mhc-L0"):
         return sum(a.bytes for a in target_weight_allocations(m, Q16, tp)
-                   if a.alloc_id.endswith("-w-mhc-L0"))
+                   if a.alloc_id.endswith(suffix))
     assert hc_bytes(1) == hc_bytes(8)
     # 手算：mix=24, hc_dim=20480 → 2×(24·20480·4 + 24·4 + 3·4) = 3,932,376 B
     assert hc_bytes(1) == 2 * (24 * 20480 * 4 + 24 * 4 + 3 * 4)
+    # broadcast 派生张量 [mix,h] fp32：24·5120·4 = 491,520 B，TP 不变
+    assert hc_bytes(1, "-w-mhc-broadcast-L0") == \
+        hc_bytes(8, "-w-mhc-broadcast-L0") == 24 * 5120 * 4
 
 
 def test_v41_tp_must_divide_o_groups():

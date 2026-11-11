@@ -48,13 +48,18 @@ _QWEN36_EVIDENCE = ModelEvidence(
 _V41_EVIDENCE = ModelEvidence(
     forward_source="partial-source",
     cpu_forward="not-run", gpu_measurement="none",
-    checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch"),
+    checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch",
+                   "sm-v41-mhc-kernels"),
     unverified_paths=(
         "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与"
         "EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；"
         "cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子"
         "已 source-checked（ev-vllm-v41-engram，R04）",
-        "mhc_tilelang_kernel: mHC 边界计数为 source-checked+近似，tilelang 核未执行",
+        "mhc_kernel_branches: mHC 计数已按 tilelang kernel 源码 pin 升级为"
+        "精确整数（R05，ev-vllm-v41-mhc-kernels，source-checked 未执行）；"
+        "SM100 分支（mega/overlap/single-pass）、MNNVL TP4 all-reduce、"
+        "replay(write_kv)/SP/amd aiter 域外未建模；split-K 规约开销与"
+        "中间缓冲流量未细分",
         "csa2_attention_projection: CSA2 注意力/投影为 v0.1 移植，非独立 forward 证据",
         "csa2_moe_routing: sqrtsoftplus/noaux_tc/分组路由未建模",
         "candidate_publish: 候选块发布/消费语义未独立核验",
@@ -63,8 +68,9 @@ _V41_EVIDENCE = ModelEvidence(
     method_status={"baseline": "partial-source", "dflash_v1": "unsupported",
                    "mtp": "unverified"},
     note="Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 "
-         "cpu_offload 运行时行为未覆盖）；CSA2/MoE scoring/量化仍缺口；"
-         "hc 仅 source-checked，未执行。")
+         "cpu_offload 运行时行为未覆盖）；mHC 已 kernel 源码级 source-checked"
+         "（R05，ev-vllm-v41-mhc-kernels；未执行，SM100/MNNVL/replay/SP/amd "
+         "分支域外登记）；CSA2/MoE scoring/量化仍缺口。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",
@@ -178,7 +184,8 @@ def _v41() -> ModelIR:
         full_config=full, text_prefix="text_config")
     return replace(ir, evidence=_V41_EVIDENCE,
                    evidence_refs=("ev-v41-config", "ev-vllm-v41-model",
-                                  "ev-vllm-v41-engram"))
+                                  "ev-vllm-v41-engram",
+                                  "ev-vllm-v41-mhc-kernels"))
 
 
 def _qwen36() -> ModelIR:

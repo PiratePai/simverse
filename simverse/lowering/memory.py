@@ -353,6 +353,7 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
     b_expert = quant["expert_w"] / 8
     allocs: List[Allocation] = []
     fam = model.family
+    first_layer_index = model.layers[0].index if model.layers else None
     for layer in model.layers:
         li = layer.index
         dense_b = 0
@@ -414,6 +415,17 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             allocs.append(Allocation(
                 f"{role}-w-mhc-L{li}", "weights", role, int(hc_b),
                 live_note="常驻 fp32 每卡复制（hc_attn_fn/hc_ffn_fn）"))
+            if li == first_layer_index:
+                # 首层 attn 侧读派生张量 hc_attn_fn_broadcast [mix,h] fp32
+                # （R05 2026-11-12：finalize_mhc_broadcast_weights——
+                # hc_attn_fn.view(-1,m,h).sum(dim=1)，model.py L1530-1544；
+                # 非 checkpoint 参数，驻留与 fn 本体分开登记）
+                allocs.append(Allocation(
+                    f"{role}-w-mhc-broadcast-L{li}", "weights", role,
+                    int(mix * model.hidden * 4),
+                    live_note="finalize_mhc_broadcast_weights 派生"
+                              "（hc_attn_fn 按流求和），非 checkpoint 参数"
+                              "（model.py L1530-1544）；每 rank 复制"))
         engram_spec = (model.extras or {}).get("engram") \
             if fam == "v41_csa2" else None
         if engram_spec and li in engram_spec.get("layer_ids", ()):

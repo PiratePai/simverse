@@ -71,8 +71,9 @@ _STRUCT_KEYS = {
                  "routed_scaling_factor", "scoring_func", "topk_method",
                  "max_position_embeddings", "tie_word_embeddings",
                  "num_nextn_predict_layers", "norm_topk_prob",
-                 # mHC（2026-11-10 mapped：count/work.hc_boundary_rows +
-                 # lowering/memory hc 权重；vLLM pin source-checked）
+                 # mHC（2026-11-10 mapped；R05 2026-11-12 kernel 源码 pin：
+                 # count/work.hc_boundary_rows + hc_exit_rows、lowering/memory
+                 # hc 权重 + broadcast 派生张量；逐键注记见 _HC_KEY_NOTES）
                  "hc_mult", "hc_eps", "hc_sinkhorn_iters",
                  # Engram（2026-11-11 R04 mapped：common/engram.py pin
                  # @f358f057 blob ba4ceea6 source-checked；count/work.engram_rows
@@ -81,6 +82,23 @@ _STRUCT_KEYS = {
                  "engram_layer_ids", "engram_num_embeddings", "engram_vocab_size",
                  "engram_compressed_vocab_size", "engram_max_ngram_size",
                  "engram_n_heads", "engram_head_dim", "engram_pad_token_id"},
+}
+
+# mHC 3 键的 mapped 覆盖注记（R05 2026-11-12：kernel 源码已 pin，
+# vllm/model_executor/kernels/mhc/* blob sha1 对 vllm-tree.json 校验，
+# ev-vllm-v41-mhc-kernels；mHC 升级为 kernel 源码级 source-checked，未执行）
+_HC_KEY_NOTES = {
+    "hc_mult":
+        "mapped：流数 m（hc_dim=m·h 全宽流不随 TP 切分）；mHC kernel 计数"
+        "入 count（hc_* 边界行 + hc_exit_* 出口行，kernel 源码级 "
+        "source-checked R05）",
+    "hc_eps":
+        "mapped：hc_pre_eps 与 hc_sinkhorn_eps 同用本值（model.py L553-554/"
+        "L388-391）；hc_post_alpha=2.0 为源码常数（入 extras.hc 对账）",
+    "hc_sinkhorn_iters":
+        "mapped：R=迭代数；kernel 语义 = 首轮 softmax+列归一后 (R−1) 次"
+        "行/列交替（tilelang_kernels.py L413-441），sinkhorn 行按精确整数"
+        "计数 m²(4R+6)+6m+mix+3 /token/side",
 }
 
 # Engram 8 键的 mapped 覆盖注记（engram.py = vllm/models/deepseek_v41/common/
@@ -554,8 +572,12 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                    text_prefix: str = "") -> ModelIR:
     """DeepSeek-V4.1-Flash：MLA+CSA2 压缩层计划 + 全层 MoE + mHC/Engram 建模。
 
-    mHC（hc_mult/hc_eps/hc_sinkhorn_iters）：2026-11-10 按 vLLM pin 源码建模
-    （count/work.hc_boundary_rows + lowering/memory hc 权重）→ mapped。
+    mHC（hc_mult/hc_eps/hc_sinkhorn_iters）：2026-11-10 按 vLLM pin 源码建模；
+    R05 2026-11-12 升级为 kernel 源码级 source-checked（kernels/mhc/*
+    tilelang/triton pin @f358f057，ev-vllm-v41-mhc-kernels）——count
+    hc_* 边界行精确整数计数 + hc_exit_* 出口两行、lowering/memory hc 权重
+    + hc_attn_fn_broadcast 派生张量驻留（finalize_mhc_broadcast_weights，
+    非 checkpoint 参数）。未执行（source-checked ≠ executed）。
     Engram 8 键：2026-11-11 R04 按 common/engram.py pin（vllm @f358f057，
     blob sha1 ba4ceea6 对 vllm-tree.json 校验）source-checked 建模 → mapped
     （count/work.engram_rows + lowering/memory engram 表/wkv/qk 对象）；
@@ -609,24 +631,29 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         "candidate_block_size": "候选 block 缓冲粒度未进入 candidate_publish/"
                                 "容量建模；不冒充已消费",
     }
-    # hc_* / engram_* 8 键 → mapped（hc：count/work.hc_boundary_rows +
-    # lowering/memory hc 权重，vllm model.py pin @f358f057 source-checked
-    # 2026-11-10；engram：count/work.engram_rows + lowering/memory engram
-    # 对象，common/engram.py pin blob ba4ceea6 source-checked 2026-11-11）
+    # hc_* / engram_* 11 键 → mapped（hc：R05 kernel 源码级 source-checked
+    # 2026-11-12，count/work.hc_boundary_rows + hc_exit_rows、lowering/memory
+    # hc 权重 + broadcast 派生张量；engram：count/work.engram_rows +
+    # lowering/memory engram 对象，common/engram.py pin blob ba4ceea6
+    # source-checked 2026-11-11）
     coverage, gaps = _coverage("v41_csa2", tc, gaps_hint,
                                 full_config=full_config, text_prefix=text_prefix)
-    # Engram 8 键的 mapped 注记逐键替换为行号证据（默认 struct 注记过于笼统）
-    for key, note in _ENGRAM_KEY_NOTES.items():
-        path = f"{text_prefix}.{key}" if text_prefix else key
-        if path in coverage and coverage[path]["status"] == "mapped":
-            coverage[path] = {"status": "mapped", "consumer": "model_ir+count+memory",
-                              "note": note}
+    # hc/engram 键的 mapped 注记逐键替换为行号证据（默认 struct 注记过于笼统）
+    for notes in (_HC_KEY_NOTES, _ENGRAM_KEY_NOTES):
+        for key, note in notes.items():
+            path = f"{text_prefix}.{key}" if text_prefix else key
+            if path in coverage and coverage[path]["status"] == "mapped":
+                coverage[path] = {"status": "mapped",
+                                  "consumer": "model_ir+count+memory",
+                                  "note": note}
     if len(ratios) > L:
         gaps.append(
             f"compress_ratios[{L}:{len(ratios)}]: 尾部 {len(ratios) - L} 项未进入"
             "主干层图（MTP/草稿层作用未建模；不能当作已消费）")
-    # mHC 参数（消费方：count/work.hc_boundary_rows、lowering/memory）。
-    # post_alpha=2.0 为源码常数（model.py self.hc_post_alpha），入册便于对账。
+    # mHC 参数（消费方：count/work.hc_boundary_rows + hc_exit_rows、
+    # lowering/memory hc 权重 + broadcast 派生张量）。
+    # post_alpha=2.0 为源码常数（model.py self.hc_post_alpha L391），入册对账；
+    # 迭代语义（R−1 次行/列交替）与精确计数见 ev-vllm-v41-mhc-kernels。
     hc_spec = {
         "mult": int(tc["hc_mult"]),
         "sinkhorn_iters": int(tc["hc_sinkhorn_iters"]),

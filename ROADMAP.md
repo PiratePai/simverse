@@ -1,6 +1,6 @@
 # Simverse Roadmap
 
-更新：2026-11-10。产品范围固定为 **Qwen3.6-35B-A3B + DFlash** 与 **DeepSeek-V4.1-Flash**。历史模型仅用于内部回归与校准，不继续扩展产品目录。以下为待办，不代表已交付或交付日期承诺。
+更新：2026-11-12。产品范围固定为 **Qwen3.6-35B-A3B + DFlash** 与 **DeepSeek-V4.1-Flash**。历史模型仅用于内部回归与校准，不继续扩展产品目录。以下为待办，不代表已交付或交付日期承诺。
 
 ## 当前已交付
 
@@ -8,7 +8,10 @@
 - [x] ModelIR、计数/成本/执行分层，CLI/Web/导出共用结果。
 - [x] Qwen3.6+DFlash 解析实验、DT 串行及初步微批流水。
 - [x] V4.1 部分结构及 mHC 边界计数；Engram 单副本路径已 source-checked 建模
-  （R04，2026-11-11；DP 分片交换/cpu_offload 运行时行为未覆盖，见 B 组表）。
+  （R04，2026-11-11；DP 分片交换/cpu_offload 运行时行为未覆盖，见 B 组表）；
+  mHC/Sinkhorn 已 kernel 源码级 source-checked 精确计数（R05，2026-11-12，
+  kernels/mhc/* pin + 出口两行 + broadcast 派生张量驻留；SM100/MNNVL/replay/
+  SP/amd 分支域外登记）。
 - [x] 历史 H200 部分算子校准、来源与覆盖域门禁；不代表重点模型实测。
 - [x] A 组（2026-11-10）：TP/EP per-rank 统一配方、同卡对象身份账本、
   生命周期峰值分列、预算契约与可部署性四态判定链路（见 A 组表；真实
@@ -53,7 +56,7 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 | ID | 独立交付物与验收标准 | 硬依赖／联合验收点 |
 |---|---|---|
 | R04 | ✅ 完成（单副本路径，2026-11-11）：common/engram.py pin（vllm @f358f057，blob sha1 对 vllm-tree.json 校验）→ 素数桶表布局/批级哈希/查表/wkv/门控四行入 count、表/wkv/qk/staged 对象入 memory（表默认 cpu_offload 研究假设，显式 engram_table_placement 输入）、TP 通信行；独立 oracle tests/test_v41_engram.py 24 项（层桶和 == engram_num_embeddings 精确相等；PR #3 合入后复核修正 rank 局部查表与固定 BF16 字节）。证据 ev-vllm-v41-engram；[报告](docs/validation/v41-engram-20261111.md)。**剩余（未完）**：DP 分片交换（all-to-all/peer/symmetric memory）与 EngramBatch MXFP8 路径、cpu_offload 运行时行为、amd 变体；host 查表时延 unknown，M01 仅 GPU 侧下界 | Engram 源码（已 pin）；不依赖 Qwen 或设备扩展 |
-| R05 | mHC/Sinkhorn：固定 kernel 分支、迭代与操作计数；精确与近似分列（hc 三键已 mapped，边界行已计；tilelang kernel 源仍未 pin，sinkhorn 每迭代 OP 数保持解析近似） | 对应 kernel 源码；不等待 R04 |
+| R05 | ✅ 完成（主路径，2026-11-12）：mHC kernel 源码 pin（kernels/mhc/* 等 12+3 文件，vllm @f358f057，blob sha1 对 vllm-tree.json 校验）→ 边界行升级为精确整数计数（sinkhorn = m²(4R+6)+6m+mix+3/token/side 逐式分解、post_pre = h(2m²+3m+5)+2、mix 补核内 sqrsum、首层 attn 读 broadcast 派生张量 [mix,h] fp32 并入驻留账本）、新增模型出口 hc_exit_post/hc_exit_collapse 两行（行数 241→243）；独立 oracle tests/test_v41_mhc_kernels.py 11 项。证据 ev-vllm-v41-mhc-kernels + sm-v41-mhc-kernels；[报告](docs/validation/v41-mhc-sinkhorn-20261112.md)。**剩余（登记未建模）**：SM100 分支（mega/overlap/single-pass）/MNNVL TP4 融合 all-reduce/replay(write_kv)/SP/amd aiter；split-K 规约开销与中间缓冲流量近似 | 对应 kernel 源码（已 pin）；不等待 R04 |
 
 各模块分别解除自己的缺口；整个模型的结构资格需全部相关缺口闭环，不能以一个模块通过代表整体通过。
 

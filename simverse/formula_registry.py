@@ -64,28 +64,77 @@ F_CAPACITY = _f(
     "lowering/memory.py（R02a/R02b 生命周期分层）", "同卡显存账本/峰值")
 
 # ---- mHC（mega hyper-connections，V4.1；证据 vllm deepseek_v41/nvidia/model.py
-#       pin @f358f057，source-checked 2026-11-10）----
+#       pin @f358f057，source-checked 2026-11-10；R05 2026-11-12 kernel 源码
+#       pin（model_executor/kernels/mhc/tilelang_kernels.py 等 12 文件，blob
+#       sha1 对 vllm-tree.json 校验，ev-vllm-v41-mhc-kernels）后逐式精确计数。
+#       计数约定：每元素初等运算各计 1 op（加/减/乘/除/比较），exp/sigmoid/
+#       rsqrt 各 1；归约求和 n 元素计 n−1 次加、归约 max 计 n−1 次比较；
+#       split-K 跨片规约与 NaN 守卫分支不计入（见证据 limits））----
 F_MHC_MIX = _f(
     "v2.mhc_mix",
-    "coeff GEMM FLOPs = 2·T·IC·mix_hc；IC=hc_dim=m·h（首层 attn 侧 IC=h），"
-    "mix_hc=(2+m)·m；权重 FP32（hc_*_fn 参数 dtype=float32）",
-    "model.py hc_attn_fn/hc_ffn_fn 形状 (mix_hc, hc_dim)、hc_post_alpha 常数 2.0",
+    "FLOPs = T·(2·IC·mix_hc + 2·IC)：系数 GEMM + 核内 sqrsum（每 k 元素 "
+    "1 乘 + 1 加，hc_prenorm_gemm_tilelang L911-912 / mhc_fused_tilelang "
+    "L772-775）；IC=hc_dim=m·h（首层 attn 侧 IC=h，rms_numel=h）；"
+    "mix_hc=(2+m)·m；权重 FP32（首层 attn 侧读派生张量 hc_attn_fn_broadcast "
+    "[mix,h]：weight_read=mix·h·4，容量仍登记 fn 参数本体 mix·hc_dim·4）",
+    "tilelang_kernels.py hc_prenorm_gemm_tilelang/mhc_fused_tilelang + "
+    "model.py hc_attn_fn/hc_ffn_fn 形状 (mix_hc, hc_dim)、"
+    "finalize_mhc_broadcast_weights L1530-1544",
     "mHC 边界系数生成（每层 attn/ffn 各一次）")
 F_MHC_SINKHORN = _f(
     "v2.mhc_sinkhorn",
-    "ops ≈ T·mix_hc·iters·5（每迭代每系数约 5 OP：减/幂/行和/列和/归一）",
-    "iters=hc_sinkhorn_iters 精确（model.py sinkhorn_repeat=hc_sinkhorn_iters）；"
-    "每迭代 OP 数为解析近似（tilelang kernel 未 pin）→ 行标 approximated",
-    "mHC 系数 sinkhorn 归一化（FP32 系数）")
+    "ops = T·[m²·(4R+6) + 6m + mix_hc + 3]（精确整数；R=sinkhorn_iters）。"
+    "逐式（mhc_pre_big_fuse_with_norm_tilelang L383-441，m=hc_mult）："
+    "rms 3（÷rms_numel + eps + rsqrt）+ mixes×rms mix 次乘；"
+    "pre 门 4m（乘+加+sigmoid+加 eps）+ post 门 4m（乘+加+sigmoid+乘 "
+    "post_alpha=2.0 源码常数）；comb affine 2m²（乘 scale+加 base）；"
+    "首轮 softmax 6m²−2m（max m(m−1) 比较 + 减 m² + exp m² + 行和 m(m−1) "
+    "+ 除 m² + 加 eps m²）+ 列归一 ×1 2m²（列和 m(m−1) + eps 加 m + 除 m²）；"
+    "循环 (R−1) 次 ×(行归一 2m² + 列归一 2m²)。"
+    "迭代语义：首轮 softmax+列归一之后才进 (R−1) 次行/列交替（L433-440），"
+    "R=1 → 循环 0 次；NaN 守卫（rms≥0，L432）只跳过 NaN padding 行，"
+    "按控制流不计入",
+    "tilelang_kernels.py mhc_pre_big_fuse_with_norm_tilelang L383-441"
+    "（model 路径 norm_weight 恒非 None → MHC_PRE_NORM_KERNEL epilogue）；"
+    "iters=hc_sinkhorn_iters 精确（model.py sinkhorn_repeat）；计数约定："
+    "超越函数各计 1 op、归约求和计 n−1 次加/归约 max 计 n−1 次比较；"
+    "split-K 跨片规约 (n_splits−1)·(mix+1)/token 依赖设备 SM 数，未入账",
+    "mHC 系数 epilogue：门控+affine+sinkhorn 归一化（FP32 系数，精确计数）")
 F_MHC_POST_PRE = _f(
     "v2.mhc_post_pre",
-    "FLOPs = 4·T·hc_dim（post 流更新 + collapse 各 2·T·hc_dim）"
-    "+ T·(4h+2)（融合 RMSNorm，norm_weight=attn_norm/ffn_norm）",
-    "model.py forward：常规路径 mhc_shifted_post_pre 融合前一子层 post 与本侧 "
-    "pre（else 分支）；Engram 层为 mhc_post_tilelang + engram + mhc_pre 分立",
+    "FLOPs = T·[h·(2m²+3m+5) + 2]。构成：post 核 h·(2m²+m)（每 h 元素 "
+    "m 乘（post·x）+ m² 乘 + m² 加（comb·residual），mhc_post_tilelang "
+    "L856-861；T≤32 融合核把 post 折入 prenorm GEMM，操作量相同）+ "
+    "collapse 2mh（每元素 m·(乘+加)，L478-502）+ 两遍 RMSNorm 5h+2"
+    "（sumsq 累积 2h + 归约 h−1 + rsqrt 3（÷h+eps+rsqrt）+ 缩放 2h，"
+    "L457-524；save_pre_mix 下先 round bf16 再算 sumsq——语义注记）",
+    "tilelang.py mhc_fused_post_pre_delayed_tilelang L256-486 + "
+    "tilelang_kernels.py mhc_post_tilelang/mhc_pre_big_fuse_with_norm_"
+    "tilelang；model.py 常规路径 mhc_shifted_post_pre 融合前一子层 post 与"
+    "本侧 pre；Engram 层为 mhc_post_tilelang + engram + mhc_pre 分立"
+    "（model.py L583-614，总量不变）",
     "mHC 流折叠/展开边界（含残差与 norm；v41 层不再另计通用 norm/add 行）")
-F_MHC_EXPAND = _f("v2.mhc_expand", "写 = T·m·h（首层嵌入广播到 m 流）",
-                  "model.py 首层 hc_expand(x, hc_mult)", "首层流广播")
+F_MHC_EXPAND = _f("v2.mhc_expand", "写 = T·m·h（首层嵌入广播到 m 流；"
+                  "triton 拷贝核读一次 T·h 写 T·m·h，flops 按写元素数计）",
+                  "model.py 首层 hc_expand(x, hc_mult)；nvidia/ops/mhc.py "
+                  "L326-355 _hc_expand_kernel", "首层流广播")
+F_MHC_EXIT_POST = _f(
+    "v2.mhc_exit_post",
+    "FLOPs = T·h·(2m²+m)：末层 FFN 输出 post 核（mhc_post_tilelang，"
+    "无后继边界折入）；act_read=(T·hc_dim+T·h)·B_a，act_write=T·hc_dim·B_a",
+    "model.py _collapse L1259-1279（末层 FFN 已自行 finalize；"
+    "fuse_mhc_all_reduce 分支域外未建模）+ tilelang_kernels.py "
+    "mhc_post_tilelang L856-861",
+    "mHC 模型出口 post（每 forward 一次，layer=-1）")
+F_MHC_EXIT_COLLAPSE = _f(
+    "v2.mhc_exit_collapse",
+    "FLOPs = T·2mh：终折叠 hc_collapse_triton（enable_fp_fusion=False → "
+    "逐流 m·(乘+加)）；act_read = T·hc_dim·B_a + T·m·4（pre_mix fp32），"
+    "act_write = T·h·B_a",
+    "model.py L1187-1192（末层 ffn pre_mix）+ kernels/mhc/triton.py "
+    "L75-147 _hc_head_reduce_store_kernel；final RMSNorm 另由 final_norm "
+    "行计，不重复",
+    "mHC 模型出口终折叠（每 forward 一次，layer=-1）")
 
 # ---- Engram（DeepSeek-V4.1-Flash；证据 vllm/models/deepseek_v41/common/
 #       engram.py pin @f358f057 blob sha1 ba4ceea6，source-checked 2026-11-11

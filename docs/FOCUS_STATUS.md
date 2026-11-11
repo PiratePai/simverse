@@ -40,12 +40,12 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 
 | 能力 | 范围与限制 |
 |---|---|
-| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 Engram 单副本路径 + hc 已 source-checked 建模（R04；DP 交换/cpu_offload 运行时未覆盖），CSA2/MoE/量化仍缺口；四栏证据见 JSON |
+| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 Engram 单副本路径（R04）+ mHC kernel 源码级精确计数（R05）已 source-checked 建模（DP 交换/cpu_offload 运行时/SM100 系分支未覆盖），CSA2/MoE/量化仍缺口；四栏证据见 JSON |
 | Qwen3.6+DFlash | pinned 草稿、接受律、draft/verify 解析成本、同卡与 DT 串行；非实测收益；CPU/GPU 未执行 |
 | **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
 | **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
 | **预算契约与判定（R03a/b）** | nominal/allocatable(measured/hypothesis)/额外开销分列；四态判定 unknown/oom/feasible/conditional；已知下界超标称即 OOM；假设预算不进实际部署排名 |
-| mHC / Engram | mHC 已有源码边界映射和计数测试（Sinkhorn 操作数仍近似）；Engram 素数桶表/哈希/查表/wkv/门控已建模（R04；表位置 cpu_offload 为研究假设，DP 分片交换未覆盖） |
+| mHC / Engram | mHC 已 kernel 源码级 source-checked 精确计数（R05 2026-11-12：kernels/mhc/* pin，sinkhorn/post_pre 逐式精确 + 出口两行 + broadcast 派生张量驻留；SM100/MNNVL/replay/SP/amd 分支域外登记）；Engram 素数桶表/哈希/查表/wkv/门控已建模（R04；表位置 cpu_offload 为研究假设，DP 分片交换未覆盖） |
 | DT 流水事件核 | 微批依赖、资源互斥、周期和利用率；非完整在线服务 |
 | 接受律与比较 | 显式假设、未知传播、资格门禁；不从平均接受长度推造完整概率律 |
 | CLI/Web/导出/扫描 | 共用生产结果、精度选择、EP 选择、预算输入、独立运行身份 |
@@ -66,7 +66,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 - 重点模型小尺寸 CPU forward 与计数的独立执行对照（当前全部未执行）。
 - Qwen3.6+DFlash 实际接受分布、draft/verify 延迟及服务栈配对验证。
 - 重点模型各精度/TP 的 GDN、MoE、attention 测量；历史 H200 profile 不能按名称相似迁移。
-- V4.1 Engram DP 分片交换路径与 mHC tilelang kernel 数值/操作边界（单机 Engram 已 source-checked）。
+- V4.1 Engram DP 分片交换路径；mHC 域外分支（SM100 系/MNNVL TP4/replay/SP/amd）与 split-K/中间缓冲流量近似（单机 Engram 与 mHC 主路径均已 source-checked，未执行）。
 - 实际可分配显存（G-D7）、非 KV 运行时开销（workspace/CUDA graph/NCCL 池尺寸，当前按缺口传播）、匹配 E2E 请求轨迹。
 - 浏览器交互与像素复核：2026-11-10 A组轮已实测 EP 选择/预算输入/运行链路
   （截图 docs/evidence/workbench_ep_budget_run.png）；其余页面沿此前口径。

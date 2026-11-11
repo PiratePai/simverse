@@ -125,6 +125,38 @@ _PINNED_ASSETS = [
       "研究假设配方（场景 engram_table_placement，默认 cpu_offload）",
       "kernel 内部 op 数（哈希/门控常数 10d+5 等）为解析近似计数"],
      False, "2026-11-11"),
+    ("ev-vllm-v41-mhc-kernels", "source-checked",
+     "vLLM V4.1 mHC kernel 计数证据（R05，2026-11-12）：一次 mHC 边界 = "
+     "前一子层 post + 本侧系数 GEMM（含核内 sqrsum，每 k 元素 1 乘+1 加）+ "
+     "系数 epilogue（pre/post sigmoid 门、comb affine、softmax + 列归一 + "
+     "(R−1)×(行+列归一)，R=hc_sinkhorn_iters）+ collapse + 两遍 RMSNorm；"
+     "操作计数逐式为精确整数（初等运算各 1 op、超越函数 1 op、归约 n−1）；"
+     "首层 attn 侧 GEMM IC=h 且读派生张量 hc_attn_fn_broadcast "
+     "[mix,h]（finalize_mhc_broadcast_weights 按流求和，非 checkpoint 参数）"
+     "+ hc_expand 广播行；模型出口 = 末层 FFN post（mhc_post_tilelang）+ "
+     "hc_collapse_triton 终折叠 + final RMSNorm（final_norm 行已另计）；"
+     "Engram 层 post/pre 分立不改变总量",
+     str(REFS / "vllm" / "vllm" / "model_executor" / "kernels" / "mhc" /
+         "tilelang_kernels.py"),
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5：主路径 "
+     "kernels/mhc/tilelang.py + tilelang_kernels.py + triton.py + torch.py + "
+     "warmup.py + __init__.py + layers/mhc.py + models/deepseek_v41/nvidia/"
+     "ops/mhc.py + mega_mhc.py + cute_dsl/all_reduce_mhc.py + amd/mhc.py + "
+     "utils/deep_gemm.py（另同批 pin kernels/mhc/aiter.py、cpu.py、cute_dsl/"
+     "__init__.py；12+3 文件 git blob sha1 已对 docs/rebuild-20261106/"
+     "references/vllm-tree.json 逐项校验，tests/test_v41_mhc_kernels.py 防漂移）",
+     "R05 mHC 边界精确计数（count/work.hc_boundary_rows + hc_exit_rows、"
+     "lowering/memory -w-mhc-broadcast-L0 派生张量、formula v2.mhc_* 六条）",
+     ["源码阅读（source-checked）非执行；CPU/GPU 均未运行",
+      "SM100 分支（mega_mhc、overlap 流、T≤4 single-pass）、MNNVL TP4 融合 "
+      "all-reduce、write_kv/decoder_replay/specialized_decode、SP gather、"
+      "amd aiter 变体均域外未建模（分支谓词见 sm-v41-mhc-kernels）",
+      "split-K 跨片规约 (n_splits−1)·(mix+1)/token 依赖设备 SM 数未入账；"
+      "中间缓冲（mixes/sqrsum splits 维）HBM 往返与 T≤32 融合路径寄存器"
+      "喂入的流量节省未细分（act 流量字段保留解析近似）",
+      "计数约定（超越函数 1 op、归约 n−1、split-K/NaN 守卫不计）为文档"
+      "约定而非 kernel 指令数"],
+     False, "2026-11-12"),
     ("ev-vllm-v41-dspark", "source-checked",
      "vLLM V4.1 DSpark speculator：num_reqs 批处理、复用 V4 decoder 的事实",
      str(REFS / "vllm" / "vllm" / "v1" / "worker" / "gpu" / "spec_decode" / "dspark" / "speculator.py"),

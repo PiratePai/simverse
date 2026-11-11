@@ -3,9 +3,10 @@
 与 [数据缺口清单](data-gaps.md) 分开维护：本页只列**工程实现**缺口（不依赖新数据，
 或先有实现才能消费数据）。每项含：影响面/缺什么/旧仓为何不足/需要什么实现/
 验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
-新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）。
+新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）；
+2026-11-12 更新（R05：mHC kernel 源码 pin + 精确计数）。
 
-## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
+## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；mHC kernel 源码级 source-checked 2026-11-12 R05）⭐P0
 
 - **影响**：必需场景①（deepseek_v41_flash）全部性能/容量结论——structure_complete=
   False，M02/M04/M05/M06 降级，不参与排名。
@@ -22,15 +23,32 @@
   FP32 权重每卡复制）计入 count（hc_* 行，替代该族通用 norm/add 行防重复计费）
   与 memory（-w-mhc 分配）；测试 tests/test_v41_hc.py（手算锚点/整模型复算/TP
   不变性/复制守恒/权重守恒）。公式 v2.mhc_* 四条。
+- **2026-11-12 R05 进展**：**mhc tilelang kernel 源已 pin（解除 2026-11-10
+  登记的"kernel 源未入评审包"）**——kernels/mhc/{tilelang,tilelang_kernels,
+  triton,torch,warmup,__init__}.py + layers/mhc.py + nvidia/ops/{mhc,
+  mega_mhc}.py + cute_dsl/all_reduce_mhc.py + amd/mhc.py + utils/deep_gemm.py
+  （12 核心 + 同批 3 文件，vllm @f358f057，blob sha1 对 vllm-tree.json 校验）；
+  hc_* 边界行从解析近似升级为逐式精确整数（sinkhorn = m²(4R+6)+6m+mix+3/
+  token/side、post_pre = h(2m²+3m+5)+2、mix 补核内 sqrsum），新增模型出口
+  hc_exit_post/hc_exit_collapse 两行与首层 broadcast 派生张量驻留
+  （-w-mhc-broadcast-L0，491,520 B/每 rank）；测试 tests/test_v41_mhc_kernels.py
+  11 项独立 oracle。公式 v2.mhc_* 扩至六条；证据 ev-vllm-v41-mhc-kernels
+  （source-checked，未执行）。
 - **仍缺（G-C1 剩余）**：Engram **DP 分片交换**（all-to-all/EngramPeerExchange/
   symmetric memory/DPSharedEngramStorage）与 EngramBatch MXFP8 打包路径未建模
   （本仓默认单副本路径不启用，登记未覆盖）；cpu_offload 运行时行为（预取流/
-  TLB/GB200 排序阈值 36864/4096）未建模；amd/engram.py 变体未 pin；mhc
-  tilelang kernel 源码仍未入评审包。CSA2/MoE scoring、量化映射、swiglu clamp、
-  candidate block、compress_ratios 尾部为独立缺口（不在 G-C1 内）。
+  TLB/GB200 排序阈值 36864/4096）未建模；amd/engram.py 变体未 pin。mHC 侧：
+  SM100 分支（mega_mhc/overlap 流/T≤4 single-pass）、MNNVL TP4 融合
+  all-reduce、write_kv/decoder_replay/specialized_decode、SP gather、amd
+  aiter 变体域外登记；split-K 规约开销（依赖设备 SM 数）与中间缓冲
+  （mixes/sqrsum splits 维）流量未细分。CSA2/MoE scoring、量化映射、
+  swiglu clamp、candidate block、compress_ratios 尾部为独立缺口（不在
+  G-C1 内）。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
-  mhc tilelang kernel 源；structure_complete 还需 CSA2/MoE/量化缺口闭环。
-- **当前降级**：structure gate 拦截（capability 可见；Engram 单机/hc 部分已不再缺）。
+  mHC 域外分支按部署域补建模；structure_complete 还需 CSA2/MoE/量化缺口闭环
+  （mHC/Engram 均未执行，不冒充 executed/measured）。
+- **当前降级**：structure gate 拦截（capability 可见；Engram 单机/mHC
+  kernel 级计数已不再缺）。
 - **优先级**：P0（必需模型场景）。
 
 ## G-C2 verify/prefill 形状域建模 + 蒸馏扩展（消费 G-D4）
