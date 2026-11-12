@@ -1,0 +1,533 @@
+{
+  "before_sha256": "9f09ae43e2bf4d29971235b13b5c248172df8c8d103d9a483b3d96407fe26be8",
+  "scenario_sha256": "3c2a297838c8ac774d2c09ec606845d7d4eb5c57693227e802fac4c356f1edc8",
+  "before": {
+    "flops": 7176453222,
+    "weight_read": 1649382848,
+    "weight_read_expected": 530843184.0,
+    "act_read": 19047934,
+    "act_write": 10928656,
+    "kv_read": 42467988,
+    "kv_write": 24076,
+    "state_read": 12288,
+    "state_write": 12288,
+    "rows": 1007
+  },
+  "after": {
+    "flops": 7176453222,
+    "weight_read": 1769999808,
+    "weight_read_expected": 752027184.0,
+    "act_read": 19047934,
+    "act_write": 10928656,
+    "kv_read": 42467988,
+    "kv_write": 24076,
+    "state_read": 12288,
+    "state_write": 12288,
+    "rows": 1007
+  },
+  "delta": {
+    "flops": 0,
+    "weight_read": 120616960,
+    "weight_read_expected": 221184000.0,
+    "act_read": 0,
+    "act_write": 0,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0,
+    "rows": 0
+  },
+  "by_op": {
+    "engram_wkv": {
+      "before": {
+        "flops": 78643200,
+        "weight_read": 39321600,
+        "weight_read_expected": 0.0,
+        "act_read": 24576,
+        "act_write": 12800,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 2
+      },
+      "after": {
+        "flops": 78643200,
+        "weight_read": 40550400,
+        "weight_read_expected": 0.0,
+        "act_read": 24576,
+        "act_write": 12800,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 2
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 1228800,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 2,
+      "rows_after": 2,
+      "t_ms_delta": 0.0003668059701492539
+    },
+    "final_norm": {
+      "before": {
+        "flops": 20482,
+        "weight_read": 20480,
+        "weight_read_expected": 0.0,
+        "act_read": 10240,
+        "act_write": 10240,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "after": {
+        "flops": 20482,
+        "weight_read": 10240,
+        "weight_read_expected": 0.0,
+        "act_read": 10240,
+        "act_write": 10240,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": -10240,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 1,
+      "rows_after": 1,
+      "t_ms_delta": -3.0567164179104482e-06
+    },
+    "index_q_proj": {
+      "before": {
+        "flops": 83886080,
+        "weight_read": 41943040,
+        "weight_read_expected": 0.0,
+        "act_read": 20480,
+        "act_write": 65536,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 8
+      },
+      "after": {
+        "flops": 83886080,
+        "weight_read": 43253760,
+        "weight_read_expected": 0.0,
+        "act_read": 20480,
+        "act_write": 65536,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 8
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 1310720,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 8,
+      "rows_after": 8,
+      "t_ms_delta": 0.0003912597014925391
+    },
+    "kv_proj": {
+      "before": {
+        "flops": 209715200,
+        "weight_read": 104857600,
+        "weight_read_expected": 0.0,
+        "act_read": 409600,
+        "act_write": 40960,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 209715200,
+        "weight_read": 108134400,
+        "weight_read_expected": 0.0,
+        "act_read": 409600,
+        "act_write": 40960,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 3276800,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.000978149253731339
+    },
+    "lm_head": {
+      "before": {
+        "flops": 165478400,
+        "weight_read": 82739200,
+        "weight_read_expected": 0.0,
+        "act_read": 10240,
+        "act_write": 32320,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "after": {
+        "flops": 165478400,
+        "weight_read": 165478400,
+        "weight_read_expected": 0.0,
+        "act_read": 10240,
+        "act_write": 32320,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 82739200,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 1,
+      "rows_after": 1,
+      "t_ms_delta": 0.024698268656716413
+    },
+    "moe_routed": {
+      "before": {
+        "flops": 2123366400,
+        "weight_read": 0,
+        "weight_read_expected": 530841600.0,
+        "act_read": 3287040,
+        "act_write": 2457600,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 2123366400,
+        "weight_read": 0,
+        "weight_read_expected": 752025600.0,
+        "act_read": 3287040,
+        "act_write": 2457600,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 221184000.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.06602507462686569
+    },
+    "moe_shared": {
+      "before": {
+        "flops": 353894400,
+        "weight_read": 176947200,
+        "weight_read_expected": 0.0,
+        "act_read": 547840,
+        "act_write": 409600,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 353894400,
+        "weight_read": 182476800,
+        "weight_read_expected": 0.0,
+        "act_read": 547840,
+        "act_write": 409600,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 5529600,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.0016506268656716339
+    },
+    "o_a_proj": {
+      "before": {
+        "flops": 335544320,
+        "weight_read": 167772160,
+        "weight_read_expected": 0.0,
+        "act_read": 327680,
+        "act_write": 81920,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 335544320,
+        "weight_read": 173015040,
+        "weight_read_expected": 0.0,
+        "act_read": 327680,
+        "act_write": 81920,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 5242880,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.0015650388059701495
+    },
+    "o_b_proj": {
+      "before": {
+        "flops": 419430400,
+        "weight_read": 209715200,
+        "weight_read_expected": 0.0,
+        "act_read": 81920,
+        "act_write": 409600,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 419430400,
+        "weight_read": 216268800,
+        "weight_read_expected": 0.0,
+        "act_read": 81920,
+        "act_write": 409600,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 6553600,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.001956298507462692
+    },
+    "q_a_proj": {
+      "before": {
+        "flops": 524288000,
+        "weight_read": 262144000,
+        "weight_read_expected": 0.0,
+        "act_read": 409600,
+        "act_write": 102400,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 524288000,
+        "weight_read": 270336000,
+        "weight_read_expected": 0.0,
+        "act_read": 409600,
+        "act_write": 102400,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 8192000,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.002445373134328341
+    },
+    "q_b_proj": {
+      "before": {
+        "flops": 419430400,
+        "weight_read": 209715200,
+        "weight_read_expected": 0.0,
+        "act_read": 102400,
+        "act_write": 327680,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 419430400,
+        "weight_read": 216268800,
+        "weight_read_expected": 0.0,
+        "act_read": 102400,
+        "act_write": 327680,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 6553600,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.001956298507462692
+    }
+  },
+  "t_ms_delta": 0.10203013731343447,
+  "before_memory": {
+    "steady_bytes": 35768859072,
+    "transient_peak_bytes": 13312,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "after_memory": {
+    "steady_bytes": 50128006592,
+    "transient_peak_bytes": 13312,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "before_known_peak": 35768872384,
+  "after_known_peak": 50128019904,
+  "expected_changed_ops": [
+    "embed_lookup",
+    "engram_wkv",
+    "final_norm",
+    "index_q_proj",
+    "kv_proj",
+    "lm_head",
+    "moe_routed",
+    "moe_shared",
+    "o_a_proj",
+    "o_b_proj",
+    "q_a_proj",
+    "q_b_proj"
+  ],
+  "execution": "analytical replay only; no CPU forward or kernel execution"
+}

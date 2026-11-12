@@ -166,6 +166,45 @@ _CSA2_KEY_NOTES = {
 _V41_DTYPE_DOMAIN = "official_v41_bfloat16"
 _V41_BF16_ITEMSIZE = 2
 
+# R22：official V4.1-Flash 固定资产的 quantization_config（无 full_config
+# 的内部调用按此默认；与 model_dtype 默认同模式——不是任意量化回退）。
+_V41_DEFAULT_QUANT_CFG = {
+    "quant_method": "fp8",
+    "activation_scheme": "dynamic",
+    "weight_block_size": [32, 32],
+    "scale_fmt": "ue8m0",
+    "expert_dtype": "fp4",
+}
+
+# R22：quantization_config 叶键 mapped 注记（20 文件 pin quant-pin.json；
+# consumer=count/moe+work、lowering/memory、count/quant_layout）。
+_V41_QUANT_KEY_NOTES = {
+    "quant_method":
+        "mapped：fp8 → override deepseek_v4_fp8（model_type deepseek_v41* → "
+        "DeepseekV41FP8Config；config/model.py L1429/L1444-1465 override 链、"
+        "quant_config.py L163-192、quantization/__init__.py L120-132）；"
+        "checkpoint 必须 fp8 序列化（fp8.py L103-109 拒绝在线量化）",
+    "activation_scheme":
+        "mapped：dynamic——块量化硬要求（fp8.py L125-130）；激活 scale 不落盘"
+        "（KDynamicNoParam，modelopt.py L2497-2510），运行时按 kernel 域"
+        "量化（SM90 Marlin W8A16/W4A16 实为 BF16 激活，见 extras.quant）",
+    "weight_block_size":
+        "mapped：[32,32]——线性层走 MXFP8 分支的必要条件（quant_config.py "
+        "L221-243）；checkpoint scale 32×32 块，装载展开为 (1,32) 运行时块"
+        "（modelopt.py L2424-2479/L2430-2445）；count/memory 按 N·K/32 计",
+    "scale_fmt":
+        "mapped：ue8m0——声明与派生一致；loader 实际不读该键（fp8.py "
+        "L155-172 键表无 scale_fmt），有效 scale dtype 由 expert_dtype=='fp4'"
+        "→is_scale_e8m0 派生（quant_config.py L89-93），非 ue8m0 值按声明"
+        "矛盾拒绝（不静默取派生值）",
+    "expert_dtype":
+        "mapped：fp4——config 类把它提升到 hf_config 顶层（transformers_utils/"
+        "configs/deepseek_v41.py L46-50）；驱动两条 dispatch：线性 is_scale_e8m0"
+        "（ue8m0 1B scale）+ 路由专家 Mxfp4MoEMethod(activation_key="
+        "kMxfp8Dynamic)（quant_config.py L244-261）；scale_fmt 键的 dtype 由此"
+        "派生而非 loader 读取",
+}
+
 _MOE_ROUTE_KEY_NOTES = {
     "scoring_func":
         "mapped：sqrtsoftplus——weights=sqrt(softplus(logits))，>20 取 "
@@ -648,7 +687,14 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     V4.1 EP 保守整除域（mega 断言；fused 通用余数映射未入 pin）；公式
     v2.moe_route_*；平坦偏置 top-k 无分组——V4.1 config 无
     n_group/topk_group 键，分组仅 V3 式 use_grouped_topk 路径）。
-    量化映射、swiglu clamp、注意力核本体、尾部 compress_ratios 仍为显式
+    量化映射（R22，2026-11-13）：quantization_config 5 叶键按 20 文件 pin
+    （quant-pin.json 20 文件，vllm @f358f057，blob sha1 对 vllm-tree.json 逐项校验）
+    source-checked 映射 → mapped（extras["quant"]；dense/shared 线性 MXFP8
+    1B+ue8m0 (1,32) scale、路由专家 MXFP4 打包 0.5B+scale、embed/lm_head/
+    norm/gate BF16 未量化；Marlin SM90 执行域 act=BF16）。执行变体
+    （Humming/TRTLLM SM100/emulation 反量化）登记 capability-gaps，不进
+    本 gaps。
+    swiglu clamp、注意力核本体、尾部 compress_ratios 仍为显式
     缺口 → gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
@@ -703,6 +749,53 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     if not bool(tc.get("norm_topk_prob", True)):
         raise ValueError("V4.1 norm_topk_prob=false 不支持：dsv4/cpu 路由均"
                          "断言 renormalize")
+    # R22：量化 config 域校验（pinned dispatch 只覆盖 official V4.1-Flash
+    # 的组合；偏离值按 config 域拒绝，不静默回退到别的量化路径）——
+    # quant-pin.json：deepseek_v41/quant_config.py L163-192（override 只认
+    # quant_method ∈ fp8/deepseek_v4_fp8 + deepseek_v4* 模型型）、L76-80
+    # （expert_dtype 域 fp4|fp8）、L221-243（线性 MXFP8 分支要求
+    # weight_block_size==[32,32] 且 is_scale_e8m0）、fp8.py L111-131
+    # （块量化必须 dynamic activation）。
+    if full_config is None:
+        quant_cfg = dict(_V41_DEFAULT_QUANT_CFG)
+    else:
+        raw_qcfg = full_config.get("quantization_config")
+        if not isinstance(raw_qcfg, dict):
+            raise ValueError(
+                "V4.1 quantization_config 缺失/非对象：official 资产固定携带"
+                " 5 叶键（fp8 动态块量化 + fp4 专家）；无量化变体不在"
+                " source-checked 域")
+        quant_cfg = raw_qcfg
+    qm = str(quant_cfg.get("quant_method", ""))
+    if qm not in ("fp8", "deepseek_v4_fp8"):
+        raise ValueError(
+            f"V4.1 quantization_config.quant_method={qm!r} 不在 pinned dispatch"
+            " 域（override 只认 fp8/deepseek_v4_fp8 → DeepseekV41FP8Config；"
+            "quant_config.py L175-192）")
+    if quant_cfg.get("activation_scheme") != "dynamic":
+        raise ValueError(
+            f"V4.1 activation_scheme={quant_cfg.get('activation_scheme')!r} "
+            "不支持：块量化要求 dynamic（fp8.py L125-130）；static 激活"
+            "路径未建模")
+    if list(quant_cfg.get("weight_block_size") or []) != [32, 32]:
+        raise ValueError(
+            f"V4.1 weight_block_size={quant_cfg.get('weight_block_size')!r} "
+            "不在域：MXFP8 线性 dispatch 要求精确 [32,32]（quant_config.py "
+            "L222-243）；[128,128] FP8 块路径为 V3 式未建模变体")
+    if quant_cfg.get("expert_dtype") != "fp4":
+        raise ValueError(
+            f"V4.1 expert_dtype={quant_cfg.get('expert_dtype')!r} 不在已建模"
+            "域：fp4→Mxfp4MoEMethod 已入账；fp8（Flash-Base 块量化专家）"
+            "路径未建模（quant_config.py L244-263）")
+    if quant_cfg.get("scale_fmt") != "ue8m0":
+        # 注意：loader 不读 scale_fmt（Fp8Config.from_config 键表无该键，
+        # fp8.py L155-172）；有效 scale dtype 由 expert_dtype 派生
+        # （is_scale_e8m0，quant_config.py L89-93）。值不一致 = checkpoint
+        # 声明与派生结果矛盾，拒绝而非静默取派生值。
+        raise ValueError(
+            f"V4.1 scale_fmt={quant_cfg.get('scale_fmt')!r} 不在域：official"
+            " 资产 ue8m0；该键不被 loader 消费（fp8.py L155-172），实际"
+            " scale dtype 由 expert_dtype=='fp4' 派生，不一致按声明矛盾拒绝")
     layers = []
     r_hist: Dict[int, int] = {}
     for i in range(L):
@@ -797,6 +890,18 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             coverage[path] = {"status": "mapped",
                               "consumer": "model_ir+count+memory",
                               "note": note}
+    # R22：quantization_config 容器+5 叶键 unsupported → mapped（20 文件 pin
+    # quant-pin.json source-checked 2026-11-13）；对应 gap 条目移除。
+    coverage["quantization_config"] = {
+        "status": "mapped", "consumer": "model_ir+count+memory",
+        "note": "容器；5 叶键逐项 mapped（R22 quant-pin.json 20 文件；dispatch → "
+                "MXFP8 线性 + MXFP4 专家 + BF16 未量化类）"}
+    for key, note in _V41_QUANT_KEY_NOTES.items():
+        coverage[f"quantization_config.{key}"] = {
+            "status": "mapped", "consumer": "model_ir+count+memory",
+            "note": note}
+    gaps = [g for g in gaps
+            if not g.startswith("quantization_config")]
     # R21：路由 spec（消费方：count/moe.v41_moe_route_rows、
     # lowering/memory 路由偏置对象、count/work EP 整除域校验）。
     # 常数全部来自 moe-pin.json @f358f057：
@@ -867,6 +972,64 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         # n_shared_experts/fuse_shared_experts；见 moe_output.shared_output。
         "shared_expert_weight": 1.0,
     }
+    # R22：量化 spec（消费方：count/work.v41_layer_rows、count/moe.moe_rows、
+    # count/work.head_rows、lowering/memory.target_weight_allocations、
+    # count/quant_layout 字节公式、scenario V41 量化一致性校验）。
+    # 证据 quant-pin.json 20 文件 @f358f057，逐条见 _V41_QUANT_KEY_NOTES
+    # 与 docs/validation/v41-quant-map-20261113.md；执行域按注册设备
+    # （H100/H200=SM90、L40=SM89，均 ≤SM90）固定为 Marlin W8A16/W4A16。
+    quant_spec = {
+        "method": "deepseek_v4_fp8_dispatch",
+        "method_source": "override_quantization_method（quant_config.py "
+                         "L163-192；config/model.py L1429/L1444-1465）",
+        "linear_class": "ModelOptLinearMethod(kMxfp8Static, kMxfp8Dynamic)",
+        "linear_source": "quant_config.py L221-243；modelopt.py KMxfp8Static "
+                         "L2424-2479",
+        "dense_linear": {"value_dtype": "fp8_e4m3", "value_itemsize": 1,
+                         "scale_dtype": "ue8m0", "scale_itemsize": 1,
+                         "ckpt_scale_block": [32, 32],
+                         "runtime_scale_block": [1, 32]},
+        # 未量化类：get_quant_method 对非 LinearBase/RoutedExperts/Attention
+        # 返回 None → 默认方法（fp8.py L174-203；embedding 落
+        # UnquantizedEmbeddingMethod，vocab_parallel_embedding.py L322-326）
+        "unquantized_itemsize": model_dtype_bytes,
+        "unquantized_classes": ["embed", "lm_head", "rmsnorm", "gate_linear",
+                                "compressor_fused_wkv_wgate", "indexer_wk",
+                                "indexer_weights_proj", "mhc", "engram_table"],
+        "routed_experts": {"value_dtype": "fp4_e2m1_packed",
+                           "value_itemsize": 0.5, "scale_dtype": "ue8m0",
+                           "scale_itemsize": 1, "scale_block": 32,
+                           "activation_key": "kMxfp8Dynamic",
+                           "source": "quant_config.py L244-261 → "
+                                     "Mxfp4MoEMethod（mxfp4.py L648-703/"
+                                     "L765-840）"},
+        # 执行域（checkpoint 格式之外）：注册设备全部 ≤SM90 →
+        #   * 线性：FlashInfer MXFP8 kernel 均要求 SM100+（flashinfer.py
+        #     L47-53/L126-139）→ Marlin MXFP8 W8A16（SM80+，marlin.py
+        #     L14-26；激活保持 BF16，无运行时激活量化）；
+        #   * 专家：TRTLLM/DeepGEMM 为 SM100+（oracle/mxfp4.py L461-486
+        #     docstring）→ Marlin W4A16（BF16 激活）；Humming 在 cc=90 优先
+        #     于 Marlin（priority.py L10-23）但依赖可选外部 humming 包
+        #     （utils/humming.py L18-97 lazy facade）→ 部署变体未建模；
+        #   * 共享专家：与 dense 线性同 dispatch（DeepseekV4MLP 传
+        #     quant_config，deepseek_v4/nvidia/model.py L322-335）。
+        "act_itemsize": 2,
+        "act_dtype": "bfloat16",
+        "act_domain": "registered_sm80_sm90_marlin_w8a16_w4a16",
+        "act_source": "kernels/linear/__init__.py L569-589/L962-1014 + "
+                      "marlin.py L14；oracle/mxfp4.py L461-486",
+        # Marlin 分配对齐（routed_experts.py L190-203 于 create_weights 前
+        # 调 maybe_roundup_sizes；oracle/mxfp4.py L850-858）
+        "expert_backend": "marlin_w4a16",
+        "expert_round_up": {"intermediate": 128, "hidden": 256},
+        "expert_round_up_source": "oracle/mxfp4.py L850-855（MARLIN 分支）",
+        # checkpoint 声明（scale_fmt 不被 loader 读取；见键注记）
+        "checkpoint_quantization_config": dict(quant_cfg),
+        "kv_cache": "quantization_config 无缓存叶键；记录宽度由 R20 "
+                    "v41_kv_record 配方决定（attention.py L583-589），"
+                    "Fp8KVCacheMethod 仅在显式 fp8 kv_cache_dtype 时加载"
+                    "checkpoint scale（fp8.py L201-203/L845-849）",
+    }
     return ModelIR(
         id=model_id, label=label, family="v41_csa2", hidden=h, vocab=v,
         layers=layers, source=source,
@@ -895,7 +1058,8 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         },
         "hc": hc_spec,
         "engram": engram_spec,
-        "moe_route": moe_route_spec})
+        "moe_route": moe_route_spec,
+        "quant": quant_spec})
 
 
 def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id: str,

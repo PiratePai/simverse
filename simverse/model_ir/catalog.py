@@ -55,7 +55,7 @@ _V41_EVIDENCE = ModelEvidence(
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch",
                    "sm-v41-mhc-kernels", "sm-v41-csa2-indexer",
-                   "sm-v41-moe-route"),
+                   "sm-v41-moe-route", "sm-v41-quant-dispatch"),
     unverified_paths=(
         "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与"
         "EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；"
@@ -79,9 +79,15 @@ _V41_EVIDENCE = ModelEvidence(
         "只打分候选块）/decode_topk CuTe 路径/TP 行分片 all-gather/PCP/DCP/"
         "fused_mqa_topk/FlashInfer plain-row bf16 变体未建模；CUDA-graph 静态"
         "整宽 logits 缓冲与 -inf 尾写、cooperative 候选值相等边界近似未入账",
-        "quantization_config: FP8/FP4 配置未映射到本仓计算精度（compressor/"
-        "weights_proj/wk 的 bf16 固定与打包记录宽度为 pinned 事实，其余量化"
-        "路径仍缺）",
+        "quant_deploy_variants: 量化映射主干（dispatch→MXFP8 线性+ue8m0 "
+        "(1,32) scale/MXFP4 打包专家/Marlin SM90 执行域 BF16 激活/embed"
+        "-lm_head-norm BF16）已 R22 source-checked（ev-vllm-v41-quant，"
+        "quant-pin.json 20 文件）；未建模变体：Humming W4A8（cc=90 优先于"
+        " Marlin 但依赖可选外部 humming 包；I 对齐 64 非 128）、SM100 "
+        "TRTLLM/DeepGEMM MXFP8 动态激活（1B+K/32；无注册设备）、emulation "
+        "反量化驻留（VLLM_MXFP8_EMULATION_DEQUANT_AT_LOAD 默认 BF16 2B）、"
+        "Marlin 重排/补齐字节与 workspace、NVFP4 moe_quant_algo 专家、"
+        "expert_dtype=fp8 Flash-Base 块量化专家",
     ),
     method_status={"baseline": "partial-source", "dflash_v1": "unsupported",
                    "mtp": "unverified"},
@@ -91,8 +97,11 @@ _V41_EVIDENCE = ModelEvidence(
          "21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；"
          "MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 14 文件；"
          "count 三行 + gate 权重（loader BF16）/输入（mHC layer_input "
-         "BF16）+ 路由偏置对象 + EP 保守整除域（仅 mega 断言））；量化映射/"
-         "注意力核本体仍缺口；hc 仅 source-checked，未执行。")
+         "BF16）+ 路由偏置对象 + EP 保守整除域（仅 mega 断言））；量化映射"
+         "已 R22 source-checked（ev-vllm-v41-quant，quant-pin.json 20 文件；"
+         "MXFP8 线性/MXFP4 专家/scale 开销/打包/TP-EP 分片/Marlin SM90 执行域"
+         " BF16 激活；Humming/SM100/emulation 部署变体登记缺口）；注意力核"
+         "本体仍缺口；hc 仅 source-checked，未执行。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",
@@ -211,7 +220,7 @@ def _v41() -> ModelIR:
                    evidence_refs=("ev-v41-config", "ev-vllm-v41-mhc",
                                   "ev-vllm-v41-model",
                                   "ev-vllm-v41-engram", "ev-vllm-v41-csa2",
-                                  "ev-vllm-v41-moe"))
+                                  "ev-vllm-v41-moe", "ev-vllm-v41-quant"))
 
 
 def _qwen36() -> ModelIR:

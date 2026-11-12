@@ -1,6 +1,6 @@
 from simverse.model_ir.catalog import catalog_json
 from simverse.pipeline import run_v2
-from simverse.scenario import ScenarioV2
+from simverse.scenario import ScenarioV2, V41_QUANT
 
 
 def test_product_catalog_only_focus_models():
@@ -21,5 +21,6 @@ def test_default_pair_does_not_claim_forward_complete_and_budget_unknown():
 
 
 def test_dflash_rejects_unverified_target_pair():
-    b = run_v2(ScenarioV2(model_id="deepseek_v41_flash")).to_json()
+    b = run_v2(ScenarioV2(model_id="deepseek_v41_flash",
+                          quant=V41_QUANT)).to_json()
     assert "unsupported_combo" in str(b)

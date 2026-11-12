@@ -1,11 +1,59 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-13（dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-13（R22：V4.1 量化映射按 20 文件 pin（quant-pin.json）source-checked 建模——
+quantization_config 5 叶键 mapped：MXFP8 线性（e4m3 1B+ue8m0 (1,32) scale，checkpoint 32×32 块
+装载展开）+ MXFP4 路由专家（打包 2 值/byte+scale+Marlin I→128/H→256 分配对齐）+ embed/lm_head/
+norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fmt 键 loader 不消费、按声明
+矛盾拒绝；场景 V41_QUANT 冻结；known_peak +14.36 GB（Marlin 对齐主导）；Humming/SM100/emulation
+变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #5/#7/#9/#10 已合入 main（HEAD `73738ad`）；本 PR #11 分支 `codex/v41-moe-route-r21` 待验收；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
 运行：`py -3.12 -m pytest tests -q`（**Codex 宿主最终验收回执（非本会话执行）**：在 dtype 修订提交 `b9a5a0f` 上 **334 passed in 19.86s，exit 0**；`tools/replay_v41_moe.py --check` check OK，exit 0；`simverse.cli run-v2` status=completed，exit 0，structure gate 按预期保留。其后 `4ea4fc1` 仅改 `families.py` 注释、不改行为。**本 DSH 沙箱**：**328 passed + 6 个 `tmp_path` 环境错误**，exit 1；测试本体无断言失败，沙箱限制见 §3.9。历史：Codex 宿主 R21 前 332 passed、gate 修复后 333；R07a+R20 集成 Codex 宿主全量 311 passed；R07a 280、R20 单分支 295、R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：334**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-13 dtype 域收紧；311→334 = R21 21 项 + gate BF16 1 项 + dtype 域负例 1 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
+**pytest 收集数：365**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-13 R22；334→365 = R22 量化映射 31 项（tests/test_v41_quant.py）；此前 311→334 = R21 21 项 + gate BF16 1 项 + dtype 域负例 1 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-13 R22：V4.1 量化映射（quantization_config → 布局/字节/执行域）**
+（分支 `v41-quant-map-r22`）：quant-pin.json 20 文件（vllm @f358f057，
+blob sha1 对 vllm-tree.json 逐项校验）source-checked 入册
+（ev-vllm-v41-quant，executed=False；sm-v41-quant-dispatch）。语义核对
+结论：quant_method=fp8 + model_type deepseek_v41* → override
+deepseek_v4_fp8 → DeepseekV41FP8Config（config/model.py override 链 +
+quantization/__init__.py L120-132 平台子类）；expert_dtype=fp4 由 config
+类提升到 hf_config 顶层并派生 is_scale_e8m0；线性层（weight_block_size==
+[32,32] 且 e8m0）→ ModelOptLinearMethod(kMxfp8Static, kMxfp8Dynamic)——
+值 e4m3 1B/elem + ue8m0 uint8 (1,32) 块 scale（checkpoint 32×32 块装载
+展开为 (N,K/32)；K 每 rank 整除 32 断言）；激活动态不落盘 scale；路由
+专家 → Mxfp4MoEMethod(activation_key=kMxfp8Dynamic)——w13 (E,2I,H/2)
+uint8 打包 + (E,2I,H/32) scale、w2 同构，分配前 Marlin 对齐 I→128/
+H→256（routed_experts.py L190-203 于 create_weights 前调用）；embed/
+lm_head/RMSNorm 未量化 BF16（get_quant_method 非
+LinearBase/RoutedExperts/Attention → None → 默认方法）；执行域注册设备
+（≤SM90）= Marlin W8A16/W4A16 → **激活 BF16**（FlashInfer MXFP8 线性核
+与 TRTLLM/DeepGEMM 专家核均 SM100+；Humming cc=90 优先但依赖可选外部
+包 → 部署变体未建模）；**scale_fmt 键不被 loader 消费**（Fp8Config.
+from_config 键表无该键），有效 scale dtype 由 expert_dtype 派生——非
+ue8m0 值按声明矛盾拒绝；KV 缓存无量化叶键（记录宽度仍 R20 v41_kv_record
+配方）。落地：count/quant_layout 字节公式 + work/moe/head/hc/engram 行
+recipe 计价（gemm 并 scale、激活 BF16、embed/lm_head/final_norm BF16、
+final_norm 修 2·width·b_act 双重计宽）、memory scale/打包/对齐对象与
+engram wkv scale、pipeline 集合通信载荷 BF16、model_ir extras.quant +
+5 叶键 mapped（quantization_config 移出 gaps）、scenario V41_QUANT
+（dense_w=8/expert_w=4/act=16）冻结校验、公式 v2.quant_*。默认 TP8/B1/
+ctx32768 replay（quant=V41_QUANT）：weight_read 1,649,382,848→
+1,769,999,808（+120,616,960 = scale + BF16 修正；final_norm −10,240）、
+weight_read_expected 530,843,184→752,027,184（+221,184,000 = 40×6×
+Δ921,600 专家打包+对齐）、flops/act 不变（act=16 两侧同 BF16）、M01
+116.20089028→116.30292042ms（+0.10203014）、steady/known_peak
+35,768,859,072/35,768,872,384→50,127,805,952/50,128,019,904
+（+14,359,147,520；evidence/quant-map attribution.json 逐 op 归因，
+--check 无漂移复算）。新增 31 项独立 oracle（tests/test_v41_quant.py：
+pin 三重校验/纯 stdlib dispatch oracle/e8m0 小张量语义/手算绝对值/
+负例 5+3/count↔memory 守恒/replay 冻结）。既有断言随事实更新（G9/G11/
+model_ir/moe_route/hc/csa2/engram/pipeline/product_scope，各附因）；
+gpu 表驻留下界 75.4 GiB<80 GiB 标称（MXFP4 打包后不再按已知下界判
+OOM，判定回 unknown——预算缺口不变）。structure_complete 仍 False
+（swiglu/注意力核本体/compress_ratios 尾部缺口不变）。[报告]
+(validation/v41-quant-map-20261113.md)；G-C14 主干解除（执行变体登记）。
 
 **2026-11-12 R21：V4.1 MoE scoring/top-k/分组路由**（PR #11 分支
 `codex/v41-moe-route-r21`）：moe-pin.json 14 文件（vllm @f358f057，blob
@@ -258,9 +306,12 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
     top-k/candidate block 已由 R20（2026-11-12，ev-vllm-v41-csa2）source-checked
     解除；MoE 路由（scoring/top-k/归一化/缩放/共享专家/EP 整除）已由 R21
     （2026-11-12，ev-vllm-v41-moe）source-checked 解除（部署变体
-    MegaMoE/DSpark 草稿 MoE/padding skip 仍 unverified）；swiglu、
-    quantization_config、稀疏 MLA 注意力核本体、compress_ratios 尾部仍为
-    缺口；mHC 仅 source-checked；CPU/GPU 均未执行。
+    MegaMoE/DSpark 草稿 MoE/padding skip 仍 unverified）；量化映射
+    （quantization_config 5 叶键 → MXFP8 线性/MXFP4 专家/scale/打包/
+    Marlin 执行域 BF16 激活）已由 R22（2026-11-13，ev-vllm-v41-quant）
+    source-checked 解除（Humming/SM100/emulation 执行变体仍 unverified）；
+    swiglu、稀疏 MLA 注意力核本体、compress_ratios 尾部仍为缺口；mHC 仅
+    source-checked；CPU/GPU 均未执行。
   - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成已双栈逐行核对
     （R07a 2026-11-12：colocated=source-checked/dt=unsupported）；served
     已部署实测未做；拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位
@@ -293,11 +344,12 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 复核：
   main branch protection 要求经 PR 合入及 `pytest (Windows, Python 3.12)`
   必需检查（strict），审批数为 0，且 `enforce_admins=true`。
-- **未完成**：V4.1 量化映射源码与执行、稀疏 MLA 注意力核本体、
+- **未完成**：V4.1 稀疏 MLA 注意力核本体、swiglu clamp、
   Engram DP 分片交换路径、Qwen3.6 MTP 原生 forward、
   两款主模型 CPU/GPU 实测、DFlash served 实测与运行时池尺寸、真实可分配预算。
-  （MoE 路由主干 R21 已 source-checked；MegaMoE/DSpark 草稿 MoE/padding
-  skip 等部署变体仍缺。）
+  （量化映射主干 R22 已 source-checked；Humming/SM100/emulation 执行变体
+  仍缺（G-C14）。MoE 路由主干 R21 已 source-checked；MegaMoE/DSpark 草稿
+  MoE/padding skip 等部署变体仍缺。）
 
 ## 0.1 必读上下文
 

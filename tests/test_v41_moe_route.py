@@ -317,16 +317,22 @@ def test_gate_bytes_follow_loader_and_mhc_dtype_not_scenario_quant():
                for _, w, cap, ar, aw in sig8)
 
     # memory 侧同一账：-w-moe-L 的 router 分量必须是 2B，不是 dense_w/8。
+    # R22：shared/experts 分量改按量化配方（MXFP8+scale / MXFP4 打包+scale
+    # +Marlin I→128 对齐 288→384）；值不随场景 quant 位宽缩放。
     allocs = {a.alloc_id: a.bytes
               for a in target_weight_allocations(m, Q8, 8, ep=1, rank=0)
               if "-w-moe-L" in a.alloc_id}
-    inter = 2304 // 8
+    inter = 2304 // 8                     # 288
     router = 5120 * 384 * 2
-    shared = int(3 * 5120 * inter * (Q8["dense_w"] / 8))
-    experts = int(384 * 3 * 5120 * inter * (Q8["expert_w"] / 8))
+    shared = (3 * 5120 * inter * 1        # MXFP8 值 1B
+              + (2 * inter) * (5120 // 32) + 5120 * (inter // 32))  # ue8m0
+    i_eff = 384                           # round_up(288, 128)（Marlin）
+    experts = 384 * (i_eff * 5120 + 5120 * i_eff // 2
+                     + 2 * i_eff * (5120 // 32) + 5120 * (i_eff // 32))
     assert len(allocs) == 40
     assert allocs["target-w-moe-L0"] == router + shared + experts
     assert router == 3_932_160 and 40 * router == 157_286_400
+    assert shared == 4_561_920 and experts == 1_203_240_960
 
 
 def test_build_model_work_route_rows_and_shared_no_gate():
@@ -530,7 +536,10 @@ def test_structure_complete_still_false_and_gaps():
     m = build_catalog()["models"]["deepseek_v41_flash"]
     gap_keys = {g.split(":")[0] for g in m.gaps}
     assert not m.structure_complete
-    assert {"swiglu_limit", "quantization_config"} <= gap_keys
+    assert "swiglu_limit" in gap_keys
+    # R22：量化映射已解除（ev-vllm-v41-quant）；quantization_config 不再
+    # 是 gap，覆盖登记为 mapped。
+    assert "quantization_config" not in gap_keys
     assert any("compress_ratios[40:43]" in g for g in m.gaps)
     # 证据四栏：source-checked 未冒充 executed
     assert m.evidence.cpu_forward == "not-run"

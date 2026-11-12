@@ -690,7 +690,13 @@ def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,
                                         "total_t_ms": 0.0}}
     top_k = next((l.moe.top_k for l in model.layers
                   if l.moe is not None and l.moe.experts), 0)
-    cols = model_collectives(model, plan, model.hidden, quant["act"] / 8,
+    act_bytes = quant["act"] / 8
+    # R22：V4.1 集合通信载荷沿模型隐状态 BF16（extras.quant 配方；≤SM90
+    # Marlin W8A16/W4A16 执行域激活不量化），不随场景 act 位宽定价。
+    quant_recipe = (getattr(model, "extras", None) or {}).get("quant")
+    if quant_recipe is not None:
+        act_bytes = float(quant_recipe["act_itemsize"])
+    cols = model_collectives(model, plan, model.hidden, act_bytes,
                              tokens, link, moe_top_k=top_k,
                              lm_head_tokens=lm_head_tokens)
     t = sum(c.t_ms for c in cols)

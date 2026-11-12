@@ -382,7 +382,94 @@ ENTRIES: List[SourceMapEntry] = [
              "域 official V4.1 bf16）+ memory router_b/路由偏置对象 + 保守 EP "
              "整除域（仅 mega 断言 L357-362；fused 通用余数映射未入 pin/"
              "未建模，不主张 fused 非法）；共享专家独立相加"
-             "（moe_output.py）；量化映射/swiglu clamp 仍为独立缺口"),
+             "（moe_output.py）；量化映射已由 R22 另立 sm-v41-quant-"
+             "dispatch 解除；swiglu clamp 仍为独立缺口"),
+    SourceMapEntry(
+        entry_id="sm-v41-quant-dispatch",
+        model_or_method="deepseek_v41_flash 量化映射",
+        semantic="V4.1 量化 dispatch：quant_method=fp8 + model_type "
+                 "deepseek_v41* → override deepseek_v4_fp8 → "
+                 "DeepseekV41FP8Config（CUDA/ROCm 用 v41 子类，他平台 v4"
+                 "基类）；expert_dtype 由 HF config 类提升到 hf_config 顶层"
+                 "（默认 fp4，域 fp4|fp8）；expert_dtype=='fp4' 派生 "
+                 "is_scale_e8m0（线性 ue8m0 1B scale；fp8 专家则 float32）。"
+                 "线性层（LinearBase 且 weight_block_size==[32,32] 且 "
+                 "is_scale_e8m0）→ ModelOptLinearMethod(kMxfp8Static, "
+                 "kMxfp8Dynamic)：值 e4m3 1B/elem + ue8m0 uint8 (1,32) 块 "
+                 "scale（checkpoint 32×32 块 repeat_interleave 展开为 "
+                 "(N,K/32)；K 每 rank 整除 32 断言），动态激活不落盘 "
+                 "scale；路由专家（RoutedExperts 且 expert_dtype==fp4 且"
+                 "非 NVFP4 moe_quant_algo）→ Mxfp4MoEMethod("
+                 "activation_key=kMxfp8Dynamic)：w13 (E,2I,H/2) uint8 + "
+                 "scale (E,2I,H/32)、w2 (E,H,I/2)+scale (E,H,I/32)，分配前"
+                 "按后端对齐（Marlin I→128/H→256）；embed/lm_head/RMSNorm"
+                 "未量化（get_quant_method 返回 None → 默认方法 BF16）；"
+                 "执行域注册设备（≤SM90）：Marlin W8A16/W4A16 → 激活 BF16"
+                 "（FlashInfer MXFP8 线性核要求 SM100+；TRTLLM/DeepGEMM "
+                 "专家核 SM100+；Humming cc=90 优先但需可选外部包）",
+        source_pin=VLLM_PIN,
+        source_location="vllm/models/deepseek_v41/quant_config.py:28/66-93/"
+                        "145-192/221-263（expert_dtype 域与 is_scale_e8m0、"
+                        "get_name、override 只认 fp8/deepseek_v4_fp8 + "
+                        "deepseek_v4* 模型型、线性 MXFP8 分支与专家分支）；"
+                        "vllm/transformers_utils/configs/deepseek_v41.py:"
+                        "46-50（quant_cfg 提升 expert_dtype）；vllm/config/"
+                        "model.py:1404-1477（override 链，deepseek_v4_fp8 "
+                        "在 overrides 列表）；vllm/model_executor/layers/"
+                        "quantization/__init__.py:120-132/174-183（平台→"
+                        "config 类映射、方法表）；fp8.py:86/92-131/154-172/"
+                        "174-203/845-849（ACTIVATION_SCHEMES、块量化要 "
+                        "dynamic、from_config 键表无 scale_fmt、get_quant_"
+                        "method 对 Attention→Fp8KVCacheMethod 其他→None、"
+                        "KV scale 仅显式加载）；modelopt.py:2424-2479/"
+                        "2497-2510/2537-2567（KMxfp8Static 值/scale 布局与"
+                        "展开、K%32 断言、动态激活无参、kernel 家族分派）；"
+                        "quantization/utils/quant_utils.py:246-251（kMxfp8 "
+                        "Static/Dynamic=fp8+(uint8,(1,32))）；mxfp8_utils."
+                        "py:10-13/40-87/274-287（常数、e8m0 量化语义、"
+                        "dequant bf16）；mxfp4.py:648-703/713-731/765-840"
+                        "（Mxfp4MoEMethod 后端选择/roundup/打包+scale 形状）；"
+                        "fused_moe/routed_experts.py:190-203（create_weights"
+                        " 前调用 maybe_roundup_sizes）；fused_moe/oracle/"
+                        "mxfp4.py:461-486/545-561/756-819/822-902（优先级"
+                        "TRTLLM→DeepGEMM→Marlin、Humming cc=90 优先+SM90 "
+                        "block-FP8 激活、deepseek 选择、对齐表）；"
+                        "quantization/utils/humming/priority.py:10-23"
+                        "（cc=90 优先）+ utils/humming.py:18-97（可选外部"
+                        "包 lazy facade）；kernels/linear/__init__.py:569-589/"
+                        "962-1014（MXFP8 kernel 优先级与选择）；kernels/"
+                        "linear/mxfp8/marlin.py:13-40（SM80+ W8A16、K%32）；"
+                        "emulation.py:16-50（默认 BF16 反量化驻留）；"
+                        "flashinfer.py:41-53/126-139（SM100+ 门）；"
+                        "vocab_parallel_embedding.py:318-340（quant fallback"
+                        "→UnquantizedEmbeddingMethod）",
+        branch_predicate="quant_method∈{fp8,deepseek_v4_fp8} 且 model_type∈"
+                         "deepseek_v4/v41 族（→deepseek_v4_fp8）；线性："
+                         "weight_block_size==[32,32] 且 expert_dtype=='fp4'；"
+                         "专家：expert_dtype=='fp4' 且 moe_quant_algo≠"
+                         "NVFP4（官方资产无该键）；未量化：非 LinearBase/"
+                         "RoutedExperts/Attention",
+        thresholds="weight_block_size 精确 [32,32]；expert_dtype ∈ {fp4,"
+                   "fp8}（fp8 专家路径未建模）；activation_scheme 必须 "
+                   "dynamic；scale_fmt 声明须与 expert_dtype 派生一致",
+        input_domain="official V4.1-Flash 固定资产（quantization_config 5 叶"
+                     "键）；执行域=注册设备 H100/H200(SM90)/L40(SM89) 的 "
+                     "stock vLLM（无可选 humming 包）",
+        both_sides_covered=False,
+        uncovered_domain=["Humming W4A8 变体（cc=90 优先、可选包、I→64 "
+                          "对齐、block-FP8(128) 激活）未建模",
+                          "SM100 TRTLLM/DeepGEMM/FlashInfer W8A8 mxfp8 动态"
+                          "激活路径未建模（无注册设备）",
+                          "emulation 反量化驻留（默认 env 开）与 Marlin 重排"
+                          "/workspace 字节未入账",
+                          "NVFP4 moe_quant_algo 专家、expert_dtype=fp8 "
+                          "Flash-Base 块量化专家未建模",
+                          "marlin_moe/marlin_utils_fp8 is_supported_config "
+                          "细节未逐项 pin（后端可用性按 oracle docstring 域）"],
+        note="R22 source-checked（quant-pin.json 20 文件）；场景 quant 对 "
+             "V4.1 被 scenario.V41_QUANT 冻结校验；checkpoint/运行时/计算"
+             "精度三层分立（见 extras.quant 与 "
+             "docs/validation/v41-quant-map-20261113.md）"),
     SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",

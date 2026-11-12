@@ -244,7 +244,8 @@ class RankMemory:
 
 def engram_allocations(engram_spec: dict, hidden: int, quant: dict, tp: int,
                        layer_id: int, role: str = "target", rank: int = 0,
-                       table_placement: str = ENGRAM_PLACEMENT_CPU_OFFLOAD
+                       table_placement: str = ENGRAM_PLACEMENT_CPU_OFFLOAD,
+                       model_extras: Optional[dict] = None
                        ) -> List[Allocation]:
     """一个 Engram 层的驻留对象（R04；common/engram.py pin @f358f057
     blob sha1 ba4ceea6，source-checked 2026-11-11）。
@@ -285,6 +286,15 @@ def engram_allocations(engram_spec: dict, hidden: int, quant: dict, tp: int,
     if wkv_out % tp:
         raise ValueError(
             f"Engram wkv 输出宽 {wkv_out} 不整除 TP{tp}（列切要求整除）")
+    # R22：wkv 是量化 ColumnParallelLinear（quant_config 传入，engram.py
+    # L1724-1729）→ MXFP8 布局：值 1B + ue8m0 scale（(wkv_out/tp)×(cols·d_v)/32）。
+    # 值/scale 均由配方驱动（与 count.engram_rows 同口径）。
+    wkv_scale_b = 0
+    quant_recipe = (model_extras or {}).get("quant") if model_extras is not None else None
+    if quant_recipe is not None:
+        from ..count.quant_layout import mxfp8_linear_bytes
+        b_w = float(quant_recipe["dense_linear"]["value_itemsize"])
+        _v, wkv_scale_b = mxfp8_linear_bytes(wkv_out // tp, cols * d_v)
     head_start = min(rank * part, cols)
     head_end = min(head_start + part, cols)
     rows_r = sum(primes[idx][head_start:head_end])
@@ -301,7 +311,7 @@ def engram_allocations(engram_spec: dict, hidden: int, quant: dict, tp: int,
                        "gpu 驻留需显式场景输入 engram_table_placement")),
         Allocation(
             f"{role}-w-engram-wkv-L{layer_id}", "weights", role,
-            int(cols * d_v * (wkv_out // tp) * b_w),
+            int(cols * d_v * (wkv_out // tp) * b_w) + wkv_scale_b,
             live_note=f"常驻（ColumnParallelLinear {cols * d_v}→{wkv_out} 列切 "
                       f"/tp={tp}，gather_output=True；L1719-1733）"),
         Allocation(
@@ -370,7 +380,8 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                               role: str = "target", ep: int = 1, rank: int = 0,
                               plan=None,
                               engram_table_placement: str =
-                              ENGRAM_PLACEMENT_CPU_OFFLOAD
+                              ENGRAM_PLACEMENT_CPU_OFFLOAD,
+                              quant_recipe: Optional[dict] = None,
                               ) -> List[Allocation]:
     """主模型每 rank 权重驻留（TP/EP 分片后口径；R01 统一配方）。
 
@@ -380,11 +391,32 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
     routed 按 EP 关(inter/tp)/开(E_l 整专家)。
     V4.1 Engram 层另加表/wkv/qk 对象（R04，engram_allocations）；
     engram_table_placement 为显式配方输入（默认 cpu_offload 研究假设）。
+    R22 quant_recipe（V4.1 extras.quant）在场时：
+      * 量化线性/共享专家并入 ue8m0 scale（(N, K/32) 运行时展开后口径）；
+      * 路由专家按 MXFP4 打包+scale 且 I/H 取 Marlin 分配对齐
+        （intermediate→128、hidden→256；oracle/mxfp4.py L850-855）；
+      * embed/lm_head/final norm 未量化 → BF16 2B（fp8.py L174-203 返回
+        None → 默认方法）。
     """
     b_dense = quant["dense_w"] / 8
     b_expert = quant["expert_w"] / 8
+    if quant_recipe is None:
+        quant_recipe = (model.extras or {}).get("quant")
+    if quant_recipe is not None:
+        # R22：V4.1 值字节亦由配方驱动（与 count 同口径；场景 quant 已被
+        # validate 钉死为同值，直接传入 Q16 等位宽不再改变 V4.1 计价）。
+        b_dense = float(quant_recipe["dense_linear"]["value_itemsize"])
+        b_expert = float(quant_recipe["routed_experts"]["value_itemsize"])
     allocs: List[Allocation] = []
     fam = model.family
+
+    def _q_scale(n: int, k: int) -> int:
+        """量化线性 (N, K) 的 ue8m0 scale 字节；非 V4.1 配方时 0。"""
+        if quant_recipe is None:
+            return 0
+        from ..count.quant_layout import mxfp8_linear_bytes
+        _v, s = mxfp8_linear_bytes(n, k)
+        return s
     for layer in model.layers:
         li = layer.index
         dense_b = 0
@@ -426,14 +458,19 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             # 单位必须与 count 的 weight_capacity 一致（字节）：旧式漏 b_dense，
             # BF16 下内存少 2×（2026-11-10 审查 F2 同轮发现，独立 oracle 暴露）。
             dense_b += model.hidden * qrank * b_dense             # q_a_proj
+            dense_b += _q_scale(qrank, model.hidden)
             dense_b += model.hidden * d * b_dense                 # kv_proj
+            dense_b += _q_scale(d, model.hidden)
             dense_b += qrank * heads * d * b_dense                # q_b_proj
+            dense_b += _q_scale(heads * d, qrank)
             # q_norm(q_lora_rank)/kv_norm(head_dim) 为普通 RMSNorm bf16 参数
             #（attention.py L440-450），每层常驻、不随 TP/场景 dense_w 缩放。
             dense_b += (qrank + d) * 2
             # o_a（每 rank ng 组；F2：旧式漏乘 ng，TP1 少 8×）
             dense_b += (kvs["heads"] * d // kvs["o_groups"]) * orank * ng * b_dense
+            dense_b += ng * _q_scale(kvs["heads"] * d // kvs["o_groups"], orank)
             dense_b += ng * orank * model.hidden * b_dense        # o_b（组切分）
+            dense_b += _q_scale(model.hidden, ng * orank)
             if a.produces_kv:
                 # R20：compressor fused_wkv_wgate 与 indexer wk 均为
                 # quant_config=None 的 replicated bf16 权重（compressor.py
@@ -446,6 +483,7 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                 # weights_proj h→ih replicated bf16（quant_config=None，
                 # attention.py L1484-1490）；wq_b q_lora→ih·di 走 quant_config
                 dense_b += model.hidden * ih * 2 + qrank * ih * di * b_dense
+                dense_b += _q_scale(ih * di, qrank)
         hc_spec = (model.extras or {}).get("hc") if fam == "v41_csa2" else None
         if hc_spec and layer.kind == "mla_csa2":
             # mHC 权重（FP32，每卡复制不随 TP 缩放：全宽流 + torch.empty 全宽参数，
@@ -468,7 +506,8 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
         if engram_spec and li in engram_spec.get("layer_ids", ()):
             allocs += engram_allocations(
                 engram_spec, model.hidden, quant, tp, layer_id=li,
-                role=role, rank=rank, table_placement=engram_table_placement)
+                role=role, rank=rank, table_placement=engram_table_placement,
+                model_extras=model.extras)
         if layer.dense_inter:
             dense_b += 3 * model.hidden * (layer.dense_inter // tp) * b_dense
         if dense_b:
@@ -489,19 +528,47 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             gate_w_b = (int(moe_route["gate_weight_itemsize"])
                         if moe_route is not None else b_dense)
             router_b = int(model.hidden * moe.experts * gate_w_b)  # replicated
-            shared_b = int(3 * model.hidden * (moe.shared_intermediate // tp)
-                           * b_dense) if moe.shared_intermediate else 0
+            si_rank = moe.shared_intermediate // tp
+            shared_scale_b = (_q_scale(2 * si_rank, model.hidden)
+                              + _q_scale(model.hidden, si_rank)
+                              if moe.shared_intermediate else 0)
+            shared_b = (int(3 * model.hidden * si_rank * b_dense)
+                        + shared_scale_b) if moe.shared_intermediate else 0
             gate_b = int(model.hidden * b_dense) if moe.shared_gate else 0
             if ep != 1:
                 base, rem = divmod(moe.experts, ep)
                 e_l = base + (1 if rank < rem else 0)
-                experts_b = int(e_l * 3 * model.hidden * moe.intermediate
-                                * b_expert)
-                note = f"EP{ep} E_local={e_l}（整专家）"
+                if quant_recipe is not None:
+                    from ..count.quant_layout import (
+                        marlin_round_up_hidden, marlin_round_up_intermediate,
+                        mxfp4_expert_bytes)
+                    i_eff = marlin_round_up_intermediate(moe.intermediate)
+                    h_eff = marlin_round_up_hidden(model.hidden)
+                    v_b, s_b = mxfp4_expert_bytes(h_eff, i_eff)
+                    experts_b = int(e_l * (v_b + s_b))
+                    note = (f"EP{ep} E_local={e_l}（整专家）；MXFP4 0.5B+"
+                            f"ue8m0 scale，I_eff={i_eff}/H_eff={h_eff}（R22）")
+                else:
+                    experts_b = int(e_l * 3 * model.hidden * moe.intermediate
+                                    * b_expert)
+                    note = f"EP{ep} E_local={e_l}（整专家）"
             else:
-                experts_b = int(moe.experts * 3 * model.hidden
-                                * (moe.intermediate // tp) * b_expert)
-                note = f"EP off inter/tp={moe.intermediate // tp}（每 rank 全 E）"
+                inter_rank = moe.intermediate // tp
+                if quant_recipe is not None:
+                    from ..count.quant_layout import (
+                        marlin_round_up_hidden, marlin_round_up_intermediate,
+                        mxfp4_expert_bytes)
+                    i_eff = marlin_round_up_intermediate(inter_rank)
+                    h_eff = marlin_round_up_hidden(model.hidden)
+                    v_b, s_b = mxfp4_expert_bytes(h_eff, i_eff)
+                    experts_b = int(moe.experts * (v_b + s_b))
+                    note = (f"EP off inter/tp={inter_rank}（每 rank 全 E）；"
+                            f"MXFP4 0.5B+ue8m0 scale，I_eff={i_eff}"
+                            f"/H_eff={h_eff}（Marlin 128 对齐，R22）")
+                else:
+                    experts_b = int(moe.experts * 3 * model.hidden
+                                    * inter_rank * b_expert)
+                    note = f"EP off inter/tp={inter_rank}（每 rank 全 E）"
             router_note = (f"router {moe_route['gate_weight_dtype']} "
                            f"{gate_w_b}B" if moe_route is not None else
                            "router 场景 dense_w")
@@ -523,26 +590,32 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                     live_note=f"常驻 fp32 复制（e_score_correction_bias"
                               f"{vl_note}；sqrtsoftplus/noaux_tc 路由）"))
     vocab_r = model.vocab // tp if model.vocab % tp == 0 else model.vocab
+    # R22：V4.1 embed/lm_head/final norm 未量化（dispatch 返回 None → 默认
+    # 方法 BF16），不随场景 dense_w 缩放；其他家族沿用 dense_w 计价。
+    head_b = (float(quant_recipe["unquantized_itemsize"])
+              if quant_recipe is not None else b_dense)
+    head_note = ("；BF16 未量化（R22 quant dispatch）"
+                 if quant_recipe is not None else "")
     if not model.tie_embeddings:
         allocs.append(Allocation(
             f"{role}-w-embed", "weights", role,
-            int(model.hidden * vocab_r * b_dense),
+            int(model.hidden * vocab_r * head_b),
             shared_identity=f"{model.id}:embed@tp{tp}",
-            live_note=f"常驻（词表行切 V/tp={vocab_r}；DFlash 草稿共享同一对象）"))
+            live_note=f"常驻（词表行切 V/tp={vocab_r}{head_note}；DFlash 草稿共享同一对象）"))
         allocs.append(Allocation(
             f"{role}-w-lm_head", "weights", role,
-            int(model.hidden * vocab_r * b_dense),
+            int(model.hidden * vocab_r * head_b),
             shared_identity=f"{model.id}:lm_head@tp{tp}",
-            live_note=f"常驻（词表行切 V/tp={vocab_r}；DFlash 草稿共享同一对象）"))
+            live_note=f"常驻（词表行切 V/tp={vocab_r}{head_note}；DFlash 草稿共享同一对象）"))
     else:
         allocs.append(Allocation(
             f"{role}-w-embed-tied", "weights", role,
-            int(model.hidden * vocab_r * b_dense),
+            int(model.hidden * vocab_r * head_b),
             shared_identity=f"{model.id}:embed@tp{tp}",
             live_note="常驻（tied，词表行切）"))
     # final norm（model.norm，h 复制）
     allocs.append(Allocation(
-        f"{role}-w-final-norm", "weights", role, int(model.hidden * b_dense),
+        f"{role}-w-final-norm", "weights", role, int(model.hidden * head_b),
         live_note="常驻（final RMSNorm，每 rank 复制）"))
     return allocs
 

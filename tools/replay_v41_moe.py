@@ -71,31 +71,43 @@ def capture_baseline() -> None:
 
 
 def check() -> None:
-    """无漂移复算：与已提交 after.json/attribution.json 核对，不写任何文件。"""
-    scenario = ScenarioV2.from_json(json.loads(
-        (FOLDER / "scenario.json").read_text(encoding="utf-8")))
+    """复算核对（R22 后契约）：分两层，不写任何文件。
+
+    1. R21 证据内部一致：before→after 的逐字段 delta = Σ by_op delta，
+       审计面外行逐字段冻结（全部对已提交文件，历史场景 act=8 自洽）。
+    2. 当前代码复现**当前**账本：R21 场景按 R22 契约把 quant.act 覆盖为
+       16（磁盘证据字节不动）后复算，work 账本必须与 R22 证据
+       （docs/evidence/quant-map/after.json，同拓扑场景）逐字段相等——
+       两场景仅 quant.act/workload 注记不同，均不进账本。当前的无漂移
+       复算入口是 tools/replay_v41_quant.py --check。
+    """
+    sc_data = json.loads(
+        (FOLDER / "scenario.json").read_text(encoding="utf-8"))
     committed_after = json.loads(
         (FOLDER / "after.json").read_text(encoding="utf-8"))
     att = json.loads((FOLDER / "attribution.json").read_text(encoding="utf-8"))
     before = json.loads((FOLDER / "before.json").read_text(encoding="utf-8"))
-    fresh = run_v2(scenario).to_json()
-    # 账本本体必须逐字段复现（manifest 身份字段 code_revision/run_id 随
-    # HEAD 变化，属登记性漂移；work/metrics 数值不得漂移）
-    assert fresh["work"] == committed_after["work"], \
-        "work 账本与已提交 after.json 不一致（确定性被破坏）"
-    for key, val in committed_after["metrics"].items():
-        if key.startswith("M01_"):
-            assert fresh["metrics"][key] == val, key
-    # 归因仍然成立：逐字段 delta = Σ by_op delta；审计面外行冻结
-    old, new = before["work"]["target_decode"], fresh["work"]["target_decode"]
+    # ① R21 内部一致性
+    old = before["work"]["target_decode"]
+    committed = committed_after["work"]["target_decode"]
     for key in old["totals"]:
-        delta = new["totals"][key] - old["totals"][key]
+        delta = committed["totals"][key] - old["totals"][key]
         assert delta == sum(g["delta"][key] for g in att["by_op"].values()), key
     AUDITED = set(att["expected_changed_ops"])
     frozen = lambda rows: [r for r in rows if r["op"] not in AUDITED]
-    assert frozen(old["rows"]) == frozen(new["rows"])
-    print("check OK: ledger reproduces committed after.json; attribution holds")
-
+    assert frozen(old["rows"]) == frozen(committed["rows"])
+    assert set(att["by_op"]) <= AUDITED
+    # ② 当前代码复现当前账本（R22 证据；manifest 身份字段除外）
+    sc_data["quant"]["act"] = 16          # R22 契约覆盖（磁盘证据不动）
+    fresh = run_v2(ScenarioV2.from_json(sc_data)).to_json()
+    r22_after = json.loads(
+        (ROOT / "docs/evidence/quant-map" / "after.json")
+        .read_text(encoding="utf-8"))
+    assert fresh["work"] == r22_after["work"], (
+        "复算账本与 R22 证据不一致（确定性被破坏；入口 "
+        "tools/replay_v41_quant.py --check）")
+    print("check OK: R21 attribution internally consistent; current ledger "
+          "reproduces the R22 evidence (docs/evidence/quant-map)")
 
 def main() -> None:
     scenario = ScenarioV2.from_json(json.loads(
