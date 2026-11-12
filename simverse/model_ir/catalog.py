@@ -87,11 +87,14 @@ _DFLASH_EVIDENCE = ModelEvidence(
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-dflash-round-protocol", "sm-dflash-cross-attention",
                    "sm-vllm-dflash-colocated-sharing",
-                   "sm-vllm-dflash-norm-dtype"),
+                   "sm-vllm-dflash-norm-dtype",
+                   "sm-vllm-dflash-serving", "sm-sglang-dflash-serving"),
     unverified_paths=(
-        "serving_integration: SGLang DFLASH / vLLM PR#40898 未逐行核对（pending asset）",
+        "served_deployment: R07a 双栈源码核对不等于已部署实测；真实 trace 与"
+        "匹配环境待 R07b",
         "rejection_sampling_cost: 拒绝采样/KV 回退/hidden 提取无独立耗时，"
-        "当前显式 0 占位",
+        "当前显式 0 占位（两栈 GPU kernel 证据已注记；vLLM prepare-inputs "
+        "为图外 eager Triton）",
         "runtime_pool_sizes: workspace/CUDA graph/NCCL 池尺寸无证据",
     ),
     method_status={"dflash_v1": "source-checked"},
@@ -289,9 +292,14 @@ PENDING_ASSETS = {
         "affected": ["该模型的结构回归与计数对账"],
     },
     "qwen36_dflash_serving_integration": {
-        "status": "pending-asset",
-        "reason": "SGLang DFLASH 服务端集成与 vLLM PR#40898 未逐行核对（部署能力证据）",
-        "affected": ["部署矩阵中 DFlash 的 served 标记（模拟不冒充已部署）"],
+        "status": "source-checked-2026-11-12-r07a",
+        "reason": "R07a 已逐行核对双栈（vLLM dflash speculator @dc74b8cb + "
+                  "SGLang DFLASH worker_v2 @74cb973d，证据 ev-vllm-dflash-"
+                  "serving / ev-sglang-dflash-serving）：colocated 路径 "
+                  "supported（source-checked）；dt_serial/dt_pipeline 无栈实现"
+                  "（unsupported）。已部署实测（served）仍待 R07b 真实 trace",
+        "affected": ["部署矩阵中 DFlash 的 served 标记（source-checked ≠ "
+                     "已部署实测；不冒充）"],
     },
 }
 

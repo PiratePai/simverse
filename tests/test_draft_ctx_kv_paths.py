@@ -6,11 +6,14 @@
   * L529-531 `_context_kv_proj`（ModelOpt MXFP8 独立线性层）；
   * L688-697 逐层完整 `qkv_proj` 后切 Q 的回退。
 
-关键口径（TP8/B1/E[N]=3/h2048/4 Q heads per rank/1 KV head per rank/d128）：
-  * raw/MXFP8 的 ctx 投影只算 K/V 行：2·3·2048·(2·1·128)=3,145,728 FLOPs/
-    层；
-  * 回退执行完整 qkv：2·3·2048·(4·128 + 2·1·128)=9,437,184 FLOPs/层，
-    权重量读含 Q 行；
+关键口径（TP8/B1/E[N]=3/blk16→verify 跨度 span=16 行/h2048/4 Q heads
+per rank/1 KV head per rank/d128；R07a 2026-11-12 起投影计算按**跨度**
+16 行计——两服务栈（vLLM _precompute_context_kv / SGLang
+project_target_hidden）均对整 verify 跨度投影、只写 committed 行）：
+  * raw/MXFP8 的 ctx 投影只算 K/V 行：2·16·2048·(2·1·128)=
+    16,777,216 FLOPs/层；kv_write 仍按 produced=3 行；
+  * 回退执行完整 qkv：2·16·2048·(4·128 + 2·1·128)=50,331,648 FLOPs/
+    层，权重量读含 Q 行；
   * `_k_norm_weights` 的 L×d 堆叠在三条路径都存在（L565-568），且按
     草稿 config dtype（bfloat16→2B/elem）计，不随 `dense_w` 变化；
   * 位宽只是计价档，不决定分支；路径缺失/未知必须显式拒绝。
@@ -34,6 +37,7 @@ from simverse.draft_quant import (FUSED_RAW, MXFP8_CONTEXT_PROJ,  # noqa: E402
 from simverse.lowering.memory import (DeviceBudget,  # noqa: E402
                                       colocated_rank_memory,
                                       draft_extra_allocations,
+                                      draft_peak_lower_bound,
                                       transient_allocations)
 from simverse.model_ir import build_catalog  # noqa: E402
 from simverse.scenario import ScenarioV2  # noqa: E402
@@ -49,7 +53,8 @@ E_N = 3.0
 TP = 8
 Q_HEADS_RANK = 4          # 32 / 8
 KV_HEADS_RANK = 1         # 8 / 8
-PRODUCED = int(B * E_N)   # 3
+PRODUCED = int(B * E_N)   # 3（committed 行——只进 kv_write）
+SPAN = 16                 # B×blk verify 跨度（R07a：投影计算基）
 NORM_BYTES = 2            # config dtype=bfloat16；RMSNorm 参数不随 dense_w
 
 
@@ -68,10 +73,16 @@ def _ctx_rows(path, quant=Q8):
 
 
 def test_raw_fused_path_hand_oracle():
-    """raw 融合路径：每层只投影 K/V 行（fused 副本一次大 GEMM 的逐层份额）。"""
+    """raw 融合路径：每层只投影 K/V 行（fused 副本一次大 GEMM 的逐层份额）。
+
+    R07a：计算按 verify 跨度 SPAN=16 行（两栈全跨度投影）；kv_write 按行内
+    committed produced=3（被拒行 PAD 不落缓存——vLLM 测试负例在册）。
+    """
     for r in _ctx_rows(FUSED_RAW):
-        assert r.flops == 2 * PRODUCED * H * (2 * KV_HEADS_RANK * D) == 3_145_728
+        assert r.flops == 2 * SPAN * H * (2 * KV_HEADS_RANK * D) == 16_777_216
         assert r.weight_read == 2 * H * KV_HEADS_RANK * D * 1 == 524_288
+        assert r.act_read == SPAN * H * 1
+        assert r.kv_write == PRODUCED * 2 * KV_HEADS_RANK * D * 1
         assert "fused_raw" in r.shape
 
 
@@ -79,7 +90,7 @@ def test_fallback_full_qkv_hand_oracle():
     """4bit/量化回退：逐层完整 qkv_proj 后切 Q —— FLOPs 与权重读都含 Q。"""
     for r in _ctx_rows(PER_LAYER_FALLBACK, Q4):
         proj_out = Q_HEADS_RANK * D + 2 * KV_HEADS_RANK * D   # 512 + 256
-        assert r.flops == 2 * PRODUCED * H * proj_out == 9_437_184
+        assert r.flops == 2 * SPAN * H * proj_out == 50_331_648
         assert r.weight_read == proj_out * H * 0.5 == 786_432
         assert "Q512" in r.shape and "KV128" in r.shape
         assert "per_layer_fallback" in r.shape
@@ -92,7 +103,7 @@ def test_mxfp8_context_projection_is_distinct_from_fallback():
     """
     for r in _ctx_rows(MXFP8_CONTEXT_PROJ):
         proj_out = 2 * KV_HEADS_RANK * D
-        assert r.flops == 2 * PRODUCED * H * proj_out == 3_145_728
+        assert r.flops == 2 * SPAN * H * proj_out == 16_777_216
         assert r.weight_read == proj_out * H * 1 == 524_288
         assert "mxfp8_context_proj" in r.shape
         assert "block-scale" in r.shape
@@ -104,9 +115,9 @@ def test_dense_w_does_not_select_branch():
     这不是推荐组合，而是证明实现分支只由 path 选择，不由位宽阈值选择。
     """
     fb = _ctx_rows(PER_LAYER_FALLBACK)
-    assert all(r.flops == 9_437_184 for r in fb)       # Q8 仍是完整 qkv
+    assert all(r.flops == 50_331_648 for r in fb)      # Q8 仍是完整 qkv
     raw = _ctx_rows(FUSED_RAW)
-    assert all(r.flops == 3_145_728 for r in raw)
+    assert all(r.flops == 16_777_216 for r in raw)
 
 
 def test_unknown_path_rejected_not_guessed():
@@ -180,8 +191,19 @@ def test_memory_physical_objects_per_path():
     assert fb["draft-w-dflash-k-norm-stack"].bytes == N_LAYERS * D * NORM_BYTES
 
 
-def test_transient_fallback_includes_q_staging():
-    """回退路径的逐层完整 qkv（含 Q）在 stack 前存活，临时缓冲需含 Q。"""
+def test_transient_fallback_includes_q_staging_lifecycle():
+    """回退路径的逐层完整 qkv（含 Q）在 stack 前存活；生命周期下界取
+    已知并存组 max，而不是把所有缓冲相加。
+
+    Q4 仅 dense_w=4，act 仍 8（b_a=1）；B=1/blk=16：
+      normed=16·2048=32,768；flat=fused=16·6·2·128=24,576；
+      k_norm=16·6·128=12,288；qkv_staging=16·6·(4+2)·128=73,728；
+      logits=15·31040·4=1,862,400（块尾，与 ctx 不并活）。
+    raw ctx 组 max = max(57,344, 49,152, 36,864)=57,344；
+    fallback 额外 normed+qkv=106,496、qkv+flat=98,304 → ctx max=106,496。
+    logits 主导块峰值，故 t-draft-buffers 两路径同值；差异必须由
+    ctx group/live_note 体现，而不是硬加到总字节。
+    """
     m, d = _models()
     kw = dict(model=m, draft_ir=d, quant=Q4, dquant=Q4, batch=B, ctx=32768,
               tp=TP, block_size=16, e_produced=E_N,
@@ -190,10 +212,35 @@ def test_transient_fallback_includes_q_staging():
         ctx_kv_path=FUSED_RAW, **kw) if a.alloc_id == "t-draft-buffers")
     fb_buf = next(a for a in transient_allocations(
         ctx_kv_path=PER_LAYER_FALLBACK, **kw) if a.alloc_id == "t-draft-buffers")
-    qkv_staging = int(B * E_N * N_LAYERS
-                      * (Q_HEADS_RANK + 2 * KV_HEADS_RANK) * D * 1)
-    assert qkv_staging == 13_824
-    assert fb_buf.bytes - raw_buf.bytes == qkv_staging
+    normed = int(SPAN * H)
+    flat = int(SPAN * N_LAYERS * 2 * KV_HEADS_RANK * D)
+    fused = flat
+    k_normed = int(SPAN * N_LAYERS * KV_HEADS_RANK * D)
+    qkv_staging = int(SPAN * N_LAYERS
+                      * (Q_HEADS_RANK + 2 * KV_HEADS_RANK) * D)
+    logits = int(B * (SPAN - 1) * (m.vocab // TP) * 4)
+    noise = int(B * SPAN * H)
+    fc_in = int(SPAN * 8 * H)
+    assert qkv_staging == 73_728
+    raw_ctx = max(normed + flat, flat + fused, fused + k_normed)
+    fb_ctx = max(raw_ctx, normed + qkv_staging, qkv_staging + flat)
+    assert raw_ctx == 57_344 and fb_ctx == 106_496
+    assert max(fc_in, noise, logits, raw_ctx) == logits
+    assert max(fc_in, noise, logits, fb_ctx) == logits
+    assert raw_buf.bytes == fb_buf.bytes == logits
+    assert raw_buf.bytes < (noise + fc_in + normed + flat + fused
+                            + k_normed + logits)
+    assert "qkv_staging" not in raw_buf.live_note
+    assert "qkv_staging" in fb_buf.live_note
+    # 独立生命周期 helper：组逐项手算 + 峰值取 max 而非 sum。
+    peak, ctx_peak, groups = draft_peak_lower_bound(
+        fc_in=fc_in, noise=noise, logits=logits, normed_ctx=normed,
+        qkv_staging=qkv_staging, ctx_kv_flat=flat, fused_kv_out=fused,
+        ctx_k_normed=k_normed)
+    assert peak == logits and ctx_peak == fb_ctx
+    assert dict(groups)["qkv_staging+flat"] == 98_304
+    assert dict(groups)["normed_ctx+qkv_staging"] == 106_496
+    assert sum(v for _, v in groups) > ctx_peak    # 组内也不是求和
 
 
 def test_colocated_raw_vs_fallback_single_resident_difference():

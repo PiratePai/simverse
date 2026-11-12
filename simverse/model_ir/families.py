@@ -60,7 +60,7 @@ _STRUCT_KEYS = {
                "num_key_value_heads", "head_dim", "intermediate_size",
                "vocab_size", "layer_types", "sliding_window", "max_window_layers",
                "num_target_layers", "use_sliding_window", "max_position_embeddings",
-               "tie_word_embeddings"},
+               "tie_word_embeddings", "is_causal"},
     "v41_csa2": {"hidden_size", "num_hidden_layers", "num_attention_heads",
                  "num_key_value_heads", "head_dim", "q_lora_rank", "o_lora_rank",
                  "o_groups", "qk_rope_head_dim", "index_head_dim", "index_n_heads",
@@ -784,14 +784,29 @@ def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id:
     n = config["num_hidden_layers"]
     fc = config.get("dflash_config", {})
     target_layer_ids = tuple(fc.get("target_layer_ids", ()))
+    # 因果性来源优先级与 pinned 实现一致（HF dflash/model.py L364-366、
+    # vLLM qwen3_dflash.py L86-97、SGLang models/dflash.py L239-249）：
+    # 顶层 is_causal → dflash_config.causal → layer_types 派生
+    # （sliding_attention 因果；full_attention 非因果）。不能把所有 full 层
+    # 一律当因果窗口——Qwen3.6 DFlash 的 1 个 full 层是 ENCODER_ONLY。
+    explicit_causal = config.get("is_causal")
+    causal_override = fc.get("causal")
     layers = []
     for i in range(n):
-        kind = SLIDING if (i < len(types) and types[i] == "sliding_attention") else FULL
+        layer_type = types[i] if i < len(types) else "full_attention"
+        kind = SLIDING if layer_type == "sliding_attention" else FULL
+        if explicit_causal is not None:
+            layer_causal = bool(explicit_causal)
+        elif causal_override is not None:
+            layer_causal = bool(causal_override)
+        else:
+            layer_causal = layer_type == "sliding_attention"
         layers.append(LayerIR(
             i, kind,
             attn=AttentionIR(heads=heads, kv_heads=kv, head_dim=d,
                              rotary_dim=_rotary_dim(d, config),
-                             sliding_window=swa if kind == SLIDING else None),
+                             sliding_window=swa if kind == SLIDING else None,
+                             causal=layer_causal),
             moe=None, dense_inter=config.get("intermediate_size")))
     coverage, gaps = _coverage("dflash", config, full_config=full_config,
                                 text_prefix=text_prefix)

@@ -88,7 +88,9 @@ _PINNED_ASSETS = [
      "identity/dflash_repo/model.py",
      "github z-lab/dflash @07ebd93db9f472af339b644bb70221ad8428328a dflash/model.py",
      "DFlash v1 单次并行提案、逐位拒绝、KV 回退语义",
-     ["源码阅读未执行；SGLang/vLLM 服务端集成路径未逐行核对"], False),
+     ["源码阅读未执行；服务端集成路径 2026-11-12 R07a 已逐行核对"
+      "（ev-vllm-dflash-serving / ev-sglang-dflash-serving）；"
+      "HF 参考与两服务栈的 ctx 投影跨度差异见 R07a 报告"], False),
     ("ev-dflash-readme", "source-checked",
      "DFlash 发布说明：SGLang DFLASH 部署配方、block 8/16 建议、B200 基准身份",
      "identity/dflash__README.md",
@@ -232,6 +234,49 @@ _PINNED_ASSETS = [
      ["layernorm.py/base_loader.py 未入本地 pin，未执行；Python 默认 dtype "
       "被调用方覆盖的运行期场景未建模；源码阅读非执行验证"],
      False),
+    ("ev-vllm-dflash-serving", "source-checked",
+     "DFlash v1 服务栈（vLLM PR#40898 路径）逐行核对（R07a）：colocated "
+     "proposer 每轮 in-process propose()（1 bonus+N mask 查询块）；aux "
+     "hidden=target_layer_ids(+1) 经 fc(concat) 投影；ctx K/V 每轮对整 "
+     "verify 跨度 B×blk 投影、被拒后缀 PAD 不落缓存（测试负例在册）；"
+     "拒绝采样=共享 RejectionSampler（greedy argmax 前缀/随机比值检验+"
+     "目标分布 bonus）；draft_sample_method 默认 greedy 全量 logits "
+     "gather（local_argmax_reduction 可选、默认关）；PIECEWISE CG 不支持",
+     "identity/vllm_dflash_serving_pin/manifest.json",
+     "vllm-project/vllm @dc74b8cbbbe3dbb9399fe369757d63defd614cc2（与 "
+     "vllm_qwen35_pin 同 SHA；13 文件 SHA256 清单在 manifest：dflash/"
+     "speculator+cudagraph+config、eagle3_utils、上级 speculator、"
+     "rejection_sampler(+utils)、config/speculative、4 个 DFlash 测试）",
+     "R07a G-C3：dflash_serving_integration(colocated)=supported 的源码"
+     "依据；count/draft span 基修正（fc/hidden_norm/ctx_kv_proj + ctx K "
+     "norm/rope + vLLM layout copy）",
+     ["source-checked 源码阅读，非 CPU 执行/实测；DraftLogitsCache"
+      "（probabilistic）未入 R02b 账本（场景无 draft_sample_method 键）；"
+      "FULL graph 桶取整 padding 行未计"],
+     False, "2026-11-12"),
+    ("ev-sglang-dflash-serving", "source-checked",
+     "DFLASH v1 服务栈（SGLang）逐行核对（R07a）：DFlashWorkerV2 同驱 "
+     "overlap/非 overlap；轮=prepare 块→草稿前向（非因果）→借目标 "
+     "lm_head 产候选（tp>1 局部 (max,id) all-gather，非全量 gather）→"
+     "目标 verify（capture FULL）→Triton accept+bonus（new_seq_lens="
+     "prefix+commit）→全跨度 fc+hidden_norm→逐层 ctx KV 只写 committed "
+     "行→next_draft_input；mamba/GDN 态回退 last_steps=commit−1；非贪婪"
+     "采样 kernel 不可用时降级 greedy（分布不保持）；disagg=target 侧 "
+     "PD 非 DT",
+     "identity/sglang_dflash_pin/manifest.json",
+     "sgl-project/sglang @74cb973d78dfa4af85a90d2841891fec27e78db2"
+     "（main 2026-11-12；12 文件 SHA256 清单在 manifest：dflash_worker_v2、"
+     "dflash_info(_v2)、dflash_utils、dflash_dp、dflash_disaggregation、"
+     "spec_info、models/dflash、kernels dflash+candidates、2 个 e2e 测试）",
+     "R07a G-C3：dflash_serving_integration(colocated)=supported 的第二栈"
+     "源码依据；两栈通信口径差异（greedy 局部 argmax vs 全量 gather）与 "
+     "dt 模式无栈对应的判定依据",
+     ["source-checked 源码阅读，非 CPU 执行/实测；采样验证 kernel 可用性"
+      "（构建/设备相关）unknown；greedy (max,id) all-gather 字节未入本仓"
+      "通信行（按 vLLM 全量口径计，差异披露在 R07a 报告）；GDN 态回退"
+      "extra_buffer 拷贝成本未计价；vLLM permute+contiguous 全局 layout "
+      "拷贝行不对应 SGLang（逐层 store_prefix）"],
+     False, "2026-11-12"),
     ("ev-h200-tiny-distill", "measured",
      "H200 实测 profile 蒸馏集（Qwen3-30B-A3B-tiny 复制品采集：linear 6 算子 ×387 "
      "token 网格 + decode 注意力 5184 点，CUDA_EVENT median；环境 H200/driver 570.124.06/"

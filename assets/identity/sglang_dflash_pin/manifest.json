@@ -1,0 +1,37 @@
+{
+ "repo": "sgl-project/sglang",
+ "sha": "74cb973d78dfa4af85a90d2841891fec27e78db2",
+ "sha_date": "2026-11-12T02:46:52Z（main）",
+ "fetched_at": "2026-11-12",
+ "fetch_method": "GitHub raw 固定 commit（LF 归一后 SHA256）",
+ "files": {
+  "dflash_info.py": "efbba4a802f364fa5fadc818bab6d1e2babcaa4ab9c436b97af7b4048534125e",
+  "dflash_info_v2.py": "1aa3d8d88953772a0ccc5c257cd574f781386164dd9128c6b7f53a68389c2198",
+  "dflash_worker_v2.py": "683c1c4b74845cfafd902ab46c27c8947786be791321d204d59c2953c83005e9",
+  "dflash_utils.py": "296c47d4ba6a769535767ba2aad94c558419583aa8be0f3c85db88457816c3fb",
+  "dflash_disaggregation.py": "cc5449ced07a2499989a2b6c8897818a64ce8a11a1d3efa3d8814ce7eb8a91dd",
+  "dflash_dp.py": "bc7ab3ad1a004a08b4cc6f3171172cb20a2dcec9db14f6d53d1c442ec5169a15",
+  "spec_info.py": "76be1e44eb787719696d4d3fd8d0a84824c2de6e930f7bb51d16819c40ced3fc",
+  "models_dflash.py": "fb330972588aae8eaa2450b72e89cb83727c159657633cc184c3245816716fdd",
+  "kernels_dflash.py": "d9708b44e7b03ad3fcf4a48f69387b1bedfad9565c6c10d5fd4ce8b7ec4adb7d",
+  "dflash_candidates.py": "f97c98fce23bfc25fcd025f30c5550600505360fa22e6932f97fcfd9378125a5",
+  "tests/test_dflash.py": "be36dfbadebd050c1f4ed2ff60742a06d37fd6a0215650b24fb73d314f8279e1",
+  "tests/test_basic_sanity_dflash.py": "2e4deb4867e76514d862357d3b0f141fbb2e547f395a90abaf385fe1c74d9cf8"
+ },
+ "paths": {
+  "dflash_info.py": "python/sglang/srt/speculative/dflash_info.py",
+  "dflash_info_v2.py": "python/sglang/srt/speculative/dflash_info_v2.py",
+  "dflash_worker_v2.py": "python/sglang/srt/speculative/dflash_worker_v2.py",
+  "dflash_utils.py": "python/sglang/srt/speculative/dflash_utils.py",
+  "dflash_disaggregation.py": "python/sglang/srt/speculative/dflash_disaggregation.py",
+  "dflash_dp.py": "python/sglang/srt/speculative/dflash_dp.py",
+  "spec_info.py": "python/sglang/srt/speculative/spec_info.py",
+  "models_dflash.py": "python/sglang/srt/models/dflash.py",
+  "kernels_dflash.py": "python/sglang/kernels/ops/speculative/dflash.py",
+  "dflash_candidates.py": "python/sglang/kernels/ops/speculative/dflash_candidates.py",
+  "tests/test_dflash.py": "test/registered/spec/dflash/test_dflash.py",
+  "tests/test_basic_sanity_dflash.py": "test/registered/core/test_basic_sanity_dflash.py"
+ },
+ "purpose": "R07a DFlash 服务栈审计（SGLang 侧）：DFLASH worker 调度/hidden 传递/KV 回退与 mamba 态回退/accept+bonus/通信路径/计时边界；source-checked，非执行",
+ "note": "v1 worker（dflash_worker.py）在 pin commit 已不存在（仅 dflash_worker_v2）；文件名加前缀避免 models/kernels 两处 dflash.py 冲突"
+}

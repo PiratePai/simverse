@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；同日 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #5/#7 已合入 main；本轮验收修复分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R20 全量 **295 passed**，exit 0；本次 DSH 验收沙箱对 6 个 `tmp_path` 用例 setup PermissionError，实际 289 passed / 6 errors——均为沙箱临时目录 ACL 限制而非代码失败，见 §3.9；历史：R06 264、R06 初版 262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：295**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R20；264→295 为 R20 CSA2 索引 oracle 新增 31 项；此前 236→252 为 R05 新增 16 项，252→262 为 R06 几何/算量对账新增 10 项，262→264 为独立张量 oracle 的 hermetic/live 两项）。
+更新：2026-11-12（R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（PR #5/#7 已合入 main；PR #9 已合入远端 main merge `7151e5d`；本 PR #10 分支 `codex/v41-csa2-index-r20` 正在集成；历史验收分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 集成：R07a 宿主验收 **280 passed**、R20 单分支宿主验收 **295 passed**；与 R07a 合并后 Codex 宿主全量 **311 passed，exit 0**。本 DSH 沙箱 6 项 `tmp_path` setup PermissionError 仅为环境回执，见 §3.9，不是代码失败。历史：R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：311**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R07a+R20 集成；264→280 为 R07a 新增 test_dflash_serving_r07a.py 16 项（原 13 + 复核 3）；280→311 为 R20 CSA2 索引 oracle 新增 31 项（R20 分支 264→295）；236→252 为 R05 新增 16 项，252→262 为 R06 新增 10 项，262→264 为 R06 oracle 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -126,8 +126,9 @@ tp=7/9/16 拒绝、逐行手算绝对值、开/关账本差=精确新增、count
 断言归因见报告 §8，剩余缺口不变仍在阻断）。默认 V4.1 replay 前后
 逐项归因：decode FLOPs 7,067,478,214→7,146,532,702、GPU 侧解析耗时下界
 113.34→116.15ms（host 查表/预取时延未知）、GPU steady +39,485,440B（仅 wkv+qk）、host 表
-25,344,443,520B、行 909→916；structure_complete 仍 False（CSA2/MoE/
-量化缺口不变）。报告：[docs/validation/v41-engram-20261111.md]
+25,344,443,520B、行 909→916；structure_complete 当时仍 False（CSA2/MoE/
+量化缺口；其中 CSA2 索引打分/top-k/candidate 后由 R20 2026-11-12 解除，
+MoE/量化等仍在阻断）。报告：[docs/validation/v41-engram-20261111.md]
 (validation/v41-engram-20261111.md)；证据 ev-vllm-v41-engram；G-C1
 单机算子解除（DP 交换/cpu_offload 运行时/amd 变体仍登记未覆盖）。
 
@@ -188,11 +189,19 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
     算子精确对账）；MTP 只有 config+目标首层模板 → **unverified**；
     forward 仍不完整、模型级 cpu_forward 仍 not-run，不能参与部署排名。
   - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
-    DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2/MoE、
-    candidate、swiglu、quantization_config 仍为缺口；mHC 仅
-    source-checked；CPU/GPU 均未执行。
-  - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成未核、拒绝采样/KV
-    回退/hidden 提取仍 0 占位；CPU/GPU 未执行。
+    DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2 索引打分/
+    top-k/candidate block 已由 R20（2026-11-12，ev-vllm-v41-csa2）source-checked
+    解除；MoE scoring、swiglu、quantization_config、稀疏 MLA 注意力核本体、
+    compress_ratios 尾部仍为缺口；mHC 仅 source-checked；CPU/GPU 均未执行。
+  - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成已双栈逐行核对
+    （R07a 2026-11-12：colocated=source-checked/dt=unsupported）；served
+    已部署实测未做；拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位
+    unknown（vLLM prepare-inputs 为图外 eager Triton）；CPU/GPU 未执行。
+- **本轮修复**（2026-11-12 R07a）：ctx 投影/act 改 verify 跨度基（含 ctx K
+  norm/rope、vLLM permute+contiguous 布局拷贝）、草稿行改生效块
+  plan.block_size、full 草稿层按 pinned layer_types 非因果；capability 分模式
+  （colocated=supported source-checked / dt=unsupported）。详见
+  [R07a 报告](validation/dflash-serving-audit-20261112.md)。
 - **本轮修复**（2026-11-12 R06）：full-attn 输出门控逐元素行
   `attn_output_gate`（官方 L802 sigmoid(gate)·attn_out；此前只计 q_proj
   2× GEMM 消费）——默认场景 decode +10,240 FLOPs、verify +163,840、
@@ -204,7 +213,9 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   行号/未核状态校正。
 - **当前数值**：CLI 内置默认 Qwen3.6+DFlash（显式 `draft_ctx_kv_path=fused_raw`，α0.72、blk16）稳态
   2,830,652,352 B（shared gate +81,920 B；含 fused ctx-KV 3,145,728 B 与
-  k_norm 堆叠 1,536 B），known_peak 2,832,959,265 B，仍不完整；
+  k_norm 堆叠 1,536 B），known_peak 2,832,959,265 B（下界；含 ctx flat/
+  permute contiguous/K norm 输出临时，`t-draft-buffers` 取已知并存组 max
+  而非全缓冲相加；草稿 logits 按 blk−1 候选计），仍不完整；
   审计对照场景（α0.75、blk5）的 known_peak 为 2,831,405,056 B；
   V4.1 o_a TP1 每层 67,108,864 FLOPs/容量 B，40 层约 +2.35 GFLOP/token
   +2.52 GB(BF16)。详细归因/来源见
@@ -214,9 +225,9 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 复核：
   main branch protection 要求经 PR 合入及 `pytest (Windows, Python 3.12)`
   必需检查（strict），审批数为 0，且 `enforce_admins=true`。
-- **未完成**：V4.1 CSA2/MoE scoring/量化映射源码与执行、Engram DP 分片
-  交换路径、Qwen3.6 MTP 原生 forward、
-  两款主模型 CPU/GPU 实测、DFlash 服务端集成与运行时池尺寸、真实可分配预算。
+- **未完成**：V4.1 MoE scoring/量化映射源码与执行、稀疏 MLA 注意力核本体、
+  Engram DP 分片交换路径、Qwen3.6 MTP 原生 forward、
+  两款主模型 CPU/GPU 实测、DFlash served 实测与运行时池尺寸、真实可分配预算。
 
 ## 0.1 必读上下文
 
@@ -473,13 +484,21 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 
 1. **V4.1**：Engram 单副本路径已建模（R04，2026-11-11，pin+source-checked；
    剩余：DP 分片交换/EngramBatch MXFP8/cpu_offload 运行时行为/amd 变体，
-   G-C1）；CSA2/MoE
-   scoring/top-k/分组路由、candidate block、swiglu clamp、quantization_config
-   仍为显式缺口；mHC 仅 source-checked、tilelang kernel 未执行。G-C1。
+   G-C1）；CSA2 索引打分/top-k/candidate block 已由 R20（2026-11-12）
+   source-checked 解除（G-C12）；剩余 MoE scoring/top-k/分组路由、
+   swiglu clamp、quantization_config、稀疏 MLA 注意力核本体、
+   compress_ratios 尾部仍为显式缺口；mHC 仅 source-checked、tilelang
+   kernel 未执行。G-C1。
 2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
    丢弃 `mtp.` → method status=unverified，不进入部署排名。
-3. **DFlash**：服务端集成（SGLang DFLASH/vLLM PR#40898）未逐行核对；拒绝采样/
-   KV 回退/hidden 提取仍 0 占位；workspace/graph/NCCL 池尺寸未知。G-C3。
+3. **DFlash**：服务端集成已双栈逐行核对（R07a 2026-11-12：vLLM @dc74b8cb +
+   SGLang @74cb973d，colocated=supported(source-checked)/dt=unsupported；
+   ctx 投影改 verify 跨度基（含 K norm/rope/layout copy）、草稿行改生效块、
+   full 层非因果三修正已回放）。
+   残留：拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位 unknown（两栈
+   GPU kernel 证据已注记；vLLM prepare-inputs 为图外 eager Triton）；
+   DraftLogitsCache 账本、SGLang 采样可用性、GDN 态
+   回退成本、served 实测待 R07b；workspace/graph/NCCL 池尺寸未知。G-C3 残留。
 4. **设备可分配预算/价格**：无来源 → feasible=unknown、成本 null+reason。
    H200 两闭环绑定已归档的 30B-tiny/235B，不能跨模型使用。G-D7/G-D9。
 5. **CPU/GPU 执行**：Qwen 固定 HF 源码两层随机权重 CPU shape probe 已执行；
@@ -498,7 +517,9 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
    2026-11-11 按仓库所有者决定调整为单人仓规则：保留 PR、Windows pytest
    required check（strict）和管理员保护；required approving reviews 为 0。
 9. 移动端像素观感：截图存证但本会话通道无法目检；`tmp_path` 用例在本机
-   DSH 沙箱目录权限下未能完成（setup PermissionError）。历史事实：hermetic
+   DSH 沙箱目录权限下未能完成（setup PermissionError；环境差异，非代码失败）。
+   2026-11-12 R07a：Codex 宿主全量 `280 passed`，exit 0；本节仅保留 DSH
+   沙箱回执。历史事实：hermetic
    修复前外层本地 `196 passed` 因复用 ignored `outputs/run_v41.json`，不代表
    clean checkout；远端 run `42803015653` 的 2 项失败即该文件缺失。两项验收
    已按 hermetic 方式修复，外层 Codex 于 2026-11-10 验收本地全量 exit 0：
@@ -518,7 +539,7 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   trace_v2.csv、report_v2.html（历史轮）；A 组轮：
   run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
   trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
-- 下一工作项：V4.1 CSA2/MoE scoring 与量化映射源 pin、Engram DP 分片交换
+- 下一工作项：V4.1 MoE scoring 与量化映射源 pin、Engram DP 分片交换
   路径（或显式永久登记单副本口径）；Qwen3.6 MTP 原生 forward；
   两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/运行时池尺寸；
   可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；G-C4 单请求超前 → M17；

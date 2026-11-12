@@ -41,6 +41,9 @@ def _run_evidence_refs(model, draft, method_id: str,
     if draft is not None and method_id == "dflash_v1":
         refs.extend(draft.evidence_refs)
         refs.append("ev-vllm-parallel-recipe")
+        # R07a：两套服务栈逐行核对证据（colocated supported/dt unsupported）
+        refs.append("ev-vllm-dflash-serving")
+        refs.append("ev-sglang-dflash-serving")
     if profile_set:
         ev = _PROFILE_EVIDENCE.get(profile_set)
         if ev:
@@ -243,10 +246,30 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             f"{kv_shard_note(model, dep.target_tp)['strategy']}"
             + ("；EP 开：routed 整专家按 rank 分置" if pplan.moe_ep_enabled
                else "；EP 关：routed inter/tp 切分"))
-    if scenario.method_id == "dflash_v1" and dep.mode == "dt_serial":
-        cap.add("dflash_serving_integration", "unknown",
-                "SGLang DFLASH/vLLM PR#40898 未逐行核对：模拟按 HF 语义，"
-                "不冒充已部署验证", affected_metrics=["部署矩阵 served 标记"])
+    if scenario.method_id == "dflash_v1":
+        # R07a（2026-11-12）：两套服务栈逐行核对后的分模式判定——
+        # colocated：vLLM（in-process proposer，dflash/speculator pin
+        # @dc74b8cb）与 SGLang（DFlashWorkerV2 单 TP 组 @74cb973d）均有
+        # 完整源码路径 + e2e 测试 → supported（source-checked，非已部署
+        # 实测）；dt_serial/dt_pipeline_sim：两栈均无 draft/target 分离
+        # 部署路径（vLLM 仅 in-process；SGLang 的 disagg 是 target 侧
+        # PD，bonus/seq_lens 经 FutureMap 中继）→ unsupported，模式是
+        # 本仓建模假设，不对应已实现服务栈。
+        if dep.mode == "colocated":
+            cap.add("dflash_serving_integration", "supported",
+                    "源码核对双栈：vLLM dflash speculator @dc74b8cb（colocated "
+                    "proposer，embed/lm_head 共享）+ SGLang DFLASH worker_v2 "
+                    "@74cb973d（DraftParallelSpec SINGLE_GROUP）；e2e 测试在册"
+                    "（GSM8K 精度/接受长度门槛）。source-checked ≠ 已部署实测："
+                    "served 标记仍需 R07b 真实 trace",
+                    affected_metrics=["部署矩阵 served 标记"])
+        elif dep.mode in ("dt_serial", "dt_pipeline_sim"):
+            cap.add("dflash_serving_integration", "unsupported",
+                    "两栈均无 draft/target 分离部署：vLLM DFlash proposer "
+                    "in-process（同 TP 组）；SGLang DraftParallelSpec "
+                    "SINGLE_GROUP，disagg 为 target 侧 PD（非 DT）。"
+                    "dt 模式是建模假设，不对应已实现服务栈",
+                    affected_metrics=["部署矩阵 served 标记"])
 
     # ---- 计数与计价 ----
     quant, dquant = scenario.quant, scenario.draft_quant
@@ -333,7 +356,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             draft_rows = dflash_round_rows(
                 "draft_block", draft, model.vocab, e_n, ctx, dquant,
                 quant["act"] / 8, tp=draft_tp, batch=B,
-                ctx_kv_path=scenario.draft_ctx_kv_path)
+                ctx_kv_path=scenario.draft_ctx_kv_path,
+                block_size=plan.block_size)  # R07a：与 verify/msg 同块（防 16≠5 双口径）
             d_gemm, d_ew = dtype_route(dquant)
             d_dev = target_dev if dep.mode == "colocated" else draft_dev
             d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew)
@@ -378,7 +402,14 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                            "commit_rewind": 0.0, "hidden_extract": 0.0}
             cap.add("stage_cost_complete", "unknown",
                     "DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；"
-                    "时间线以显式 0 占位，仅为已建模阶段下界",
+                    "时间线以显式 0 占位，仅为已建模阶段下界。R07a 源码核对："
+                    "两栈 accept/bonus/prepare-inputs 均为 GPU kernel，但计时边界"
+                    "不同——vLLM prepare_dflash_inputs 是图外 eager Triton，"
+                    "draft sampler 在 draft FULL 图内；SGLang draft sampler "
+                    "在 draft 图内，accept/bonus 为独立 Triton launch；"
+                    "均未独立计价，仍 unknown。成本行按 vLLM 实现"
+                    "（layout copy/全量 logits）；SGLang 无全局 layout copy "
+                    "等差异单列 source_map",
                     affected_metrics=["M01 TPOT", "M02 加速比", "M04 轮分解"])
             if scenario.draft_ctx_kv_path == MXFP8_CONTEXT_PROJ:
                 cap.add(
