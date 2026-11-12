@@ -46,7 +46,9 @@ _QWEN36_EVIDENCE = ModelEvidence(
          "核过；MTP 仅 config+目标首层模板，未执行、未实测。"
          "R06（2026-11-12）已补 fixture 级小尺寸 CPU forward 对照"
          "（ev-qwen36-cpu-fixture-r06：随机权重 2 层缩比，逐 GEMM/conv/router "
-         "计数与 shape 精确对账）；模型级 cpu_forward 仍 not-run。")
+         "计数与 shape 精确对账）；独立张量参考已对两相位输出/缓存逐元素"
+         "核验（ev-qwen36-cpu-numeric-r06，随机权重 fixture 范围）；"
+         "模型级 cpu_forward 仍 not-run。")
 
 _V41_EVIDENCE = ModelEvidence(
     forward_source="partial-source",
@@ -199,7 +201,8 @@ def _qwen36() -> ModelIR:
     return replace(ir, evidence=_QWEN36_EVIDENCE,
                    evidence_refs=("ev-qwen36-main-config", "ev-hf-qwen35-modeling",
                                   "ev-hf-qwen35-config",
-                                  "ev-qwen36-cpu-fixture-r06"))
+                                  "ev-qwen36-cpu-fixture-r06",
+                                  "ev-qwen36-cpu-numeric-r06"))
 
 
 def _dflash_draft() -> DraftIR:

@@ -29,6 +29,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "qwen36_r06_cpu_fixture.json"
+NUMERIC_FIXTURE = ROOT / "tests" / "fixtures" / "qwen36_r06_numeric_oracle.json"
 # 全 32bit 精度档：本仓行与官方 fixture（fp32 随机权重）同口径
 Q32 = {"dense_w": 32, "expert_w": 32, "act": 32, "kv": 32, "state": 32}
 
@@ -44,7 +45,9 @@ def _fixture_ir():
     art = _load_artifact()
     src = SourceIdentity(
         repo_id="probe:qwen3_5_moe", revision="hf-transformers@b6401d66",
-        config_sha256=art["pinned"]["modeling_sha256"],
+        config_sha256=hashlib.sha256(json.dumps(
+            art["fixture_config"], sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest(),
         captured_at=art["environment"]["date"],
         note="R06 CPU fixture 探针（独立于本仓执行；随机权重缩比）")
     return parse_qwen3_5_moe(dict(art["fixture_config"]), src,
@@ -222,7 +225,7 @@ def test_a8_evidence_registered_and_model_level_not_overclaimed():
     reg = build_registry()
     rec = reg.get("ev-qwen36-cpu-fixture-r06")
     assert rec is not None
-    assert rec.kind == "numeric-checked" and rec.executed is True
+    assert rec.kind == "shape-checked" and rec.executed is True
     # 内容哈希绑定：registry 实算 == fixture 落盘 SHA256
     assert rec.content_sha256 == hashlib.sha256(
         FIXTURE.read_bytes()).hexdigest()
@@ -237,6 +240,12 @@ def test_a9_fixture_independent_of_simverse():
     art = _load_artifact()
     assert art["kind"] == "qwen36-r06-cpu-fixture"
     assert set(art["pinned"]) == {"modeling_sha256", "configuration_sha256"}
+    pin_dir = ROOT / "assets" / "identity" / "hf_transformers"
+    manifest = json.loads((pin_dir / "manifest.json").read_text(encoding="utf-8"))
+    for name, key in (("modeling_qwen3_5_moe.py", "modeling_sha256"),
+                      ("configuration_qwen3_5_moe.py", "configuration_sha256")):
+        actual = hashlib.sha256((pin_dir / name).read_bytes()).hexdigest()
+        assert art["pinned"][key] == manifest["files"][name]["sha256"] == actual
     for key in ("python", "torch", "transformers", "platform", "date"):
         assert art["environment"][key]
 
@@ -299,3 +308,50 @@ def test_b1_live_probe_reproduces_artifact_invariants():
         assert lp["moe"]["router_flops"] == ap["moe"]["router_flops"]
         # 输出形状
         assert lp["shapes"]["logits_shape"] == ap["shapes"]["logits_shape"]
+
+
+def test_c1_numeric_oracle_artifact_and_evidence():
+    from simverse.model_ir import build_catalog
+    from simverse.validation.registry import build_registry
+
+    art = json.loads(NUMERIC_FIXTURE.read_text(encoding="utf-8"))
+    assert art["seed"] == 20261112
+    assert art["tolerance"] == {"atol": 1e-5, "rtol": 1e-4}
+    assert "mrope generation not checked" in art["boundary"]
+    pin_dir = ROOT / "assets" / "identity" / "hf_transformers"
+    for name, sha in art["pinned"].items():
+        assert sha == hashlib.sha256((pin_dir / name).read_bytes()).hexdigest()
+    wanted = {"gdn_output", "gdn_state", "conv_state", "attn_output",
+              "attn_gated", "moe_0", "moe_1", "layer_0", "layer_1",
+              "kv_keys", "kv_values", "logits"}
+    assert set(art["phases"]) == {"prefill", "decode"}
+    for checks in art["phases"].values():
+        assert set(checks) == wanted
+        assert all(0 <= c["max_abs"] < 1e-5 for c in checks.values())
+    rec = build_registry()["ev-qwen36-cpu-numeric-r06"]
+    assert rec.kind == "numeric-checked" and rec.executed is True
+    assert rec.content_sha256 == hashlib.sha256(NUMERIC_FIXTURE.read_bytes()).hexdigest()
+    q = build_catalog()["models"]["qwen36_35b_a3b"]
+    assert "ev-qwen36-cpu-numeric-r06" in q.evidence_refs
+    assert q.evidence.cpu_forward == "not-run"
+    assert q.evidence.gpu_measurement == "none"
+
+
+def test_c2_live_numeric_oracle_reproduces_artifact(monkeypatch):
+    pytest.importorskip("torch")
+    pytest.importorskip("transformers")
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    spec = importlib.util.spec_from_file_location(
+        "probe_qwen36_numeric_oracle", ROOT / "tools" /
+        "probe_qwen36_numeric_oracle.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    live = mod.run_oracle()
+    art = json.loads(NUMERIC_FIXTURE.read_text(encoding="utf-8"))
+    assert live["pinned"] == art["pinned"]
+    assert live["tolerance"] == art["tolerance"]
+    for phase in ("prefill", "decode"):
+        for name, expected in art["phases"][phase].items():
+            actual = live["phases"][phase][name]
+            assert actual["shape"] == expected["shape"]
+            assert actual["max_abs"] < 1e-5

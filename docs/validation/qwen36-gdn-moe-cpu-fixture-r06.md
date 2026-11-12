@@ -14,7 +14,7 @@ R06 本轮范围：Qwen3.6（qwen3_5_moe 家族）**GDN 线性注意力层与 Mo
   `attn_output = attn_output * torch.sigmoid(gate)`）此前只计了 q_proj 输出
   2× 的 GEMM 消费，sigmoid+乘未计；新增 `attn_output_gate` 行（§5 归因）。
 - **模型级证据不冒充**：本轮为 fixture 级 CPU 执行证据
-  （`ev-qwen36-cpu-fixture-r06`，numeric-checked）；`qwen36_35b_a3b` 的
+  （`ev-qwen36-cpu-fixture-r06`，shape-checked）；`qwen36_35b_a3b` 的
   `cpu_forward` 保持 `not-run`，不构成完整 forward 或部署验证。
 - 两项**披露不修**的口径差异（§6）：gdn_recurrence 4 ops/elem（官方 torch
   参考约 7 ops/elem）；HF DynamicCache conv state 静态宽度 = kernel 列
@@ -24,8 +24,8 @@ R06 本轮范围：Qwen3.6（qwen3_5_moe 家族）**GDN 线性注意力层与 Mo
 
 | 项 | 值 |
 |---|---|
-| 官方 forward pin | `assets/identity/hf_transformers/modeling_qwen3_5_moe.py`（huggingface/transformers @b6401d66），SHA256 `1311a17431d7c232…`（fixture `pinned.modeling_sha256` 全量） |
-| 官方 configuration pin | 同目录 `configuration_qwen3_5_moe.py`，SHA256 `554e363a32b1a8c2…` |
+| 官方 forward pin | `assets/identity/hf_transformers/modeling_qwen3_5_moe.py`（huggingface/transformers @b6401d66），LF 字节 SHA256 `abac917f54dfe822…`（fixture `pinned.modeling_sha256` 全量） |
+| 官方 configuration pin | 同目录 `configuration_qwen3_5_moe.py`，LF 字节 SHA256 `b4292600803686a2…` |
 | 执行环境 | torch 2.15.0+cpu / transformers 5.22.1 / Python 3.12.10 / Windows（fixture `environment` 字段全录） |
 | 随机种子 | `torch.manual_seed(20261112)` |
 | fixture 维度 | h=32，2 层（L0 GDN + L1 FullAttn），4E top-2 + shared16 + gate，nv/nk=4/2，dk=dv=8，conv kernel 4，rotary_dim=2（partial 0.25），V=64 |
@@ -92,6 +92,11 @@ MoE assignment 每层恰 T·k（5·2=10 / 1·2=2，两层合计 20/4）；
 shared_expert_gate Linear(32,1)；norm 宽度清单
 {attn_norm:32, mlp_norm:32, final_norm:32, q_norm:8, k_norm:8, rmsnorm_gated:8}。
 
+表中 fixture 算量由观测到的模块形状、token/assignment 数代入本仓约定的
+FMA=2 等公式推得；探针没有指令级 FLOP 计数。`attention_core` 的每 pair
+`4d+5`、`gdn_recurrence` 的 4 op/elem 等仍是注册近似口径，不能把表中数值
+相等解释为实际执行 FLOPs 或独立输出数值验证。
+
 对账测试：`tests/test_qwen36_forward_r06.py` Part A（hermetic，9 项，无
 torch，CI 必跑）+ Part B（live 重执行探针，1 项；torch/transformers 缺失时
 skip；不含随机路由分布比较，防跨版本脆断）。
@@ -144,7 +149,7 @@ skip；不含随机路由分布比较，防跨版本脆断）。
    不覆盖真实 checkpoint、MTP、视觉塔、mrope 位置 id；fla/causal-conv1d
    未安装，走 PyTorch 参考实现（transformers 显式 fallback 提示，行为正确
    但慢）。
-5. **模型级 cpu_forward 保持 not-run**：本轮是 fixture 级 numeric-checked
+5. **模型级 cpu_forward 保持 not-run**：本轮是 fixture 级 shape-checked
    证据；两款主模型完整 CPU forward/GPU 实测仍未执行，部署排名门禁不变。
 
 ## 7. 复算命令
@@ -157,7 +162,44 @@ py -3.12 -m simverse.cli run-v2                      # 默认场景（attn_outpu
 ```
 
 证据登记：`simverse/validation/registry.py`
-`ev-qwen36-cpu-fixture-r06`（numeric-checked、executed=True，内容 SHA256
+`ev-qwen36-cpu-fixture-r06`（shape-checked、executed=True，内容 SHA256
 绑定 fixture JSON）；`simverse/model_ir/catalog.py` `_qwen36()` evidence_refs
 追加该证据，`_QWEN36_EVIDENCE.note` 补记 fixture 级对照已执行（模型级
 cpu_forward/gpu_measurement 不变）。
+
+## 8. PR #7 合入后验收修复（2026-11-12）
+
+首次全量运行 261 passed / 1 failed：live probe 读到的两份 LF pin 文件哈希
+与 fixture 记录的 CRLF 哈希不同。两组哈希只差行尾转换；仓内
+`assets/identity/hf_transformers/manifest.json` 的 LF SHA256 与实际 pin 文件一致。
+现以 manifest 的 LF 字节口径统一 fixture 与本报告，`.gitattributes` 固定 pin
+文件在 Windows 检出时保持 LF；hermetic 测试对 fixture/manifest/文件字节
+三方核对。fixture 测试的 `SourceIdentity.config_sha256` 同时改为小尺寸
+fixture config 的规范 JSON 哈希，避免误用 modeling 源码哈希。修复后
+`py -3.12 -m pytest tests -q` 为 262 passed；生产计数未变。
+
+计算审计进一步确认：探针运行了随机权重 CPU forward，但落盘的是模块调用、
+形状、路由 assignment 和据此推得的算量；没有独立实现逐元素复算输出张量。
+按 `simverse/contracts/enums.py` 的定义，证据等级应为 `shape-checked`，
+现已降级。逐算子算量对账的结论保留，模型输出的数值正确性仍待独立 oracle。
+
+## 9. 独立张量数值 oracle（2026-11-12 续验）
+
+`tools/probe_qwen36_numeric_oracle.py` 对同一 pinned HF 源码和随机权重
+（seed 20261112、h32/2 层/4 expert top-2）运行独立参考路径。参考路径只读取
+官方模型的参数张量，不调用其层、GDN、attention、router、expert 或 norm 的
+`forward` 方法：按 token 显式卷积和 GDN 状态递推、按 token/slot 计算 MoE
+专家及路由、手写 GQA 因果掩码/部分 RoPE/输出门控、残差与归一化。
+prefill T5 和带缓存 decode T1 各比较 GDN/attention/门控/MoE 输出、两层
+输出、logits、卷积/GDN/KV 状态，共每相位 12 个张量。判据为逐元素
+`abs(actual−reference) ≤ 1e−5 + 1e−4·abs(actual)`；本机 torch
+2.15.0+cpu / transformers 5.22.1 最大绝对差 `2.98e−7`（KV key），
+logits 最大差 `5.96e−8`。完整每张量形状、最大差、RMS 差和参考样本
+保存于 `tests/fixtures/qwen36_r06_numeric_oracle.json`。
+
+这条独立证据登记为 `ev-qwen36-cpu-numeric-r06`（`numeric-checked`）；
+原 `ev-qwen36-cpu-fixture-r06` 仍为 `shape-checked`，各自绑定其落盘产物。
+RoPE cos/sin 取官方 forward 的输入作为参考边界，**不验证 mrope 位置生成**。
+本轮也不覆盖真实 checkpoint、MTP、视觉塔或融合 GPU kernel；模型级
+`cpu_forward=not-run` 与部署排名阻断不变。`tests/test_qwen36_forward_r06.py`
+新增 hermetic 证据核对和可选 torch live 重执行各 1 项。

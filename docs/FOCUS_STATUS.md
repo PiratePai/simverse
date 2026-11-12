@@ -1,7 +1,7 @@
 # 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06 增补）
 
 2026-11-12 R06（Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照）：fixture 级
-数值对照已执行（探针独立跑 pin 官方 forward，h=32/2 层/4E 随机权重，
+形状与算量对照已执行（探针独立跑 pin 官方 forward，h=32/2 层/4E 随机权重，
 prefill+decode 逐 GEMM/conv/router/因果对/无放回 assignment 与本仓
 build_model_work(tp=1) **精确相等**；tests/test_qwen36_forward_r06.py
 10 项；证据 ev-qwen36-cpu-fixture-r06）。顺带修正 full-attn 输出门控
@@ -9,6 +9,13 @@ build_model_work(tp=1) **精确相等**；tests/test_qwen36_forward_r06.py
 M01 +0.00002ms）。**模型级 cpu_forward 仍 not-run**——这是 fixture 级
 证据，不构成完整 forward 或部署验证。详见
 [validation/qwen36-gdn-moe-cpu-fixture-r06.md](validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
+
+2026-11-12 R06 续验：独立 PyTorch 张量参考已逐元素核对随机权重 fixture
+的 prefill/带缓存 decode，每相位 12 个输出与缓存张量；最大绝对差
+2.98e−7（容限 atol=1e−5、rtol=1e−4）。新增
+`ev-qwen36-cpu-numeric-r06`（numeric-checked），原算量/形状证据保持
+shape-checked；模型级 CPU forward、mrope 位置生成、真实 checkpoint 与
+GPU 部署仍未验证。详见 [R06 报告 §9](validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
 
 2026-11-12 R05（V4.1 mHC/Sinkhorn 修正）：14 文件 blob SHA1 对 tree、SHA256
 pin 后补齐 sqrsum/prenorm、comb post、首层无 post、出口两行；Sinkhorn gates+
@@ -83,7 +90,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 ## 待验证或需额外数据
 
 - 重点模型小尺寸 CPU forward 与计数的独立执行对照——Qwen3.6 的 GDN+MoE
-  fixture 级数值对照已执行（R06，2026-11-12）；V4.1 侧与其余模块、
+  fixture 级形状与算量对照已执行（R06，2026-11-12）；V4.1 侧与其余模块、
   真实 checkpoint 级对照仍未执行。
 - Qwen3.6+DFlash 实际接受分布、draft/verify 延迟及服务栈配对验证。
 - 重点模型各精度/TP 的 GDN、MoE、attention 测量；历史 H200 profile 不能按名称相似迁移。

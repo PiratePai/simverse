@@ -9,8 +9,8 @@
   "date": "2026-11-12"
  },
  "pinned": {
-  "modeling_sha256": "1311a17431d7c232515823e517c2b405164a206ff4456de19d0fc21f910f824a",
-  "configuration_sha256": "554e363a32b1a8c20cc2eb5304138477694b5ae30595e3de510614083c41faba"
+  "modeling_sha256": "abac917f54dfe822a35f3bdb846593f76a2d74b251c96c45a245df273554c44c",
+  "configuration_sha256": "b4292600803686a2d0aca86f39309177cc5564cc751ec81479594369a6b88416"
  },
  "fixture_config": {
   "vocab_size": 64,
