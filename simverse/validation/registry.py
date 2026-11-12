@@ -136,6 +136,34 @@ _PINNED_ASSETS = [
       "transcendental=1 op，RMSNorm 4h+2 惯例近似；非指令数/物理 HBM",
       "split-k 运行时值及 overlap/mega/fused-AR/ROCm/CPU/XPU 部署变体未建模；"
       "capture_aux 仅 speculative，流均值工作未建模"], False, "2026-11-12"),
+    ("ev-vllm-v41-csa2", "source-checked",
+     "R20 CSA2 索引打分/top-k/candidate block：20 文件 pin（attention.py/"
+     "sparse_mla.py/compressor.py/common ops/specialized_decode 7 文件/"
+     "sparse_attn_indexer/candidate_blocks/indexer_topk/backends indexer/"
+     "deepseek_v4 attention/config attention + test_decode_topk）。覆盖：层型"
+     "0/1/2 与 kv/index 源拓扑、compressor bf16 权重+FP32 kv_score+ratio2 "
+     "softmax 门控池化+环形 state(cap 8)、rope_quant_insert 打包记录 584/528/"
+     "288、indexer K 132B/行、短上下文旁路(max_seq_len//r≤topk，全选 fill 纯 "
+     "store)、decode paged MQA logits 全候选打分+weights 折算、topk 选择"
+     "（cooperative≤64/persistent/per_row）、candidate 源发布 top-2048×8 位块"
+     "（NaN 传播 max、最新块 +inf 钉扎、-1 填充）与消费层 mask 到候选、"
+     "SparseIndexTables 等键运行首层 combine_topk_swa_indices 复用、共享"
+     " topk/candidate 缓冲（模型级单例）",
+     str(REFS / "vllm" / "csa2-pin.json"),
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；20 文件 blob SHA1 对 "
+     "vllm-tree.json 逐项校验 + SHA256 清单",
+     "V4.1 CSA2 索引管线（count/work.v41_layer_rows、lowering/memory 记录/"
+     "环形/缓冲、scenario.v41_kv_record、公式 v2.csa2_*）",
+     ["源码阅读 source-checked；kernel/CPU forward/GPU 均未执行",
+      "SM100 sparse-logits（消费层只打分候选块）、decode_topk CuTe、TP 行"
+      "分片 all-gather(≥12 行)、PCP/DCP、fused_mqa_topk、FlashInfer "
+      "plain-row bf16、MXFP4 索引缓存(68B) 变体未建模",
+      "CUDA-graph 静态整宽 logits 缓冲/整宽 -inf 尾写、workspace 池未入账"
+      "（峰值缺口传播不变）；cooperative 候选在值相等边界为近似选择",
+      "logits/选择 op 为文档化解析口径（非 kernel 指令数）；prefill gather "
+      "工作区字节为上界；环形 state 读为每请求 1 行上界",
+      "稀疏 MLA 注意力核本体（4d+5）仍 v0.1 移植，不在本证据范围"],
+     False, "2026-11-12"),
     ("ev-vllm-v41-dspark", "source-checked",
      "vLLM V4.1 DSpark speculator：num_reqs 批处理、复用 V4 decoder 的事实",
      str(REFS / "vllm" / "vllm" / "v1" / "worker" / "gpu" / "spec_decode" / "dspark" / "speculator.py"),

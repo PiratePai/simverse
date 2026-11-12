@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到同日先合入的 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-12（R20：V4.1 CSA2 索引打分/top-k/candidate block 按 20 文件 pin source-checked 建模并修正记录宽度/bf16 权重/环形 state；同日 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #5/#7 已合入 main；本轮验收修复分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R06 独立数值续验全量 **264 passed**，exit 0；历史：R06 初版 262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：264**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R06 独立数值续验；236→252 为 R05 新增 16 项，252→262 为 R06 几何/算量对账新增 10 项，262→264 为独立张量 oracle 的 hermetic/live 两项）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R20 全量 **284 passed**，exit 0；历史：R06 264、R06 初版 262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：284**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R20；264→284 为 R20 CSA2 索引 oracle 新增 20 项；此前 236→252 为 R05 新增 16 项，252→262 为 R06 几何/算量对账新增 10 项，262→264 为独立张量 oracle 的 hermetic/live 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -16,6 +16,27 @@ fixture、manifest 与文件字节三者一致；同时修正 fixture `SourceIde
 `run-v2` 与 R05 mHC replay 运行成功；该修复不改生产计数。进一步计算审计
 发现 R06 初版未提供独立输出数值 oracle，几何证据等级由 numeric-checked
 降为 shape-checked；随后新增独立数值产物与对应证据（见下）。
+
+**2026-11-12 R20 CSA2 索引打分/top-k/candidate block**：csa2-pin.json 20 文件
+（blob SHA1 对 vllm-tree.json 逐项校验 + SHA256）source-checked 入册
+（ev-vllm-v41-csa2，executed=False；sm-v41-csa2-indexer + 短上下文旁路条目
+重写）。修正/新建 count 行：index_select 拆为 index_score（全候选 paged MQA
+logits 2·pairs·(ih·di+ih) + fp32 logits 写）+ index_topk（2·pairs+T·topk 选择
+惯例）；candidate_publish → candidate_select（源层 L20：块最大值 NaN 传播/最新
+块 +inf/−1 填充）+ 新增 candidate_mask（消费层 24/28/32/36）；短上下文旁路
+（end//r≤512）index_fill 0 浮点纯 store（旧式误计 T·topk flops）；
+compress_norm → compress_pool（r2 门控池化 7d+9/group 精确式 + 环形 state
+cap8，r1 纯 norm exact）；compressed_rope+compressed_cache_write 合并为
+compressed_insert；index_k_* 合并为 index_k_store（132B/行）；SWA/压缩缓存
+改按打包记录 584|528 B/token（显式 v41_kv_record 配方，进场景身份）；
+compressor/wk/weights_proj 为 quant_config=None bf16 固定权重；
+sparse_index_build 行（decode 每 (kv源:索引源:r) 运行首层 combine 一次，
+等键后继复用）；topk/candidate 共享缓冲模型级单例下界入 transient。
+默认 TP8/B1/ctx32768 replay：op 7,161,190,222→7,175,856,742（Δ 归因
+attribution.json 逐 op 验证，审计面外行逐字段冻结）；steady +26.6MB、
+transient +10,240B、M01 +0.0075ms。structure_complete 仍 False
+（MoE scoring/量化映射/注意力核本体/MTP 尾部缺口不变）。新增 20 项独立
+oracle（tests/test_v41_csa2.py）。[报告](validation/v41-csa2-indexer-20261112.md)。
 
 **2026-11-12 R06 独立数值续验**：新增纯张量参考路径，复用 pinned HF
 随机权重但不调用被验证模块的 forward；prefill 与带缓存 decode 各对比

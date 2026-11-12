@@ -1,0 +1,7 @@
+{
+  "head": "7928e187ae1d81df9e446a4cf3c0135317f7a479",
+  "captured_before_edits": true,
+  "worktree": "D:\\Github\\new-viewer-csa2",
+  "git_status_porcelain": "?? docs/evidence/csa2/\n?? docs/rebuild-20261106/references/vllm/csa2-pin.json\n?? docs/rebuild-20261106/references/vllm/tests/models/deepseek_v41/\n?? docs/rebuild-20261106/references/vllm/vllm/config/\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/kernels/attention/\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/candidate_blocks.py\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/indexer_topk.py\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/sparse_attn_indexer.py\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v4/\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v41/attention.py\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v41/common/ops/\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v41/compressor.py\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v41/nvidia/specialized_decode/attention/\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v41/sparse_mla.py\n?? docs/rebuild-20261106/references/vllm/vllm/v1/attention/\n?? tools/replay_v41_csa2.py\n",
+  "note": "R20 基线：HEAD 7928e18（main，R05 合入后）+ 预置 CSA2 pin 源码（csa2-pin.json 20 文件，blob 对 vllm-tree.json 校验）；simverse 生产代码未改动"
+}

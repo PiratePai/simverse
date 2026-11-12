@@ -511,7 +511,8 @@ def test_scenario_engram_table_placement_validation():
     j = run_v2(sc).to_json()
     r0 = j["cost"]["memory"]["target_r0"]
     assert r0["host_resident_bytes"] == 25_344_443_520   # 2×rank0 分片×264
-    assert r0["transient_peak_bytes"] == 2 * 1 * 3 * 256 * 2  # staged 下界
+    # R20：staged 下界 + 共享索引/候选缓冲下界（1×512×4 + 1×2048×4）
+    assert r0["transient_peak_bytes"] == 2 * 1 * 3 * 256 * 2 + 1 * 512 * 4         + 1 * 2048 * 4
     inv = [a for a in r0["inventory"] if "engram" in a["alloc_id"]]
     assert {a["placement"] for a in inv if "table" in a["alloc_id"]} == \
         {"cpu_offload"}

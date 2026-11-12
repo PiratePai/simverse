@@ -54,7 +54,7 @@ _V41_EVIDENCE = ModelEvidence(
     forward_source="partial-source",
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch",
-                   "sm-v41-mhc-kernels"),
+                   "sm-v41-mhc-kernels", "sm-v41-csa2-indexer"),
     unverified_paths=(
         "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与"
         "EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；"
@@ -62,16 +62,25 @@ _V41_EVIDENCE = ModelEvidence(
         "已 source-checked（ev-vllm-v41-engram，R04）",
         "mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；"
         "RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模",
-        "csa2_attention_projection: CSA2 注意力/投影为 v0.1 移植，非独立 forward 证据",
+        "csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）"
+        "仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 "
+        "source-checked（ev-vllm-v41-csa2），核本体未独立逐行核",
         "csa2_moe_routing: sqrtsoftplus/noaux_tc/分组路由未建模",
-        "candidate_publish: 候选块发布/消费语义未独立核验",
-        "quantization_config: FP8/FP4 配置未映射到本仓计算精度",
+        "csa2_deploy_variants: SM100 sparse-logits（indexer_sparse_logits 消费层"
+        "只打分候选块）/decode_topk CuTe 路径/TP 行分片 all-gather/PCP/DCP/"
+        "fused_mqa_topk/FlashInfer plain-row bf16 变体未建模；CUDA-graph 静态"
+        "整宽 logits 缓冲与 -inf 尾写、cooperative 候选值相等边界近似未入账",
+        "quantization_config: FP8/FP4 配置未映射到本仓计算精度（compressor/"
+        "weights_proj/wk 的 bf16 固定与打包记录宽度为 pinned 事实，其余量化"
+        "路径仍缺）",
     ),
     method_status={"baseline": "partial-source", "dflash_v1": "unsupported",
                    "mtp": "unverified"},
     note="Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 "
-         "cpu_offload 运行时行为未覆盖）；CSA2/MoE scoring/量化仍缺口；"
-         "hc 仅 source-checked，未执行。")
+         "cpu_offload 运行时行为未覆盖）；CSA2 索引打分/top-k/candidate block/"
+         "压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json "
+         "20 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；"
+         "MoE scoring/量化映射/注意力核本体仍缺口；hc 仅 source-checked，未执行。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",
@@ -186,7 +195,7 @@ def _v41() -> ModelIR:
     return replace(ir, evidence=_V41_EVIDENCE,
                    evidence_refs=("ev-v41-config", "ev-vllm-v41-mhc",
                                   "ev-vllm-v41-model",
-                                  "ev-vllm-v41-engram"))
+                                  "ev-vllm-v41-engram", "ev-vllm-v41-csa2"))
 
 
 def _qwen36() -> ModelIR:

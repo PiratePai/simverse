@@ -7,3 +7,6 @@ tests/fixtures/qwen36_r06_numeric_oracle.json text eol=lf
 
 # R05 原始 replay 快照：保留捕获字节，避免 Git 行尾转换改变归档 SHA256。
 docs/evidence/r05-mhc/*.json binary
+
+# R20 原始 replay 快照（同 R05 先例）：保留捕获字节防行尾转换破坏 SHA256。
+docs/evidence/csa2/*.json binary

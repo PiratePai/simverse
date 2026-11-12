@@ -1,0 +1,147 @@
+{
+ "commit": "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+ "repo": "vllm-project/vllm",
+ "note": "R20 CSA2 索引打分/top-k/candidate block pin；路径相对 references/vllm/；blob sha1 对 ../vllm-tree.json 逐项校验",
+ "files": [
+  {
+   "path": "tests/models/deepseek_v41/nvidia/specialized_decode/test_decode_topk.py",
+   "size": 11847,
+   "blob_sha1": "765b5b119adefc7e8ee3c18d60bfa1e71c8c9c19",
+   "sha256": "c28492fbd52c76aec50f8e434df36a12290ebe32626172b3420bf6b451a01415",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/config/attention.py",
+   "size": 15912,
+   "blob_sha1": "4131421672e8a4f4fe86c43405b233bcc522c201",
+   "sha256": "9f1b9707e4b20356c35162ce482286744b2ae25efb8350c8006090a3a159e6e0",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/kernels/attention/dsa/candidate_blocks.py",
+   "size": 8784,
+   "blob_sha1": "b27fcf0f1bc9a427f349777efc24d234e1e3e05a",
+   "sha256": "0990a1da8a18d9e5537cb549ec8072137007c894fe55ca93c2329eb2e6de5664",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/indexer_topk.py",
+   "size": 17454,
+   "blob_sha1": "5195e74417ea7b3be279469a8cb5747d163b3296",
+   "sha256": "a19a4a4d8574512b98a3682e0a8e69bdd8e41ee0695996a3eee5630b64fbf413",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/sparse_attn_indexer.py",
+   "size": 66175,
+   "blob_sha1": "5ae6920ab808530fb955a392c5386cdd807bf197",
+   "sha256": "b320b589505823b63f00c6b0daef5d2c66e9d93ec48ef19a468afd57c597fd59",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v4/attention.py",
+   "size": 46400,
+   "blob_sha1": "f3748cfbbaa194b3d0f5bdc5f7b19eace4aa30bf",
+   "sha256": "939848cbc964d2d4b153d11b70fdfe793e63af2cf4888a37d907034ec8224bbf",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/attention.py",
+   "size": 71234,
+   "blob_sha1": "780eef57dededa881e600ca5de2763ae2da13ff4",
+   "sha256": "12827be271ae0e8a6bbcdb8c8dcfbbbac2486d293edca8ff2f5c5565cd3f2aba",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/common/ops/__init__.py",
+   "size": 1475,
+   "blob_sha1": "73c4d1b4daab9e68afd0aa1a35c03465f4418dc4",
+   "sha256": "692b8cb79df26b493fbd584daace6dd3326eba8c9ef704ff09e28e2a604655e0",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/common/ops/cache_utils.py",
+   "size": 53517,
+   "blob_sha1": "3dc258a3836b7df6f24b6965b0dcef585612834c",
+   "sha256": "aea9465e164c602f2d26c1fc8cc086f03c8c07a8771149cdef041bf61d67844e",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/common/ops/fused_compress_quant_cache.py",
+   "size": 22837,
+   "blob_sha1": "daf2fffc85165ddab1194cd97748e2b42ca03de6",
+   "sha256": "fd50982063f3d1e5f05f08fd627c9a347d75718ac9057e359d7eff4cdc091e82",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/common/ops/indexer_k_store.py",
+   "size": 10644,
+   "blob_sha1": "fe203e91786170de1106c29704fa79c7a0654c3f",
+   "sha256": "298c3c5aa61902ab439a51dd074234064e4f67ff9e1e735374db351ca56c08f9",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/compressor.py",
+   "size": 17584,
+   "blob_sha1": "833ca6862b3696f8552db687d5f6495f74ad892d",
+   "sha256": "5da254f49fbd38cedc19d9497784bb1c4bd115329d126283a2d252f0532ae114",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/aux_projections.py",
+   "size": 3314,
+   "blob_sha1": "0a6baef4f87f9d592929c23169ca6828bdb47c94",
+   "sha256": "1295e3fcf55b09963f23dcc8effa4a4c56433defdd26c1046a7fcc3dfb7a6549",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/candidate_topk.py",
+   "size": 5753,
+   "blob_sha1": "888c8ca788c0f42ce46bdc291f92505c19698897",
+   "sha256": "7900a4f327577aed935c1e8338884490297944219242e56406af8be550b6d2e9",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/decode_topk_cute.py",
+   "size": 51435,
+   "blob_sha1": "eee32bcb0552c0d8882ee4b404f2031c07087557",
+   "sha256": "8cce00068933c125b52d12b42f7aa1f6619d6e464da50da0631ed64a166771d2",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/indexer.py",
+   "size": 19993,
+   "blob_sha1": "691970438432ce73912bc99aa89b82e9cc850765",
+   "sha256": "ce0cb21600616ebc89b9bafb89cf7ae1f71eb33f5353863d54b0a508ad33260e",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/indexer_k_store.py",
+   "size": 5167,
+   "blob_sha1": "c5b00754ef8e775dab0b1c8d5b71ef2eaa926ca3",
+   "sha256": "fa472c40a29a35a97589336490bc45e06e1bd1048569f47c620a46a2ac67afc0",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/sparse_mla.py",
+   "size": 18185,
+   "blob_sha1": "e5180f0a76f7528db6c95319d1fc8ea46566e28b",
+   "sha256": "c3c5312666c0201b4b688aaf42b5273151c5f4b590539278b5510ae97fe86d0a",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/step.py",
+   "size": 16755,
+   "blob_sha1": "9c64ba8237dff53a97fef8e19657fe70b7b33909",
+   "sha256": "ac878655c9975e950705a5bd4cdb629ca1ba13c0547595fbb0dbc426e5b10d24",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/sparse_mla.py",
+   "size": 12122,
+   "blob_sha1": "918e5ddf0a251869d88d743d16cfb55336c7b95d",
+   "sha256": "d6ca9121254f2ecc5a09c2334583bb623ae8d75badf4763b35b2f91e7833025e",
+   "tree_match": true
+  }
+ ]
+}

@@ -99,7 +99,11 @@ def test_v41_structure_and_gaps(cat):
         "max_ngram_size", "compressed_vocab_size", "pad_token_id")}  # R04 已解除
     # 2026-11-10 审查新增：swiglu clamp/candidate block/compress_ratios 尾部/
     # quantization_config 也是显式缺口，不默认 ignored。
-    assert {"swiglu_limit", "candidate_block_size", "quantization_config"} <= gap_keys
+    # R20（2026-11-12）：CSA2 索引/candidate 键已 mapped（csa2-pin.json 20
+    # 文件 source-checked）；剩余缺口不含 candidate/index 拓扑键。
+    assert {"swiglu_limit", "quantization_config"} <= gap_keys
+    assert not gap_keys & {"candidate_block_size", "candidate_source_layer_id",
+                           "candidate_topk_blocks", "index_topk"}
     assert any("compress_ratios[40:43]" in g for g in m.gaps)
     assert any("csa2_moe_routing" in p for p in m.evidence.unverified_paths)
     # hc 参数入册 extras（消费方 count/memory）
@@ -309,7 +313,7 @@ def _manual_causal(n: int, win: int) -> int:
 
 
 def test_v41_counting_matches_v01_transplant(cat):
-    """V4.1 CSA2：v0.2 行集合覆盖 v0.1 已对账的注意子图（抽 3 层关键行核对）。"""
+    """V4.1 CSA2：v0.2 行集合覆盖已对账注意子图（R20 起 SWA 行按 pinned 记录宽度）。"""
     m = cat["models"]["deepseek_v41_flash"]
     rows = build_model_work(m, "decode", 1, 32768, 1,
                             {"dense_w": 8, "expert_w": 4, "act": 8, "kv": 8,
@@ -322,7 +326,9 @@ def test_v41_counting_matches_v01_transplant(cat):
     local = causal_pairs(32769, 1, swa) - causal_pairs(32768, 1, swa)
     heads_card = kvs["heads"] // 8      # config num_attention_heads=64
     assert kvs["heads"] == 64
-    assert l0.kv_read == 1 * min(32769, swa) * kvs["head_dim"] * 1
+    # R20：SWA 行按打包记录 584 B/token（fp8_ds_mla_sm90，attention.py
+    # L583-589），不再 d×kv 位宽
+    assert l0.kv_read == 1 * min(32769, swa) * 584
     assert l0.flops == 1 * local * heads_card * (4 * kvs["head_dim"] + 5)
 
 

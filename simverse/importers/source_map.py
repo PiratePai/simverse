@@ -110,16 +110,27 @@ ENTRIES: List[SourceMapEntry] = [
     SourceMapEntry(
         entry_id="sm-v41-index-short-branch",
         model_or_method="deepseek_v41_flash CSA2",
-        semantic="短上下文走 eager 全索引旁路（无 top-k 选择打分）",
+        semantic="短上下文 eager 全选旁路：跳过 wq_b/RoPE/打分/top-k/候选，"
+                 "K 缓存仍构建，topk 缓冲写 0..n−1+(−1)（纯 store 0 浮点）；"
+                 "weights_proj 仍执行",
         source_pin=VLLM_PIN,
-        source_location="vllm/models/deepseek_v41/nvidia/model.py（index 路径；"
-                        "v0.1 移植口径 fast path）",
-        branch_predicate="end//r <= index_topk",
-        thresholds="压缩块数 ≤ topk(512) → eager",
-        input_domain="ctx/r ≤ 512（r=2 → ctx ≤ 1024）vs 长上下文",
+        source_location="vllm/models/deepseek_v41/attention.py:1656-1680"
+                        "（DeepseekV4Indexer.forward 旁路分支）、"
+                        "vllm/models/deepseek_v4/attention.py:77-92"
+                        "（fill_short_context_topk_indices）",
+        branch_predicate="indexer_metadata.max_seq_len // compress_ratio <= "
+                         "index_topk_tokens and not "
+                         "torch.cuda.is_current_stream_capturing()",
+        thresholds="batch max_seq_len//r ≤ 512（r=2 → ctx ≤ 1024；r=1 → "
+                   "ctx ≤ 512；均匀批 = end//r）；graph 捕获中不走",
+        input_domain="r∈{1,2} × ctx（含混合：ctx=800 时 r2 层旁路、r1 层"
+                     "全打分）；decode 与 prefill 同谓词",
         both_sides_covered=True,
-        uncovered_domain=["vLLM sparse-logits 启用与否的运行时分支未执行"],
-        note="计数按不假定 sparse-logits 的保守全候选打分（E19）"),
+        uncovered_domain=["CUDA graph 捕获步骤不走旁路（FULL capture 内无"
+                          " host 分支）——本账本按 eager 参考配方",
+                          "vLLM sparse-logits 启用与否的运行时分支未执行"],
+        note="R20 重写（csa2-pin.json）；计数按不假定 sparse-logits 的保守"
+             "全候选打分（E19），index_fill 行 0 flops"),
     SourceMapEntry(
         entry_id="sm-v41-engram-hc",
         model_or_method="deepseek_v41_flash Engram/hc",
@@ -212,23 +223,84 @@ ENTRIES: List[SourceMapEntry] = [
              "算术 op 公式 exact（transcendental=1），norm 惯例 approximated；"
              "source-checked，不能据此解除完整结构/执行门禁"),
     SourceMapEntry(
+        entry_id="sm-v41-csa2-indexer",
+        model_or_method="deepseek_v41_flash CSA2 索引管线",
+        semantic="索引打分/top-k/candidate block 两级过滤 + 压缩器/索引 K："
+                 "kv source [2,8,14,20] 持有 compressor（bf16 权重、FP32 "
+                 "kv_score、ratio2 softmax 门控池化 + 环形 state cap8）与"
+                 "索引 K 缓存（132B/行）；index source [2,8,14,20,24,28,32,36]"
+                 " 打分（全候选 paged MQA logits + 逐头权重折算）后 top-512；"
+                 "候选源 L20 发布 top-2048×8 压缩位块（块最大值 NaN 传播、"
+                 "最新块 +inf），消费层 24/28/32/36 mask 到候选再自有 top-k；"
+                 "SWA/压缩记录 584|528 B/token（显式 v41_kv_record）；decode "
+                 "每 (kv源:索引源:r) 运行首层 combine_topk_swa_indices 一次、"
+                 "等键后继复用；topk/candidate 缓冲为模型级单例",
+        source_pin=VLLM_PIN,
+        source_location="vllm/models/deepseek_v41/attention.py:393-422"
+                        "（层型/源解析）、502-553（indexer 构造与 K 共享）、"
+                        "1440-1714（DeepseekV4Indexer）、181-189（索引 K 记录）；"
+                        "compressor.py:250-343（ring/fused_wkv_wgate）；"
+                        "common/ops/fused_compress_quant_cache.py:136-530"
+                        "（池化/记录写入）；common/ops/indexer_k_store.py:31-266；"
+                        "model_executor/layers/sparse_attn_indexer.py:493-1155"
+                        "（prefill chunk/decode 打分+候选+topk 分支）；"
+                        "kernels/attention/dsa/candidate_blocks.py:31-215"
+                        "（select/apply mask）；layers/indexer_topk.py:264-312"
+                        "（auto 后端链）；nvidia/specialized_decode/attention/"
+                        "indexer.py:91-123（ROW_SHARD_MIN_ROWS=12）、"
+                        "sparse_mla.py:159-250（SparseIndexTables）；"
+                        "common/ops/cache_utils.py:822-896（combine）；"
+                        "nvidia/model.py:780-800（共享缓冲）；"
+                        "config/attention.py:101-150（sparse_logits/logits_dtype）",
+        branch_predicate="produces_index → 打分器存在；compress_ratio>0 非源层"
+                         "复用下方最近源；候选：源层 candidate_write、"
+                         "0≤candidate_source<li 的 index source 才 mask；"
+                         "短上下文见 sm-v41-index-short-branch；"
+                         "indexer_kv_dtype auto→fp8（132B）；kv 记录族由"
+                         "capability family 决定（SM90→584 V4 record，"
+                         "SM100→528 MXFP8；nvfp4 288 仅压缩缓存且需 mega）",
+        thresholds="index_topk=512、candidate_topk_blocks=2048、"
+                   "candidate_block_size=8、index_n_heads=32、index_head_dim=128、"
+                   "swa=128、ROW_SHARD_MIN_ROWS=12、AUTO_COOPERATIVE_MAX_ROWS=64、"
+                   "combine 对齐 256",
+        input_domain="V4.1 主干 40 层（r: L0-1=0、L2-19=2、L20-39=1）；"
+                     "decode B·Q=1 与 prefill 整段；H100/H200（SM90，fp8_ds_mla"
+                     " 584B）默认配方",
+        both_sides_covered=True,
+        uncovered_domain=["kernel/CPU forward/GPU 均未执行（source-checked）",
+                          "SM100 部署变体：sparse-logits 候选池打分（O(候选块)）、"
+                          "decode_topk CuTe BF16 直选、bf16 logits/deep_select、"
+                          "chunk_decode 预算、fused_mqa_topk、MXFP4 索引缓存",
+                          "TP≥2 且 uniform decode ≥12 行的行分片 + topk/候选 "
+                          "all-gather；PCP/DCP 跨片合并；ROCm aiter/XPU",
+                          "CUDA-graph 静态 max_model_len 整宽 logits 缓冲与"
+                          "候选 mask 整宽 -inf 尾写未入账（workspace 池缺口）",
+                          "cooperative 候选 top-k 在值相等边界 bin 为近似选择"
+                          "（≤k/1024 每簇）；选择/整数核 op 为文档化口径",
+                          "稀疏 MLA 注意力核本体（flops 4d+5）仍 v0.1 移植"],
+        note="R20；20 文件 blob SHA1 对 tree + SHA256（csa2-pin.json）；"
+             "count/work.v41_layer_rows + lowering/memory + scenario."
+             "v41_kv_record；默认场景前后差异见 docs/evidence/csa2/"
+             "attribution.json 与 v41-csa2-indexer-20261112.md"),
+    SourceMapEntry(
         entry_id="sm-v41-csa2-moe-unverified",
-        model_or_method="deepseek_v41_flash CSA2/MoE",
-        semantic="CSA2 注意力/投影为 v0.1 移植；MoE sqrtsoftplus/noaux_tc/"
-                 "分组路由未建模；候选块发布/量化未映射",
+        model_or_method="deepseek_v41_flash MoE/量化/注意力核",
+        semantic="MoE sqrtsoftplus/noaux_tc/分组路由未建模；稀疏 MLA 注意力核"
+                 "本体（flops 4d+5、bmm 尺度）仍 v0.1 移植；quantization_config"
+                 " 未映射到计算精度（CSA2 索引管线 R20 已另立 "
+                 "sm-v41-csa2-indexer）",
         source_pin=VLLM_PIN,
         source_location="vllm/models/deepseek_v41/nvidia/model.py:131-200 "
-                        "(DeepseekV4MoE)、204-327（sparse-MLA 选择）、"
-                        "787-800（candidate block buffer）",
-        branch_predicate="config scoring_func=sqrtsoftplus、topk_method=noaux_tc、"
-                         "candidate_topk_blocks=2048",
+                        "(DeepseekV4MoE)、204-327（sparse-MLA 选择）",
+        branch_predicate="config scoring_func=sqrtsoftplus、topk_method=noaux_tc",
         input_domain="V4.1-Flash 全 40 层",
         both_sides_covered=False,
-        uncovered_domain=["CSA2 注意力/投影未独立逐行核（仅 v0.1 同源对账）",
-                          "MoE scoring/top-k/分组路由未消费",
-                          "candidate_publish 容量/时序未建模",
+        uncovered_domain=["MoE scoring/top-k/分组路由未消费",
+                          "稀疏 MLA 注意力核本体未独立逐行核（flops 4d+5 为"
+                          "v0.1 移植口径）",
                           "quantization_config 未映射到计算精度"],
-        note="2026-11-10 审查：这些路径不能因 config 通过而标完整或参与部署排名"),
+        note="2026-11-10 审查、R20 缩窄：索引/候选路径已解除；剩余路径不能因"
+             " config 通过而标完整或参与部署排名"),
     SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",

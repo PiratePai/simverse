@@ -8,7 +8,9 @@
 - [x] ModelIR、计数/成本/执行分层，CLI/Web/导出共用结果。
 - [x] Qwen3.6+DFlash 解析实验、DT 串行及初步微批流水。
 - [x] V4.1 部分结构及 mHC 边界计数；Engram 单副本路径已 source-checked 建模
-  （R04，2026-11-11；DP 分片交换/cpu_offload 运行时行为未覆盖，见 B 组表）。
+  （R04，2026-11-11；DP 分片交换/cpu_offload 运行时行为未覆盖，见 B 组表）；
+  CSA2 索引打分/top-k/candidate block 已 source-checked 建模
+  （R20，2026-11-12；注意力核本体/部署变体仍缺，见 B 组表）。
 - [x] 历史 H200 部分算子校准、来源与覆盖域门禁；不代表重点模型实测。
 - [x] A 组（2026-11-10）：TP/EP per-rank 统一配方、同卡对象身份账本、
   生命周期峰值分列、预算契约与可部署性四态判定链路（见 A 组表；真实
@@ -54,6 +56,7 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 |---|---|---|
 | R04 | ✅ 完成（单副本路径，2026-11-11）：common/engram.py pin（vllm @f358f057，blob sha1 对 vllm-tree.json 校验）→ 素数桶表布局/批级哈希/查表/wkv/门控四行入 count、表/wkv/qk/staged 对象入 memory（表默认 cpu_offload 研究假设，显式 engram_table_placement 输入）、TP 通信行；独立 oracle tests/test_v41_engram.py 24 项（层桶和 == engram_num_embeddings 精确相等；PR #3 合入后复核修正 rank 局部查表与固定 BF16 字节）。证据 ev-vllm-v41-engram；[报告](docs/validation/v41-engram-20261111.md)。**剩余（未完）**：DP 分片交换（all-to-all/peer/symmetric memory）与 EngramBatch MXFP8 路径、cpu_offload 运行时行为、amd 变体；host 查表时延 unknown，M01 仅 GPU 侧下界 | Engram 源码（已 pin）；不依赖 Qwen 或设备扩展 |
 | R05 | **已完成 2026-11-12**：14 kernel 文件 blob/SHA256 pin；prenorm/comb post/Sinkhorn 1400 op 修正、首层特例与出口两行、broadcast 派生容量；精确算术与 norm 惯例近似分列，独立 oracle + 前后 replay。[报告](docs/validation/v41-mhc-kernels-20261112.md) | source-checked；CPU/GPU 未执行，split/部署变体与物理流量仍缺 |
+| R20 | **已完成 2026-11-12**：CSA2 索引打分/top-k/candidate block——csa2-pin.json 20 文件 pin（blob sha1 对 vllm-tree.json）；index_select 拆分 score/topk、candidate select/mask 两级过滤（源 L20 发布 top-2048×8 块、消费层 24/28/32/36 mask）、短上下文旁路（fill 0 flops）、compressor 池化/环形 state、索引 K 132B/行、打包记录 584/528 B/token（显式 v41_kv_record）、bf16 固定权重、共享缓冲下界、sparse_index_build 运行首层一次；独立 oracle 20 项（tests/test_v41_csa2.py）+ 前后 replay 逐 op 归因。证据 ev-vllm-v41-csa2；[报告](docs/validation/v41-csa2-indexer-20261112.md)。**剩余**：注意力核本体（4d+5 移植口径）、SM100 sparse-logits/decode_topk CuTe/行分片等部署变体、CUDA-graph 静态整宽 logits 尾写、MoE scoring/量化映射/MTP 尾部不变 | source-checked；kernel/CPU forward/GPU 未执行；structure_complete 仍 False，部署排名资格不因本模块解除 |
 
 各模块分别解除自己的缺口；整个模型的结构资格需全部相关缺口闭环，不能以一个模块通过代表整体通过。
 

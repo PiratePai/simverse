@@ -334,6 +334,37 @@ def engram_staged_allocations(engram_spec: dict, tp: int, tokens: int,
     return allocs
 
 
+def v41_index_buffer_allocations(kv_spec: dict, tokens: int,
+                                 role: str = "target") -> List[Allocation]:
+    """V4.1 共享索引/候选缓冲下界（R20；跨轮常驻，模型级单例）。
+
+    topk_indices_buffer [max_num_batched_tokens, index_topk] int32 与
+    candidate_block_buffer [max_num_batched_tokens, candidate_topk_blocks]
+    int32（nvidia/model.py L781-800）按运行时常数 max_num_batched_tokens
+    一次性分配（graph 重放地址稳定）——常数未 pin，按场景 tokens 给下界。
+    两个缓冲**全模型一份**（所有 index source 层复写/共享），不乘层数。
+    """
+    if tokens <= 0:
+        return []
+    topk = int(kv_spec["index_topk"])
+    allocs = [Allocation(
+        f"{role}-t-v41-topk-buffer", "transient", role, int(tokens * topk * 4),
+        lifecycle="cross-round",
+        live_note=f"topk_indices_buffer [tokens,{topk}] int32 下界"
+                  "（模型级单例；实际按 max_num_batched_tokens 分配，"
+                  "L781-785 运行时常数未 pin）")]
+    ctb = int(kv_spec.get("candidate_topk_blocks", 0) or 0)
+    cand_src = int(kv_spec.get("candidate_source_layer_id", -1))
+    if cand_src >= 0 and ctb > 0:
+        allocs.append(Allocation(
+            f"{role}-t-v41-candidate-buffer", "transient", role,
+            int(tokens * ctb * 4), lifecycle="cross-round",
+            live_note=f"candidate_block_buffer [tokens,{ctb}] int32 下界"
+                      "（仅 candidate source 写、>源层 index source 读；"
+                      "L793-798 运行时常数未 pin）"))
+    return allocs
+
+
 def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                               role: str = "target", ep: int = 1, rank: int = 0,
                               plan=None,
@@ -400,10 +431,17 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             dense_b += (kvs["heads"] * d // kvs["o_groups"]) * orank * ng * b_dense
             dense_b += ng * orank * model.hidden * b_dense        # o_b（组切分）
             if a.produces_kv:
-                dense_b += model.hidden * d * mlt * b_dense       # compress_proj
-                dense_b += d * di * b_dense                       # index_k_proj
+                # R20：compressor fused_wkv_wgate 与 indexer wk 均为
+                # quant_config=None 的 replicated bf16 权重（compressor.py
+                # L321-332、attention.py L1508-1517），不随场景 dense_w 缩放
+                dense_b += model.hidden * d * mlt * 2             # compress_proj
+                dense_b += d * di * 2                             # index_k_proj
+                # k_norm [128] / norm [512] bf16（RMSNorm 参数）
+                dense_b += (d + di) * 2
             if a.produces_index:
-                dense_b += (model.hidden * ih + qrank * ih * di) * b_dense
+                # weights_proj h→ih replicated bf16（quant_config=None，
+                # attention.py L1484-1490）；wq_b q_lora→ih·di 走 quant_config
+                dense_b += model.hidden * ih * 2 + qrank * ih * di * b_dense
         hc_spec = (model.extras or {}).get("hc") if fam == "v41_csa2" else None
         if hc_spec and layer.kind == "mla_csa2":
             # mHC 权重（FP32，每卡复制不随 TP 缩放：全宽流 + torch.empty 全宽参数，
@@ -484,7 +522,8 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
 
 
 def kv_allocations(model: ModelIR, quant: dict, batch: int, ctx: int,
-                   role: str = "target", tp: int = 1) -> List[Allocation]:
+                   role: str = "target", tp: int = 1,
+                   v41_kv_record: str = "fp8_ds_mla_sm90") -> List[Allocation]:
     """KV/常数状态驻留（每请求；batch×ctx；per-rank 分片口径）。
 
     GQA/SLIDING：KV 头按 plan 切分（kvh<tp 时每 rank 复制全量 = kv_rank
@@ -504,20 +543,30 @@ def kv_allocations(model: ModelIR, quant: dict, batch: int, ctx: int,
                                      lifecycle="per-request",
                                      live_note="随 ctx 增长（MLA 压缩 KV 复制）"))
         else:
-            d, di = spec["head_dim"], spec["index_head_dim"]
+            # R20：按打包记录宽度计（显式 v41_kv_record 配方；pinned
+            # attention.py L583-589/L181-189）——SWA/压缩 584|528 B/token、
+            # 索引 K 132 B/行；ratio2 环形 state 为每请求 capacity(8) 行
+            # ×1024 B fp32（compressor.py L250-252），非每 token 常数。
+            from ..scenario import V41_INDEX_K_BYTES, V41_KV_RECORDS, \
+                V41_RING_CAPACITY
+            rec = V41_KV_RECORDS[v41_kv_record]
+            swa_rec, comp_rec = rec["swa_bytes"], rec["compressed_bytes"]
             swa, r_set = spec["sliding_window"], spec["compress_ratios"]
             total = 0
             for i, layer in enumerate(model.layers):
                 r = r_set[i]
-                total += min(ctx, swa) * d
+                total += min(ctx, swa) * swa_rec
                 csa = layer.csa2
                 if csa.produces_kv:
-                    total += (ctx // r) * d + (ctx // r) * di
+                    total += (ctx // r) * comp_rec + (ctx // r) * V41_INDEX_K_BYTES
                     if r > 1:
-                        total += 2 * d * 4
-            allocs.append(Allocation(f"{role}-kv", "kv", role, int(total * b_kv) * batch,
+                        total += V41_RING_CAPACITY * 2 * spec["head_dim"] * 4
+            allocs.append(Allocation(f"{role}-kv", "kv", role, int(total) * batch,
                                      lifecycle="per-request",
-                                     live_note="SWA 封顶+压缩潜层（Engram/hc 状态缺口）"))
+                                     live_note=f"SWA 封顶 {swa_rec}B/token + "
+                                     f"压缩 {comp_rec}/索引 {V41_INDEX_K_BYTES}B"
+                                     f"（{v41_kv_record}）+ ratio2 环形 state "
+                                     f"{V41_RING_CAPACITY}×1024B/请求/层"))
     else:
         elems = 0
         for l in model.layers:
@@ -730,7 +779,8 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                           draft_ctx_kv_path: str = "unknown",
                           engram_table_placement: str =
                           ENGRAM_PLACEMENT_CPU_OFFLOAD,
-                          engram_tokens: int = 0) -> RankMemory:
+                          engram_tokens: int = 0,
+                          v41_kv_record: str = "fp8_ds_mla_sm90") -> RankMemory:
     """同卡混部 per-rank 账本（R02a/R02b）。
 
     草稿与 target 同 TP 组（vLLM pin）；embed/lm_head 为 target 的物理
@@ -757,7 +807,15 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                                            role="target"):
             a.consumers = ["target"]
             rank_mem.add(a)
-    for a in kv_allocations(model, quant, batch, ctx, role="target", tp=tp):
+    # R20：V4.1 共享 topk/候选缓冲下界（模型级单例，仅 v41_csa2）
+    kv_spec = (model.extras or {}).get("kv_spec")
+    if kv_spec and kv_spec.get("family") == "v41_csa2" and engram_tokens > 0:
+        for a in v41_index_buffer_allocations(kv_spec, engram_tokens,
+                                              role="target"):
+            a.consumers = ["target"]
+            rank_mem.add(a)
+    for a in kv_allocations(model, quant, batch, ctx, role="target", tp=tp,
+                            v41_kv_record=v41_kv_record):
         a.consumers = ["target"]
         rank_mem.add(a)
     if draft_ir is not None:

@@ -3,7 +3,8 @@
 与 [数据缺口清单](data-gaps.md) 分开维护：本页只列**工程实现**缺口（不依赖新数据，
 或先有实现才能消费数据）。每项含：影响面/缺什么/旧仓为何不足/需要什么实现/
 验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
-新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）。
+新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）；
+2026-11-12 更新（R20：G-C12 CSA2 索引打分/top-k/candidate block 解除）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 
@@ -31,12 +32,43 @@
   symmetric memory/DPSharedEngramStorage）与 EngramBatch MXFP8 打包路径未建模
   （本仓默认单副本路径不启用，登记未覆盖）；cpu_offload 运行时行为（预取流/
   TLB/GB200 排序阈值 36864/4096）未建模；amd/engram.py 变体未 pin；mhc
-  kernel/CPU/GPU 执行、实际 split-k 与部署变体未验证（源码已由 R05 pin 入册）。CSA2/MoE scoring、量化映射、swiglu clamp、
-  candidate block、compress_ratios 尾部为独立缺口（不在 G-C1 内）。
+  kernel/CPU/GPU 执行、实际 split-k 与部署变体未验证（源码已由 R05 pin 入册）。
+  CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE scoring、
+  量化映射、swiglu clamp、稀疏 MLA 注意力核本体、compress_ratios 尾部仍为
+  独立缺口。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
   mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需 CSA2/MoE/量化缺口闭环。
 - **当前降级**：structure gate 拦截（capability 可见；Engram 单机/hc 部分已不再缺）。
 - **优先级**：P0（必需模型场景）。
+
+## G-C12 ~~V4.1 CSA2 索引打分/top-k/candidate block~~ → 已解除（2026-11-12 R20）⭐P0
+
+- **解除交付**：csa2-pin.json 20 文件 pin（vllm @f358f057，blob sha1 对
+  vllm-tree.json 逐项校验；其中 12 文件为任务书预置、8 文件网络拉取后同验）。
+  count：index_select 拆为 index_score（2·pairs·(ih·di+ih) + fp32 logits）与
+  index_topk（2·pairs+T·topk 选择惯例）；candidate_publish → candidate_select
+  （源层 20：top-2048×8 压缩位块，块最大值 NaN 传播、最新块 +inf 钉扎、−1
+  填充）+ candidate_mask（消费层 24/28/32/36 mask 后自有 top-k）；短上下文
+  旁路 end//r≤512 走 index_fill（0 flops 纯 store，修正旧式 T·topk 误计）；
+  compress_pool（r2 softmax 门控 7d+9/group + 环形 state cap8×1024B fp32/请求/
+  层，r1 纯 norm exact）；compressed_insert / index_k_store（132B/行）合并行；
+  sparse_index_build（decode 每 (kv源:索引源:r) 等键运行首层一次）。memory：
+  SWA/压缩缓存按打包记录 584|528 B/token（显式 v41_kv_record 场景配方，进
+  身份）、索引 K 132B、ratio2 环形 state、compressor/wk/weights_proj bf16
+  固定权重、topk/candidate 共享缓冲下界（模型级单例）。
+- **验收**：tests/test_v41_csa2.py 20 项——pin 完整性、拓扑/运行首层/candidate
+  所有权独立推导、短上下文两侧分支（含混合 ctx=800：r2 旁路 r1 全打分）、
+  decode/prefill 打分独立复算、select/mask/fill stdlib 独立语义（NaN 排序
+  最前、钉扎、-1/-inf、候选含 -1 不掩块负例）、记录宽度/环形/缓冲对账、
+  bf16 权重不随 dense_w 缩放、config 域负例 4 项、replay 冻结。
+  证据 ev-vllm-v41-csa2（source-checked，executed=False）。
+- **仍缺（登记不冒充）**：稀疏 MLA 注意力核本体（flops 4d+5 仍 v0.1 移植）；
+  SM100 sparse-logits（消费层只打分候选块，O(候选) 而非全候选）、decode_topk
+  CuTe BF16 直选、bf16 logits/deep_select、chunk_decode 预算、fused_mqa_topk、
+  MXFP4 索引缓存(68B)；TP≥2 uniform decode ≥12 行的行分片+all-gather、
+  PCP/DCP、ROCm/XPU；CUDA-graph 静态 max_model_len 整宽 logits 缓冲与候选
+  mask 整宽 -inf 尾写（workspace 池缺口）；cooperative 候选值相等边界近似。
+  kernel/CPU forward/GPU 均未执行。
 
 ## G-C2 verify/prefill 形状域建模 + 蒸馏扩展（消费 G-D4）
 

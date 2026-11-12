@@ -14,15 +14,18 @@ from .legacy import DeviceSpec, roofline_ms
 # 算子 → 计价精度路由（显式表；gemm 看 dense_w 位宽，元素/注意力核看 act）
 _ELEMENTWISE = {
     "q_norm", "k_norm", "rope", "q_rope", "k_rope", "o_rope", "attn_norm",
-    "mlp_norm", "attn_add", "mlp_add", "compress_norm", "compressed_rope",
-    "index_k_norm", "index_k_rope", "index_q_rope", "swa_cache_write",
-    "compressed_cache_write", "index_cache_write", "index_select",
-    "candidate_publish", "embed_lookup", "attention_core", "sparse_attention",
+    "mlp_norm", "attn_add", "mlp_add", "swa_cache_write",
+    "embed_lookup", "attention_core", "sparse_attention",
     "mla_absorbed_core", "causal_conv1d", "gdn_recurrence", "v_norm_gated",
     "q_a_norm", "draft_kv_scan", "shared_gate",
     # Engram 非 GEMM 算子（R04）：哈希/查表 dequant/门控核按 act 位宽计价
     #（engram_wkv 是 GEMM，走 dense_w 路由）
     "engram_hash", "engram_lookup", "engram_post_wkv",
+    # CSA2 索引/压缩非 GEMM 算子（R20；index_score 是 DeepGEMM MQA logits，
+    # 走 dense_w 路由；index_q_proj/weights_proj/k_proj/compress_proj 同 GEMM）
+    "compress_pool", "compressed_insert", "index_k_store", "index_q_rope",
+    "index_topk", "index_fill", "candidate_select", "candidate_mask",
+    "sparse_index_build",
 }
 
 

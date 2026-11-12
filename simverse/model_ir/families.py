@@ -113,6 +113,49 @@ _ENGRAM_KEY_NOTES = {
         "参与哈希语义",
 }
 
+# R20（2026-11-12）：CSA2 索引打分/top-k/candidate block 键的 mapped 注记
+# （证据 csa2-pin.json 20 文件 + ev-vllm-v41-csa2；消费者
+# count/work.v41_layer_rows、lowering/memory、scenario.v41_kv_record）。
+_CSA2_KEY_NOTES = {
+    "index_topk":
+        "mapped：每 index source 层选 top-512 压缩 token（attention.py L190/"
+        "L1463；topk_indices_buffer [max_num_batched_tokens,512] int32，"
+        "nvidia/model.py L781-785）；短上下文 ctx//r≤512 走 eager 全选旁路"
+        "（attention.py L1656-1680）",
+    "index_n_heads":
+        "mapped：indexer MQA 头数 32（attention.py L1464）；wq_b q_lora→"
+        "4096 replicated、weights_proj h→32 replicated bf16（quant_config=None，"
+        "L1477-1490）",
+    "index_head_dim":
+        "mapped：索引头宽 128；K 记录 FP8 128B+4B scale=132B/行"
+        "（attention.py L181-189；indexer_kv_dtype auto→fp8）",
+    "index_source_layer_ids":
+        "mapped：[2,8,14,20,24,28,32,36] 拥有 indexer；非持有层复用下方最近"
+        "源的 topk（attention.py L393-422/L502-553）；K 缓存仅 kv source 持有、"
+        "其余共享（L504-530）",
+    "kv_source_layer_ids":
+        "mapped：[2,8,14,20] 持有 compressor+压缩 KV+indexer K（attention.py"
+        " L404/L508-517/L654-664）；消费者经 forward_context 读源层缓存"
+        "（L667-682）",
+    "candidate_source_layer_id":
+        "mapped：层 20 的 indexer 发布候选块（candidate_write，attention.py"
+        " L531-553；select_candidate_blocks 每 8 压缩位一块、最新块钉 +inf，"
+        "candidate_blocks.py L168-215）",
+    "candidate_topk_blocks":
+        "mapped：候选块缓冲 [max_num_batched_tokens,2048] int32（nvidia/"
+        "model.py L793-798）；消费层（>20 的 index source）打分后先 mask 到"
+        "候选块再自有 top-k（sparse_attn_indexer.py L895-911/L1141-1153）",
+    "candidate_block_size":
+        "mapped：块粒度 8 压缩位（config；select/apply_candidate_mask 的 "
+        "BLOCK_SIZE，candidate_blocks.py L51/L160-163）",
+    "sliding_window":
+        "mapped：SWA 窗 128（attention.py L373；SWA 记录 584/528 B/token 见"
+        " scenario.v41_kv_record）",
+    "compress_ratios":
+        "mapped（主干 40 项）：0=纯 SWA、1=全压缩、2=2:1 池化（sparse_mla.py"
+        " L34-43；compressor.py L295-310 ratio1 无门控）；MTP 尾部另列缺口",
+}
+
 
 def _is_prime(n: int) -> bool:
     """确定性 Miller-Rabin（n < 2**32 有效；基 {2,7,61}）。
@@ -561,7 +604,12 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     （count/work.engram_rows + lowering/memory engram 表/wkv/qk 对象）；
     表布局 FP8+E8M0 264B/行、素数桶、TP head 切分、wkv/qk 投影与门控注入
     语义见 extras["engram"]。
-    CSA2/MoE scoring、量化映射、swiglu clamp、candidate block、尾部
+    CSA2 索引打分/top-k/candidate block：2026-11-12 R20 按 20 文件 pin
+    （csa2-pin.json，vllm @f358f057，blob sha1 对 vllm-tree.json 逐项校验）
+    source-checked 建模 → mapped（count/work.v41_layer_rows + lowering/
+    memory 记录/环形状态/缓冲对象；公式 v2.csa2_*；短上下文旁路、
+    prefill/decode 分支、candidate 所有权见 source_map sm-v41-csa2-indexer）。
+    MoE scoring、量化映射、swiglu clamp、注意力核本体、尾部
     compress_ratios 仍为显式缺口 → gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
@@ -580,6 +628,23 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         raise ValueError("缓存源层必须递增不重复")
     if not set(kv_ids).issubset(ix_ids) or any(ratios[i] == 0 for i in set(kv_ids) | set(ix_ids)):
         raise ValueError("压缩 KV 源层必须同时产生索引 K，源层不能是纯 SWA")
+    # R20：candidate 两级过滤的 config 域不变式（pinned attention.py
+    # L399-400/L531-553：candidate buffer 只发给 candidate source 与其后的
+    # index source；候选 block id 是源层压缩位置空间的块号，消费层与源层
+    # 压缩比不同则坐标失配——vLLM 未显式断言，按 config 域拒绝）。
+    ctb = int(tc.get("candidate_topk_blocks", 0) or 0)
+    cb = int(tc.get("candidate_block_size", 0) or 0)
+    if candidate >= 0:
+        if candidate not in ix_ids:
+            raise ValueError("candidate_source_layer_id 必须是 index source 层")
+        if ctb <= 0 or cb <= 0:
+            raise ValueError("candidate_source_layer_id >= 0 要求 "
+                             "candidate_topk_blocks/candidate_block_size > 0")
+        for i in ix_ids:
+            if candidate < i and ratios[i] != ratios[candidate]:
+                raise ValueError(
+                    f"candidate 消费层 {i} 压缩比 {ratios[i]} 与源层 "
+                    f"{ratios[candidate]} 不同：候选块坐标空间失配")
     moe = MoeIR(experts=tc["n_routed_experts"], top_k=tc["num_experts_per_tok"],
                 intermediate=tc["moe_intermediate_size"],
                 shared_intermediate=(tc.get("n_shared_experts") or 0)
@@ -606,8 +671,6 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     gaps_hint = {
         "swiglu_limit": "SwiGLU clamp（10.0）未进入本仓 MLP 计数/数值语义；"
                         "不冒充已消费",
-        "candidate_block_size": "候选 block 缓冲粒度未进入 candidate_publish/"
-                                "容量建模；不冒充已消费",
     }
     # hc_* / engram_* 8 键 → mapped（hc：count/work.hc_boundary_rows +
     # lowering/memory hc 权重，vllm model.py pin @f358f057 source-checked
@@ -617,6 +680,13 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                                 full_config=full_config, text_prefix=text_prefix)
     # Engram 8 键的 mapped 注记逐键替换为行号证据（默认 struct 注记过于笼统）
     for key, note in _ENGRAM_KEY_NOTES.items():
+        path = f"{text_prefix}.{key}" if text_prefix else key
+        if path in coverage and coverage[path]["status"] == "mapped":
+            coverage[path] = {"status": "mapped", "consumer": "model_ir+count+memory",
+                              "note": note}
+    # R20：CSA2 索引/candidate 键的 mapped 注记（同上替换；20 文件 pin
+    # csa2-pin.json，source-checked 2026-11-12）
+    for key, note in _CSA2_KEY_NOTES.items():
         path = f"{text_prefix}.{key}" if text_prefix else key
         if path in coverage and coverage[path]["status"] == "mapped":
             coverage[path] = {"status": "mapped", "consumer": "model_ir+count+memory",
@@ -686,6 +756,8 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             "index_heads": tc["index_n_heads"],
             "index_topk": tc["index_topk"],
             "candidate_topk_blocks": tc["candidate_topk_blocks"],
+            "candidate_block_size": int(tc.get("candidate_block_size", 0) or 0),
+            "candidate_source_layer_id": int(candidate),
             "sliding_window": tc["sliding_window"],
             "compress_ratios": ratios,
             "kv_source_layer_ids": kv_ids,

@@ -22,6 +22,30 @@ DEPLOY_MODES = ("baseline", "colocated", "dt_serial", "dt_pipeline_sim")
 
 BUDGET_KINDS = ("measured", "hypothesis", "unknown")
 
+# R20（2026-11-12）：V4.1 打包 KV 记录宽度（显式配方，不随场景 kv 位宽缩放；
+# pinned attention.py L583-589：fp8_ds_mla 记录在 SM90 走 V4 record
+# 448 fp8 + 64 bf16 rope + 7×ue8m0 + pad = 584 B/token，SM100 走 V4.1
+# MXFP8 record 512 + 16×ue8m0(32dim) = 528 B/token；nvfp4_ds_mla 仅压缩
+# 缓存 256 e2m1 + 32 e4m3(16dim) = 288 B（SWA 仍 528，且需 SM100 mega
+# kernel）。logits 元宽：indexer_logits_dtype auto → SM90 fp32 / SM100
+# bf16（config/attention.py L143-150）。本仓注册设备 H100/H200 均为
+# capability family 9.0 → 默认 fp8_ds_mla_sm90。索引 K 记录固定 FP8
+# 132 B/行（attention.py L181-189；indexer_kv_dtype auto→fp8，MXFP4 68 B
+# 为显式引擎 opt-in 变体，未建模）。
+V41_KV_RECORDS = {
+    "fp8_ds_mla_sm90": {"swa_bytes": 584, "compressed_bytes": 584,
+                        "logits_itemsize": 4},
+    "fp8_ds_mla_sm100": {"swa_bytes": 528, "compressed_bytes": 528,
+                         "logits_itemsize": 2},
+    "nvfp4_ds_mla_sm100": {"swa_bytes": 528, "compressed_bytes": 288,
+                           "logits_itemsize": 2},
+}
+V41_INDEX_K_BYTES = 132
+# V4.1 压缩器 ratio-2 环形状态：每请求 capacity 行 × 1024 B fp32
+# （2×512 kv+score）；capacity = max(8, next_pow2(num_spec+2))
+# （compressor.py L250-252；无投机 = 8）。
+V41_RING_CAPACITY = 8
+
 
 @dataclass
 class WorkloadHypothesis:
@@ -102,6 +126,10 @@ class DeploymentSpec:
     # 101.4 GiB/层客观不可驻留单卡 GPU——不证明实际部署配置）。仅影响带
     # Engram 层的模型（deepseek_v41_flash），其他模型该字段不被消费。
     engram_table_placement: str = "cpu_offload"
+    # R20（2026-11-12）：V4.1 打包 KV/压缩缓存记录宽度（显式配方；证据
+    # pinned attention.py L583-589 + scenario.V41_KV_RECORDS 注记）。仅影响
+    # deepseek_v41_flash；进场景身份（同 engram_table_placement 先例）。
+    v41_kv_record: str = "fp8_ds_mla_sm90"
 
 
 @dataclass
@@ -179,6 +207,14 @@ class ScenarioV2:
                 f"engram_table_placement={dep.engram_table_placement!r} 非法："
                 f"必须 ∈ {ENGRAM_TABLE_PLACEMENTS}（默认 cpu_offload 为研究"
                 "假设配方；gpu 驻留 101.4 GiB/层需显式选择）")
+        # R20：V4.1 KV 记录宽度是显式配方输入（镜像 engram placement 的
+        # 拒绝模式；默认 sm90 来自注册设备 H100/H200 的 capability family，
+        #不是从场景 kv 位宽推出来的）
+        if dep.v41_kv_record not in V41_KV_RECORDS:
+            raise ValueError(
+                f"v41_kv_record={dep.v41_kv_record!r} 非法：必须 ∈ "
+                f"{sorted(V41_KV_RECORDS)}（pinned attention.py L583-589；"
+                "记录宽度不随场景 kv 位宽缩放）")
         # 一致性护栏（不是用位宽选分支）：raw 融合副本要求未量化权重；
         # 4bit 计价档与 fused_raw 矛盾，必须显式改为 per_layer_fallback。
         if path == FUSED_RAW and (self.draft_quant or {}).get("dense_w", 16) < 8:
