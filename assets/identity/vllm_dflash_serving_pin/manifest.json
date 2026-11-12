@@ -1,0 +1,38 @@
+{
+ "repo": "vllm-project/vllm",
+ "sha": "dc74b8cbbbe3dbb9399fe369757d63defd614cc2",
+ "fetched_at": "2026-11-12",
+ "fetch_method": "GitHub raw 固定 commit（与 vllm_qwen35_pin 同一 SHA；LF 归一后 SHA256）",
+ "files": {
+  "dflash_speculator.py": "f3f93c761deec253d4bb1edc6ae8368f683c7d211f79100da8acb0407c9ae075",
+  "base_speculator.py": "cf22efc7ec8a9bd3eeebbdc5791d997871094069fae06928857e8b5924155159",
+  "cudagraph.py": "fcc3d81b1a9d84f684f9738c5b94210f53ed54aa802026561b2fd147f5f9c0ad",
+  "config.py": "16831d88d1b7b5810bf382d8c7e656098a7781ed0346bfb8af992ab574fe313d",
+  "eagle3_utils.py": "5a4e56df6bf9cfd9b5706f6bef5016076fb2817d622a304f1350debb9e8338b1",
+  "rejection_sampler.py": "11e02589b3d7c0cc7e765b90d22e624e20fa36a1abe1f6de872ec03a1b8fd49c",
+  "rejection_sampler_utils.py": "e17902b19d3353fba93eacb2d45aab0dd9729c5656d1bb2e3e53a485b2da4df0",
+  "speculative_config.py": "5fa656fdcacba3f2e081634268ac412b4e8a8da39c7cf9f8481b0e437269c1c5",
+  "test_dflash.py": "dffad86effbe68d14745af1430fe4220075fa34f4b5acfd67411d8c119d2a22e",
+  "test_dflash_causality.py": "afde5b06daf45f7d770f0bf27167d1f68c6b442e82cd41d26220343ff3b007cf",
+  "test_dflash_lookahead.py": "4ba7c9dd49164e92a0f41ce3348e679040d75d61c70b26b6599ab6ae638eac9b",
+  "test_dflash_prepare_inputs.py": "4ae1bbafd90d463fc0a84f2e1e260b846ae422dd56fa5704818bd7a5bb059816",
+  "test_draft_model.py": "53d60690be9d11f9a43df36a7b4b4a62aa8dc8f4f34768166827a55b66cf0120"
+ },
+ "paths": {
+  "dflash_speculator.py": "vllm/v1/worker/gpu/spec_decode/dflash/speculator.py",
+  "base_speculator.py": "vllm/v1/worker/gpu/spec_decode/speculator.py",
+  "cudagraph.py": "vllm/v1/worker/gpu/spec_decode/dflash/cudagraph.py",
+  "config.py": "vllm/v1/worker/gpu/spec_decode/dflash/config.py",
+  "eagle3_utils.py": "vllm/v1/worker/gpu/spec_decode/eagle/eagle3_utils.py",
+  "rejection_sampler.py": "vllm/v1/worker/gpu/spec_decode/rejection_sampler.py",
+  "rejection_sampler_utils.py": "vllm/v1/worker/gpu/spec_decode/rejection_sampler_utils.py",
+  "speculative_config.py": "vllm/config/speculative.py",
+  "test_dflash.py": "tests/v1/e2e/spec_decode/acceptance_rates/dflash/test_dflash.py",
+  "test_dflash_causality.py": "tests/v1/spec_decode/test_dflash_causality.py",
+  "test_dflash_lookahead.py": "tests/v1/spec_decode/test_dflash_lookahead.py",
+  "test_dflash_prepare_inputs.py": "tests/v1/spec_decode/test_dflash_prepare_inputs.py",
+  "test_draft_model.py": "tests/v1/e2e/spec_decode/draft_model/test_draft_model.py"
+ },
+ "purpose": "R07a DFlash 服务栈审计（vLLM 侧）：proposer 调度/hidden 传递/ctx-KV 跨度/拒绝采样/通信路径/计时边界；source-checked，非执行",
+ "note": "dflash_speculator.py 与既有 vllm_qwen35_pin/dflash_speculator.py 同源（SHA f3f93c76…）"
+}

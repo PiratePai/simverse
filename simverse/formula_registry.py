@@ -41,6 +41,10 @@ F_RESIDUAL = _f("v2.residual", "FLOPs = T·h（残差逐元素加法不因融合
                 "E09 纠正：逻辑算量保留", "残差分支")
 F_KV_RW = _f("v2.kv_rw", "kv_read/write = rows·(2·H_kv·d)·B_kv（GQA 族）",
              "原理 §3：每 token 每层 KV 元素 2·H_kv·d", "GQA/SLIDING 层")
+F_KV_LAYOUT = _f("v2.kv_layout_copy",
+                 "act_read/write = span·L·2·H_kv·d·B_act（读+写）",
+                 "R07a：vLLM _project_context_kv 的 "
+                 "permute(2,1,0,3,4).contiguous()", "DFlash ctx K/V 布局拷贝")
 F_GDN_STATE = _f("v2.gdn_state",
                  "state_elems = N_v·d_k·d_v；conv = (2K+V)·(kernel−1)（每请求常数）",
                  "hf modeling_qwen3_5_moe Qwen3_5MoeGatedDeltaNet", "GDN linear 层")

@@ -326,7 +326,12 @@ def test_g10_evidence_levels_separated_and_not_overclaimed():
     assert d.config_coverage_complete
     assert d.evidence.cpu_forward == "not-run"
     assert d.evidence.gpu_measurement == "none"
-    assert any("serving_integration" in p for p in d.evidence.unverified_paths)
+    # R07a（2026-11-12）：serving_integration 已 source-checked（双栈逐行核对），
+    # 从 unverified_paths 移入 checked_paths；仍未核的是 served 实测/运行时池，
+    # 不能因源码核对把部署实测写成已核。
+    assert "sm-vllm-dflash-serving" in d.evidence.checked_paths
+    assert any("served_deployment" in p for p in d.evidence.unverified_paths)
+    assert not any("双栈已逐行核对" in p for p in d.evidence.unverified_paths)
     # 未执行/未实测不得被写成 executed/measured
     for item in (q, v, d):
         assert item.evidence.cpu_forward != "cpu-executed"

@@ -257,10 +257,13 @@ def test_fused_ctx_kv_path_and_k_norm_stack():
 
 
 def test_transient_ctx_and_aux_hidden():
-    """二轮审计补齐的结构化临时（pinned 形状）：
+    """二轮审计补齐的结构化临时（pinned 形状；R07a 2026-11-12 跨度基）：
 
-    phase:draft += ctx 归一副本 B·E[N]·h + 融合 ctx-KV 输出
-    B·E[N]·L·2·kvh_rank·d（qwen3_dflash.py L665/L680）；
+    phase:draft += ctx 归一副本 B·blk·h + 融合 ctx-KV flat 输出
+    B·blk·L·2·kvh_rank·d → permute/contiguous 输出同尺寸 + ctx K norm 输出
+    B·blk·L·kvh_rank·d（qwen3_dflash.py L665/L680/L742；两栈对整 verify
+    跨度物化，被拒行只是不落缓存）；t-draft-buffers 取已知并存组 max
+    （lower bound），不是全缓冲相加；
     phase:verify += aux hidden B·blk·n_feat·h（speculator _store_hidden_states，
     [:produced] 截断前全块行）。手算与账本逐项对账。
     """
@@ -275,12 +278,23 @@ def test_transient_ctx_and_aux_hidden():
                                    m.vocab // tp, ctx_kv_path="fused_raw")
     draft = next(a for a in allocs if a.alloc_id == "t-draft-buffers")
     n_feat = len(d.target_layer_ids)
-    normed = int(B * e_n * h * 1)
-    fused_out = int(B * e_n * 6 * 2 * kv_rank * a0.head_dim * 1)
+    span = int(B * blk)                       # R07a：verify 跨度基
+    normed = int(span * h * 1)
+    flat = int(span * 6 * 2 * kv_rank * a0.head_dim * 1)
+    fused_out = int(span * 6 * 2 * kv_rank * a0.head_dim * 1)
+    k_normed = int(span * 6 * kv_rank * a0.head_dim * 1)
     noise = int(B * blk * h * 1)
-    fc_in = int(B * e_n * 8 * h * 1)
-    logits = int(B * blk * (m.vocab // tp) * 4)
-    assert draft.bytes == noise + fc_in + normed + fused_out + logits
+    fc_in = int(span * 8 * h * 1)
+    logits = int(B * (blk - 1) * (m.vocab // tp) * 4)   # 仅 blk−1 候选
+    # 生命周期下界：ctx 物化按 pinned vLLM 顺序取“已知并存组”的 max，
+    # 不是 flat+contiguous+K norm 三者相加；noise/logits 也不与 ctx 并活。
+    ctx_peak = max(normed + flat, flat + fused_out,
+                   fused_out + k_normed)
+    expected = max(fc_in, noise, logits, ctx_peak)
+    assert draft.bytes == expected
+    assert draft.bytes < (noise + fc_in + normed + flat + fused_out
+                          + k_normed + logits)      # 证明不是保守并集和
+    assert "lower-bound" in draft.live_note
     aux = next(a for a in allocs if a.alloc_id == "t-verify-aux-hidden")
     assert aux.lifecycle == "phase:verify"
     assert aux.bytes == int(B * blk * n_feat * h * 1)

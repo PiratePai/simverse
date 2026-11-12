@@ -631,6 +631,36 @@ def draft_extra_allocations(draft_ir, quant: dict, tp: int,
     return allocs
 
 
+def draft_peak_lower_bound(*, fc_in: int, noise: int, logits: int,
+                           normed_ctx: int, qkv_staging: int,
+                           ctx_kv_flat: int, fused_kv_out: int,
+                           ctx_k_normed: int) -> Tuple[int, int, List[Tuple[str, int]]]:
+    """草稿阶段已知并存组的下界（不把互斥生命周期相加）。
+
+    pinned vLLM `_project_context_kv`/`precompute_and_store_context_kv`：
+      * `normed_ctx + flat`（F.linear 输入/输出）同活；
+      * `flat + contiguous`（permute+contiguous）同活；返回后 flat 无引用；
+      * `contiguous + K norm 输出`（_normalize_context_k）同活；
+      * per-layer fallback 额外有 `normed_ctx + qkv_staging` 与
+        `qkv_staging + flat`（逐层 qkv 输出与 stack）。
+    noise/logits 位于块首/块尾，不与 ctx 组并活；fc_in 单独取 max。
+    返回 `(peak, ctx_peak, groups)`；groups 供生命周期 oracle 逐项核对。
+    """
+    groups: List[Tuple[str, int]] = [
+        ("normed_ctx+flat", normed_ctx + ctx_kv_flat),
+        ("flat+contiguous", ctx_kv_flat + fused_kv_out),
+        ("contiguous+k_normed", fused_kv_out + ctx_k_normed),
+    ]
+    if qkv_staging:
+        groups.extend([
+            ("normed_ctx+qkv_staging", normed_ctx + qkv_staging),
+            ("qkv_staging+flat", qkv_staging + ctx_kv_flat),
+        ])
+    ctx_peak = max(v for _, v in groups)
+    peak = max(fc_in, noise, logits, ctx_peak)
+    return peak, ctx_peak, groups
+
+
 def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
                           batch: int, ctx: int, tp: int, block_size: int,
                           e_produced: float,
@@ -638,16 +668,29 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
                           ctx_kv_path: str = "unknown") -> List[Allocation]:
     """结构化临时缓冲（R02b；尺寸来自 pinned 形状，非运行时测量）。
 
-    phase:draft（草稿前向，一轮内与 verify 串行）：
+    phase:draft（草稿前向，一轮内与 verify 串行；R07a 2026-11-12 起
+    fc 输入/ctx 归一/ctx 投影临时按 **verify 跨度 B·blk** 计——两服务栈
+    均对全跨度物化：vLLM _aux_staging[:num_graph_context_tokens] +
+    _project_context_kv 的 all_k/all_v[L, span,…]；SGLang
+    project_target_hidden/kv_proj_only 全跨度后被拒行不落缓存）：
       * noise embedding 行 B·blk·h（act 精度）；
-      * fc 输入拼接 B·E[N]·8h（act 精度）；
-      * ctx 归一化副本 B·E[N]·h；ctx 投影输出按显式路径：
-          - fused_raw / mxfp8_context_proj：B·E[N]·L·2·kvh_rank·d
-            （qwen3_dflash.py L680/L685 的一次输出）；
+      * fc 输入拼接 B·blk·8h（act 精度）；
+      * ctx 归一化副本 B·blk·h；ctx 投影输出按显式路径：
+          - fused_raw / mxfp8_context_proj：flat 输出
+            B·blk·L·2·kvh_rank·d（GEMM）→ permute/contiguous 拷贝
+            B·blk·L·2·kvh_rank·d（vLLM；SGLang 无全局拷贝）；
           - per_layer_fallback：逐层**完整** qkv 输出
-            B·E[N]·L·(q_rank+2·kvh_rank)·d（Q 随后被切掉但仍形成缓冲）
-            + stack 后的 KV 副本 B·E[N]·L·2·kvh_rank·d（L688-697）；
-      * 草稿 logits B·blk·(V/tp)·4B（fp32，logits_processor 输出口径）。
+            B·blk·L·(q_rank+2·kvh_rank)·d（Q 随后被切掉但仍形成缓冲）
+            + stack 后 K/V B·blk·L·2·kvh_rank·d（L688-697）；
+      * ctx K 逐头 RMSNorm 输出 B·blk·L·kvh_rank·d（RoPE 原地，无额外）；
+      * 草稿 logits B·(blk−1)·(V/tp)·4B（fp32，仅候选位置；anchor 不过
+        lm_head，与 count/draft.draft_lm_head 的 cand 同口径）。
+    **生命周期口径**：`t-draft-buffers.bytes` 是上述缓冲中**已知并存组**的
+    最大值（lower bound），不是所有字节的并集/和。pinned vLLM 顺序为
+    `normed_ctx + flat`（GEMM）→ `flat + contiguous`（permute+contiguous）；
+    flat 返回后释放，再做 `contiguous + K norm 输出`；noise 在块首、logits
+    在块尾，均不与 ctx 组并活。未建模的并存缓冲只会使该值偏低，不会把
+    上界冒充下界。
     phase:verify（目标块验证）：
       * 目标 logits B·blk·(V/tp)·4B（fp32）；
       * verify 辅助 hidden B·blk·n_feat·h（act；speculator
@@ -675,30 +718,50 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
                 q_rank = a.heads // tp
                 d_head = a.head_dim
                 break
+    # R07a：verify 跨度基（两栈全跨度物化；见 docstring）；E[N] 只保留在
+    # cross-round target_hidden 前缀（HF [:produced] 口径）。
+    span_rows = int(batch * blk)
     draft_noise = int(batch * blk * h * b_a)
-    fc_in = int(batch * max(1.0, e_produced) * 8 * h * b_a)
-    normed_ctx = int(batch * max(1.0, e_produced) * h * b_a)
+    fc_in = int(span_rows * 8 * h * b_a)
+    normed_ctx = int(span_rows * h * b_a)
     n_draft_layers = len(draft_ir.layers) if draft_ir is not None else 0
-    fused_kv_out = int(batch * max(1.0, e_produced) * n_draft_layers
+    # vLLM ctx 物化：F.linear 输出（flat）→ permute/contiguous 拷贝（fused_kv_out）
+    # → K 逐头 RMSNorm 输出（ctx_k_normed）→ RoPE 原地。SGLang 无全局
+    # permute/contiguous 拷贝，但同样有 K norm 输出；本账本按 vLLM 口径。
+    ctx_kv_flat = int(span_rows * n_draft_layers
+                      * 2 * kv_rank * d_head * b_a)
+    fused_kv_out = int(span_rows * n_draft_layers
                        * 2 * kv_rank * d_head * b_a)
+    ctx_k_normed = int(span_rows * n_draft_layers
+                       * kv_rank * d_head * b_a)
     qkv_staging = 0
-    staging_note = "ctx投影输出为最终 K/V"
     if path == PER_LAYER_FALLBACK:
         # 逐层 qkv 输出（含 Q）在 stack 前全部存活；stack 后再产生 KV 副本。
-        qkv_staging = int(batch * max(1.0, e_produced) * n_draft_layers
+        qkv_staging = int(span_rows * n_draft_layers
                           * (q_rank + 2 * kv_rank) * d_head * b_a)
-        staging_note = ("逐层完整 qkv 输出（含 Q，随后切掉）暂存 "
-                        f"{qkv_staging}B + stack 后 K/V {fused_kv_out}B")
-    draft_logits = int(batch * blk * target_vocab_per_rank * 4)
+    # 草稿只对 blk−1 个候选位置出 logits（块首 anchor 是已提交 token 的
+    # embedding，不再过 lm_head）；与 count/draft.draft_lm_head 的 cand 同口径。
+    draft_logits = int(batch * max(0, blk - 1) * target_vocab_per_rank * 4)
+    # 生命周期下界（不是并集求和）：pinned vLLM 的 ctx 物化顺序为
+    #   normed_ctx（hidden_norm 输出）+ flat（F.linear 输出）同时存活
+    #   → flat + contiguous（permute+contiguous 拷贝期间）同时存活
+    #   → contiguous + K norm 输出（_normalize_context_k 期间）同时存活；
+    # flat 在 contiguous 返回后即无引用，K norm 时不再与 normed_ctx 同活。
+    # 因此 t-draft-buffers 取“已知并存组”的最大值，而不是所有字节相加；
+    # 这是 lower bound（可能漏掉未建模的并存缓冲），不冒充实际峰值上界。
+    draft_peak, ctx_peak, ctx_groups = draft_peak_lower_bound(
+        fc_in=fc_in, noise=draft_noise, logits=draft_logits,
+        normed_ctx=normed_ctx, qkv_staging=qkv_staging,
+        ctx_kv_flat=ctx_kv_flat, fused_kv_out=fused_kv_out,
+        ctx_k_normed=ctx_k_normed)
+    ctx_note = (f"ctx groups max={ctx_peak}B（" + " / ".join(
+        f"{name} {value}B" for name, value in ctx_groups) + "）")
     allocs.append(Allocation(
-        "t-draft-buffers", "transient", "draft",
-        draft_noise + fc_in + normed_ctx + qkv_staging + fused_kv_out
-        + draft_logits,
+        "t-draft-buffers", "transient", "draft", draft_peak,
         lifecycle="phase:draft",
-        live_note=f"noise {draft_noise}B + fc输入 {fc_in}B + ctx归一副本 "
-                  f"{normed_ctx}B + {staging_note} + "
-                  f"logits(fp32) {draft_logits}B"
-                  f"（B={batch} blk={blk} E[N]={e_produced:.2f} path={path}）"))
+        live_note=f"lower-bound peak {draft_peak}B = max(fc输入 {fc_in}B, "
+                  f"noise {draft_noise}B, logits(fp32) {draft_logits}B, "
+                  f"{ctx_note}）；不是并存和（P1 生命周期 oracle）"))
     verify_logits = int(batch * blk * target_vocab_per_rank * 4)
     allocs.append(Allocation(
         "t-verify-buffers", "transient", "target",

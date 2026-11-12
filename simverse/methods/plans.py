@@ -200,7 +200,10 @@ def plan_dflash(draft_ir, k_limit: Optional[int] = None,
         status="approximated",
         approximations=[
             "块内逐位接受率 β_i 假设输入（Q8 hypothesis）；真实接受分布未采",
-            "SGLang/vLLM 服务端集成路径未逐行核对（部署能力另核）",
+            "服务栈口径差异（R07a 2026-11-12 已逐行核对双栈）：SGLang 非贪婪"
+            "采样验证有 kernel 可用性门槛，不可用时降级 greedy 且分布不保持"
+            "（vLLM probabilistic 完整支持）；SGLang greedy 草稿/验证走"
+            "分片 (max,id) all-gather 而非全量 logits gather（vLLM 走全量）",
         ])
 
 
