@@ -1,7 +1,7 @@
 {
  "schema_version": "0.2",
  "manifest": {
-  "run_id": "sha256:19478db62314c8ebcb469248b1f8fa4d4d09cfce01612435436598507ccc98b3",
+  "run_id": "sha256:5fbef18d30de69415d750827fcaf92c9c8b8d529b6571060b7e2403302ba9331",
   "status": "completed",
   "input_digest": "sha256:f51b4110ccfdc0014f63c5c5a42b824bd53294c0e56ee7c0ad54d3101159faea",
   "model_ir_digest": "sha256:5b426609738e55b333d3c6fb14658e0c7a6ddda7db3e977d653373e7c07276d5",
@@ -9,7 +9,7 @@
   "lowering_digest": "",
   "cost_digest": "sha256:88dd8e1cfa72f4798537a815bbc71708639ae57c03c3436c570972cc5268ad74",
   "device_snapshot_digest": "sha256:ad4b44a3f2ce32dcbe660392989d9a2fb7501aaa0046279e76ba8a95cbc68abc",
-  "code_revision": "3a121b490581022e967101dbaa92fb1aab470f32",
+  "code_revision": "34be76ce79c6ee0e474848135d591129a9b3fa1c",
   "parent_run_id": null,
   "created_at": "",
   "progress": 0.0,
@@ -22958,6 +22958,12 @@
    "expr": "kv_read/write = rows·(2·H_kv·d)·B_kv（GQA 族）",
    "source": "原理 §3：每 token 每层 KV 元素 2·H_kv·d",
    "applies": "GQA/SLIDING 层",
+   "version": "0.2"
+  },
+  "v2.kv_layout_copy": {
+   "expr": "act_read/write = span·L·2·H_kv·d·B_act（读+写）",
+   "source": "R07a：vLLM _project_context_kv 的 permute(2,1,0,3,4).contiguous()",
+   "applies": "DFlash ctx K/V 布局拷贝",
    "version": "0.2"
   },
   "v2.gdn_state": {
