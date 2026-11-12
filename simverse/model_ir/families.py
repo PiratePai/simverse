@@ -800,9 +800,11 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     # R21：路由 spec（消费方：count/moe.v41_moe_route_rows、
     # lowering/memory 路由偏置对象、count/work EP 整除域校验）。
     # 常数全部来自 moe-pin.json @f358f057：
-    #   * gate = GateLinear(h→E, out_dtype=fp32) Replicated（L270-277），
-    #     未传 quant_config/params_dtype → 权重/输入 BF16 2B（linear.py
-    #     L287-295/L179-199；base_loader.py L86）；fp32 只是 logits 出口；
+    #   * gate = GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）：
+    #     权重沿 model loader BF16（linear.py L287-295/L179-199；
+    #     base_loader.py L86）；输入由 mHC tilelang.py L900/L1096 的
+    #     layer_input_cur BF16 证明（model.py L731-816）；均 2B；fp32
+    #     只是 logits 出口；有效域 official V4.1 bf16，非 BF16 拒绝；
     #   * bias = e_score_correction_bias[E] fp32（noaux_tc，L303-313）；
     #   * bias_vl：vision_n_layers>0 时每 MoE 层创建（L314-320；V4.1-Flash
     #     视觉塔 32 层 → 存在，文本 token 也逐行做哨兵判定 dsv4 L63-76）；
