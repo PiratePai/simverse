@@ -100,12 +100,27 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                                     f"{'（复制）' if a.kv_heads < tp else ''}"))
         win = a.sliding_window
         end = start_ctx + blk
+        # 层内因果性来自 pinned 实现（HF dflash/model.py L364-366；vLLM
+        # qwen3_dflash.py L86-97；SGLang models/dflash.py L239-249）：
+        # Qwen3.6 DFlash 的 5 个 sliding 层因果、1 个 full 层非因果。
+        # 非因果 full 层的块内可见对数是 Q²（不是 Q(Q+1)/2）；非因果
+        # sliding 层在窗口内还可见未来 Q 行。R07a 复核发现并修正。
+        causal = bool(getattr(a, "causal", True))
         if win:
-            pairs = B * (causal_pairs(end, 1, win)
-                         - causal_pairs(start_ctx, 1, win))
+            causal_pairs_layer = (causal_pairs(end, 1, win)
+                                  - causal_pairs(start_ctx, 1, win))
+            if causal:
+                pairs = B * causal_pairs_layer
+            else:
+                # 窗口内未来块键：query r（0..Q-1）可见 r+1..min(Q-1,r+W-1)
+                future = sum(min(blk - 1 - r, win - 1) for r in range(blk))
+                pairs = B * (causal_pairs_layer + future)
             read_rows = B * min(end, win)
         else:
-            pairs = B * (start_ctx * blk + blk * (blk + 1) // 2)
+            if causal:
+                pairs = B * (start_ctx * blk + blk * (blk + 1) // 2)
+            else:
+                pairs = B * (start_ctx * blk + blk * blk)
             read_rows = B * start_ctx
         kv_elems = 2 * kvh * d                # per-rank KV 元素
         rows.append(OpRow(
@@ -115,9 +130,10 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
             act_write=int(T * heads_c * d * b_a),
             kv_read=int(read_rows * kv_elems * b_kv),
             kv_write=int(T * kv_elems * b_kv),
-            formula=FR.F_ATTN_CORE if not win else FR.F_SWA_PAIRS,
+            formula=FR.F_ATTN_CORE if (not win or not causal)
+            else FR.F_SWA_PAIRS,
             shape=f"B={B} pairs={pairs} rows={read_rows} win={win} "
-                  f"heads(卡上)={heads_c}"))
+                  f"causal={causal} heads(卡上)={heads_c}"))
         # ctx K/V（target_hidden 投影；与草稿块 token 的 qkv 投影是**两次
         # 独立 GEMM**）。R07a 口径（2026-11-12）：计算/读按每轮 **verify
         # 跨度 B×blk 行**（vLLM _precompute_context_kv 对全跨度投影后被拒
@@ -164,6 +180,19 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                           shape=f"span=B={B}×blk={blk} 行投影/committed="
                                 f"{produced:.2f} 行写 "
                                 f"path={path}（{path_note(path)}）；{ctx_note}"))
+        # ctx K 逐头 RMSNorm + RoPE：两栈都在全跨度投影后执行
+        # （vLLM _normalize_context_k/_apply_context_rope；SGLang
+        # apply_k_norm/apply_k_rope）。原账本只计块内 q/k norm 与 Q rope，
+        # 漏了 ctx K；R07a 复核补入，按 span 行计。
+        ops_ck, w_ck, ar_ck, aw_ck = _norm_row(span * kvh, d, b_a)
+        rows.append(OpRow(stage, li, "ctx_k_norm", flops=int(ops_ck),
+                          weight_read=int(w_ck), act_read=int(ar_ck),
+                          act_write=int(aw_ck), formula=FR.F_RMSNORM,
+                          shape=f"ctx K RMSNorm span={span}×kvh={kvh}×d={d}"))
+        ops_cr, _w_cr, ar_cr, aw_cr = _rope_row(span, kvh, d, d, b_a)
+        rows.append(OpRow(stage, li, "ctx_k_rope", flops=ops_cr,
+                          act_read=ar_cr, act_write=aw_cr, formula=FR.F_ROPE,
+                          shape=f"ctx K RoPE span={span}×kvh={kvh}×d={d}"))
         rows.append(OpRow(stage, li, "o_proj", flops=2 * T * (heads_c * d) * h,
                           weight_read=int(heads_c * d * h * b_w),
                           act_read=int(T * heads_c * d * b_a),
@@ -204,6 +233,20 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
             rows.append(OpRow(stage, li, name, flops=T * h,
                               act_read=int(2 * T * h * b_a),
                               act_write=int(T * h * b_a), formula=FR.F_RESIDUAL))
+    # 2.4) ctx K/V 布局拷贝：vLLM _project_context_kv 在逐层
+    # [span,L,2,kv,d] 投影后做 permute(2,1,0,3,4).contiguous()（读+写全
+    # span×L×2 元素）。SGLang 逐层 store_prefix 无此全局拷贝——本仓行按
+    # vLLM implementation_id 计，差异登记在 source_map。
+    if draft.layers:
+        a0 = draft.layers[0].attn
+        kvh0 = a0.kv_heads // tp if a0.kv_heads >= tp else a0.kv_heads
+        elems = span * len(draft.layers) * 2 * kvh0 * a0.head_dim
+        rows.append(OpRow(stage, -1, "ctx_kv_layout_copy",
+                          act_read=int(elems * b_a), act_write=int(elems * b_a),
+                          formula=FR.F_KV_LAYOUT,
+                          shape=f"vLLM permute+contiguous span={span}×L="
+                                f"{len(draft.layers)}×2×kv={kvh0}×d="
+                                f"{a0.head_dim} 读+写（SGLang 无全局拷贝）"))
     # 2.5) 草稿 final norm（DFlashDraftModel.norm，pinned L565；补齐）
     ops, w, ar, aw = _norm_row(T, h, b_a)
     rows.append(OpRow(stage, -1, "draft_final_norm", flops=ops, weight_read=w,

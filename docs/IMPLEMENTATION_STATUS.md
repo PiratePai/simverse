@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基与草稿生效块两修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #5/#7 已合入 main；本轮验收修复分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R07a 全量 **277 passed**，exit 0；历史：R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：277**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R07a；264→277 为 R07a 新增 test_dflash_serving_r07a.py 13 项；236→252 为 R05 新增 16 项，252→262 为 R06 新增 10 项，262→264 为 R06 oracle 两项）。
+更新：2026-11-12（R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（PR #5/#7 已合入 main；当前分支 `r07a-dflash-serving-audit`（PR #9），历史验收分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R07a **280 passed**，exit 0（Codex 宿主验收）；本 DSH 沙箱此前的 6 项 tmp_path PermissionError 仅为环境回执，见 §3.9，不是代码失败。历史：R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：280**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R07a；264→280 为 R07a 新增 test_dflash_serving_r07a.py 16 项（原 13 + 本轮复核 3）；236→252 为 R05 新增 16 项，252→262 为 R06 新增 10 项，262→264 为 R06 oracle 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -163,8 +163,15 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
     DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2/MoE、
     candidate、swiglu、quantization_config 仍为缺口；mHC 仅
     source-checked；CPU/GPU 均未执行。
-  - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成未核、拒绝采样/KV
-    回退/hidden 提取仍 0 占位；CPU/GPU 未执行。
+  - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成已双栈逐行核对
+    （R07a 2026-11-12：colocated=source-checked/dt=unsupported）；served
+    已部署实测未做；拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位
+    unknown（vLLM prepare-inputs 为图外 eager Triton）；CPU/GPU 未执行。
+- **本轮修复**（2026-11-12 R07a）：ctx 投影/act 改 verify 跨度基（含 ctx K
+  norm/rope、vLLM permute+contiguous 布局拷贝）、草稿行改生效块
+  plan.block_size、full 草稿层按 pinned layer_types 非因果；capability 分模式
+  （colocated=supported source-checked / dt=unsupported）。详见
+  [R07a 报告](validation/dflash-serving-audit-20261112.md)。
 - **本轮修复**（2026-11-12 R06）：full-attn 输出门控逐元素行
   `attn_output_gate`（官方 L802 sigmoid(gate)·attn_out；此前只计 q_proj
   2× GEMM 消费）——默认场景 decode +10,240 FLOPs、verify +163,840、
@@ -176,7 +183,9 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   行号/未核状态校正。
 - **当前数值**：CLI 内置默认 Qwen3.6+DFlash（显式 `draft_ctx_kv_path=fused_raw`，α0.72、blk16）稳态
   2,830,652,352 B（shared gate +81,920 B；含 fused ctx-KV 3,145,728 B 与
-  k_norm 堆叠 1,536 B），known_peak 2,832,959,265 B，仍不完整；
+  k_norm 堆叠 1,536 B），known_peak 2,832,959,265 B（下界；含 ctx flat/
+  permute contiguous/K norm 输出临时，`t-draft-buffers` 取已知并存组 max
+  而非全缓冲相加；草稿 logits 按 blk−1 候选计），仍不完整；
   审计对照场景（α0.75、blk5）的 known_peak 为 2,831,405,056 B；
   V4.1 o_a TP1 每层 67,108,864 FLOPs/容量 B，40 层约 +2.35 GFLOP/token
   +2.52 GB(BF16)。详细归因/来源见
@@ -188,7 +197,7 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   必需检查（strict），审批数为 0，且 `enforce_admins=true`。
 - **未完成**：V4.1 CSA2/MoE scoring/量化映射源码与执行、Engram DP 分片
   交换路径、Qwen3.6 MTP 原生 forward、
-  两款主模型 CPU/GPU 实测、DFlash 服务端集成与运行时池尺寸、真实可分配预算。
+  两款主模型 CPU/GPU 实测、DFlash served 实测与运行时池尺寸、真实可分配预算。
 
 ## 0.1 必读上下文
 
@@ -452,9 +461,11 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
    丢弃 `mtp.` → method status=unverified，不进入部署排名。
 3. **DFlash**：服务端集成已双栈逐行核对（R07a 2026-11-12：vLLM @dc74b8cb +
    SGLang @74cb973d，colocated=supported(source-checked)/dt=unsupported；
-   ctx 投影改 verify 跨度基、草稿行改生效块两修正已回放）。
+   ctx 投影改 verify 跨度基（含 K norm/rope/layout copy）、草稿行改生效块、
+   full 层非因果三修正已回放）。
    残留：拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位 unknown（两栈
-   in-graph 证据已注记）；DraftLogitsCache 账本、SGLang 采样可用性、GDN 态
+   GPU kernel 证据已注记；vLLM prepare-inputs 为图外 eager Triton）；
+   DraftLogitsCache 账本、SGLang 采样可用性、GDN 态
    回退成本、served 实测待 R07b；workspace/graph/NCCL 池尺寸未知。G-C3 残留。
 4. **设备可分配预算/价格**：无来源 → feasible=unknown、成本 null+reason。
    H200 两闭环绑定已归档的 30B-tiny/235B，不能跨模型使用。G-D7/G-D9。
@@ -474,7 +485,9 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
    2026-11-11 按仓库所有者决定调整为单人仓规则：保留 PR、Windows pytest
    required check（strict）和管理员保护；required approving reviews 为 0。
 9. 移动端像素观感：截图存证但本会话通道无法目检；`tmp_path` 用例在本机
-   DSH 沙箱目录权限下未能完成（setup PermissionError）。历史事实：hermetic
+   DSH 沙箱目录权限下未能完成（setup PermissionError；环境差异，非代码失败）。
+   2026-11-12 R07a：Codex 宿主全量 `280 passed`，exit 0；本节仅保留 DSH
+   沙箱回执。历史事实：hermetic
    修复前外层本地 `196 passed` 因复用 ignored `outputs/run_v41.json`，不代表
    clean checkout；远端 run `42803015653` 的 2 项失败即该文件缺失。两项验收
    已按 hermetic 方式修复，外层 Codex 于 2026-11-10 验收本地全量 exit 0：

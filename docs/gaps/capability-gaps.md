@@ -56,11 +56,19 @@
   SHA256 pin，与 vllm_qwen35_pin 同提交）与 SGLang @74cb973d（12 文件 pin）
   双栈审计：draft/verify 调度、hidden 传递（8 层拼接+fc 复制权重）、KV 回退
   （被拒后缀不落缓存）、拒绝采样（greedy 前缀/随机比值检验+目标分布 bonus）、
-  通信字节、计时边界（两栈 accept/prepare 均 in-graph GPU kernel）。
-  对账修正两处：ctx 投影按 **verify 跨度 B×blk** 计（两栈全跨度投影、只写
-  committed 行；原按 E[N] 前缀计属漏计）与草稿行按**生效块**
-  plan.block_size（原按 checkpoint 16 与 verify 双口径）。e2e 测试两侧在册
-  （GSM8K 精度/接受长度门槛）。`dflash_serving_integration`：colocated →
+  通信字节、计时边界（两栈 accept/prepare 均为 GPU kernel，但 vLLM 的
+  prepare_dflash_inputs 是图外 eager Triton、draft sampler 在 draft FULL
+  图内；SGLang draft sampler 在图内、accept/bonus 为独立 launch）。
+  对账修正三处：ctx 投影按 **verify 跨度 B×blk** 计（两栈全跨度投影、只写
+  committed 行；原按 E[N] 前缀计属漏计）、草稿行按**生效块**
+  plan.block_size（原按 checkpoint 16 与 verify 双口径）、**full 草稿层
+  非因果**（pinned HF/vLLM/SGLang 的 layer_types 语义；原按因果 Q(Q+1)/2
+  计，full 层应为 Q²）。同时补入 ctx K 逐头 RMSNorm/RoPE 与 vLLM
+  permute+contiguous 布局拷贝（全跨度，原账本只计块内 K norm/Q rope）。
+  `t-draft-buffers` 按已知并存组 max 计（lower bound）；flat 在 contiguous
+  后释放，不与 K norm 输出相加，峰值仍因运行时池未知而保持 unknown。
+  e2e 测试两侧在册（GSM8K 精度/接受长度门槛）。
+  `dflash_serving_integration`：colocated →
   **supported（source-checked，非已部署实测）**；dt_serial/dt_pipeline →
   **unsupported（两栈均无 DT 分离；SGLang disagg 是 target 侧 PD）**。
   证据 ev-vllm-dflash-serving / ev-sglang-dflash-serving；source_map

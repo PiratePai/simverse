@@ -254,13 +254,20 @@ ENTRIES: List[SourceMapEntry] = [
     SourceMapEntry(
         entry_id="sm-dflash-cross-attention",
         model_or_method="dflash v1",
-        semantic="草稿注意力 K/V 拼接 target_hidden 投影（ctx）与 noise 投影（块内）",
+        semantic="草稿注意力 K/V 拼接 target_hidden 投影（ctx）与 noise 投影（块内）；"
+                 "层内因果性按 pinned 实现逐层解析：sliding 层因果、full 层非因果",
         source_pin=DFLASH_PIN,
-        source_location="dflash/model.py Qwen3DFlashAttention.forward L369-420",
-        branch_predicate="k = cat([k_proj(target_hidden), k_proj(hidden)])",
-        input_domain="全部草稿层（5 sliding + 1 full）",
+        source_location="dflash/model.py Qwen3DFlashAttention.forward L369-420；"
+                        "因果性 L363-366（layer_types：sliding→causal、full→"
+                        "non-causal；is_causal 显式覆盖）；vLLM qwen3_dflash.py "
+                        "L86-97 与 SGLang models/dflash.py L239-249 同口径",
+        branch_predicate="k = cat([k_proj(target_hidden), k_proj(hidden)])；"
+                         "full 层块内可见对 Q²（非因果），不是 Q(Q+1)/2",
+        input_domain="全部草稿层（5 sliding 因果 + 1 full 非因果）",
         both_sides_covered=True,
-        note="计数按 ctx+q_len 两段 KV；fc 投影 8·h→h 入账"),
+        note="计数按 ctx+q_len 两段 KV；full 层非因果块内对已入 flops；"
+             "ctx K norm/rope 与 vLLM permute+contiguous 布局拷贝按整跨度"
+             "单列（原只计块内 K norm/Q rope）；fc 投影 8·h→h 入账"),
     SourceMapEntry(
         entry_id="sm-vllm-dflash-serving",
         model_or_method="DFlash v1 服务栈（vLLM）",
@@ -276,7 +283,9 @@ ENTRIES: List[SourceMapEntry] = [
                  "random=log p>log u+log q 比值检验；bonus 取目标分布）；"
                  "draft_sample_method 默认 greedy（全量 logits gather），"
                  "probabilistic 需 DraftLogitsCache；PIECEWISE CG 不支持"
-                 "（FULL 或 eager）",
+                 "（FULL 或 eager）。计时边界：_prepare_dflash_inputs_kernel "
+                 "在 propose 中于 dispatch_cg_and_sync_dp 之前 eager 启动"
+                 "（图外 Triton），draft sample 在 draft FULL 图内",
         source_pin=VLLM_PARALLEL_PIN,
         source_location="vllm/v1/worker/gpu/spec_decode/dflash/speculator.py"
                         "（L66/L157-168/L379-381/L452-663/L727-1009 "
@@ -382,7 +391,10 @@ ENTRIES: List[SourceMapEntry] = [
                           "DP attention（dflash_dp.py）与 target 侧 PD "
                           "disagg 场景未建模",
                           "mamba/GDN 目标态回退（extra_buffer 策略）的额外"
-                          "拷贝成本未计价——unknown"],
+                          "拷贝成本未计价——unknown",
+                          "vLLM 的 permute+contiguous 全局 layout 拷贝行不"
+                          "对应 SGLang（其逐层 store_prefix 无全局拷贝）；"
+                          "本仓行按 vLLM 口径计，差异在 R07a 报告披露"],
         note="R07a（2026-11-12）逐行核对；source-checked 非 CPU 执行/实测。"
              "DFLASH 与 vLLM PR#40898 路径已在源级区分（见 "
              "sm-vllm-dflash-serving）；dt_serial/dt_pipeline 无 SGLang "

@@ -37,6 +37,7 @@ from simverse.draft_quant import (FUSED_RAW, MXFP8_CONTEXT_PROJ,  # noqa: E402
 from simverse.lowering.memory import (DeviceBudget,  # noqa: E402
                                       colocated_rank_memory,
                                       draft_extra_allocations,
+                                      draft_peak_lower_bound,
                                       transient_allocations)
 from simverse.model_ir import build_catalog  # noqa: E402
 from simverse.scenario import ScenarioV2  # noqa: E402
@@ -190,8 +191,19 @@ def test_memory_physical_objects_per_path():
     assert fb["draft-w-dflash-k-norm-stack"].bytes == N_LAYERS * D * NORM_BYTES
 
 
-def test_transient_fallback_includes_q_staging():
-    """回退路径的逐层完整 qkv（含 Q）在 stack 前存活，临时缓冲需含 Q。"""
+def test_transient_fallback_includes_q_staging_lifecycle():
+    """回退路径的逐层完整 qkv（含 Q）在 stack 前存活；生命周期下界取
+    已知并存组 max，而不是把所有缓冲相加。
+
+    Q4 仅 dense_w=4，act 仍 8（b_a=1）；B=1/blk=16：
+      normed=16·2048=32,768；flat=fused=16·6·2·128=24,576；
+      k_norm=16·6·128=12,288；qkv_staging=16·6·(4+2)·128=73,728；
+      logits=15·31040·4=1,862,400（块尾，与 ctx 不并活）。
+    raw ctx 组 max = max(57,344, 49,152, 36,864)=57,344；
+    fallback 额外 normed+qkv=106,496、qkv+flat=98,304 → ctx max=106,496。
+    logits 主导块峰值，故 t-draft-buffers 两路径同值；差异必须由
+    ctx group/live_note 体现，而不是硬加到总字节。
+    """
     m, d = _models()
     kw = dict(model=m, draft_ir=d, quant=Q4, dquant=Q4, batch=B, ctx=32768,
               tp=TP, block_size=16, e_produced=E_N,
@@ -200,10 +212,35 @@ def test_transient_fallback_includes_q_staging():
         ctx_kv_path=FUSED_RAW, **kw) if a.alloc_id == "t-draft-buffers")
     fb_buf = next(a for a in transient_allocations(
         ctx_kv_path=PER_LAYER_FALLBACK, **kw) if a.alloc_id == "t-draft-buffers")
+    normed = int(SPAN * H)
+    flat = int(SPAN * N_LAYERS * 2 * KV_HEADS_RANK * D)
+    fused = flat
+    k_normed = int(SPAN * N_LAYERS * KV_HEADS_RANK * D)
     qkv_staging = int(SPAN * N_LAYERS
-                      * (Q_HEADS_RANK + 2 * KV_HEADS_RANK) * D * 1)
-    assert qkv_staging == 73_728      # R07a：跨度基（原 produced 基 13,824）
-    assert fb_buf.bytes - raw_buf.bytes == qkv_staging
+                      * (Q_HEADS_RANK + 2 * KV_HEADS_RANK) * D)
+    logits = int(B * (SPAN - 1) * (m.vocab // TP) * 4)
+    noise = int(B * SPAN * H)
+    fc_in = int(SPAN * 8 * H)
+    assert qkv_staging == 73_728
+    raw_ctx = max(normed + flat, flat + fused, fused + k_normed)
+    fb_ctx = max(raw_ctx, normed + qkv_staging, qkv_staging + flat)
+    assert raw_ctx == 57_344 and fb_ctx == 106_496
+    assert max(fc_in, noise, logits, raw_ctx) == logits
+    assert max(fc_in, noise, logits, fb_ctx) == logits
+    assert raw_buf.bytes == fb_buf.bytes == logits
+    assert raw_buf.bytes < (noise + fc_in + normed + flat + fused
+                            + k_normed + logits)
+    assert "qkv_staging" not in raw_buf.live_note
+    assert "qkv_staging" in fb_buf.live_note
+    # 独立生命周期 helper：组逐项手算 + 峰值取 max 而非 sum。
+    peak, ctx_peak, groups = draft_peak_lower_bound(
+        fc_in=fc_in, noise=noise, logits=logits, normed_ctx=normed,
+        qkv_staging=qkv_staging, ctx_kv_flat=flat, fused_kv_out=fused,
+        ctx_k_normed=k_normed)
+    assert peak == logits and ctx_peak == fb_ctx
+    assert dict(groups)["qkv_staging+flat"] == 98_304
+    assert dict(groups)["normed_ctx+qkv_staging"] == 106_496
+    assert sum(v for _, v in groups) > ctx_peak    # 组内也不是求和
 
 
 def test_colocated_raw_vs_fallback_single_resident_difference():

@@ -220,7 +220,8 @@ _PINNED_ASSETS = [
      "speculator+cudagraph+config、eagle3_utils、上级 speculator、"
      "rejection_sampler(+utils)、config/speculative、4 个 DFlash 测试）",
      "R07a G-C3：dflash_serving_integration(colocated)=supported 的源码"
-     "依据；count/draft span 基修正（fc/hidden_norm/ctx_kv_proj）",
+     "依据；count/draft span 基修正（fc/hidden_norm/ctx_kv_proj + ctx K "
+     "norm/rope + vLLM layout copy）",
      ["source-checked 源码阅读，非 CPU 执行/实测；DraftLogitsCache"
       "（probabilistic）未入 R02b 账本（场景无 draft_sample_method 键）；"
       "FULL graph 桶取整 padding 行未计"],
@@ -245,7 +246,8 @@ _PINNED_ASSETS = [
      ["source-checked 源码阅读，非 CPU 执行/实测；采样验证 kernel 可用性"
       "（构建/设备相关）unknown；greedy (max,id) all-gather 字节未入本仓"
       "通信行（按 vLLM 全量口径计，差异披露在 R07a 报告）；GDN 态回退"
-      "extra_buffer 拷贝成本未计价"],
+      "extra_buffer 拷贝成本未计价；vLLM permute+contiguous 全局 layout "
+      "拷贝行不对应 SGLang（逐层 store_prefix）"],
      False, "2026-11-12"),
     ("ev-h200-tiny-distill", "measured",
      "H200 实测 profile 蒸馏集（Qwen3-30B-A3B-tiny 复制品采集：linear 6 算子 ×387 "

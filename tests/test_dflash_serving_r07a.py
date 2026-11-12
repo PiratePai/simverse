@@ -25,8 +25,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from simverse.count.draft import dflash_round_rows  # noqa: E402
+from simverse.count.work import causal_pairs  # noqa: E402
 from simverse.importers.source_map import source_map_json  # noqa: E402
 from simverse.model_ir import build_catalog  # noqa: E402
+from simverse.model_ir.families import parse_dflash_draft  # noqa: E402
 from simverse.pipeline import run_v2  # noqa: E402
 from simverse.scenario import ScenarioV2  # noqa: E402
 from simverse.validation.registry import build_registry  # noqa: E402
@@ -140,6 +142,24 @@ def test_fc_hidden_norm_ctx_proj_span_basis_oracle():
         assert r.act_write == (B * blk) * 2 * KV_HEADS_RANK * D
         # committed 写不随跨度放大：E[N]=3 → produced=3 行
         assert r.kv_write == int(B * e_n * 2 * KV_HEADS_RANK * D)
+    # ctx K 逐头 RMSNorm + RoPE（vLLM _normalize_context_k/_apply_context_rope；
+    # SGLang apply_k_norm/apply_k_rope）也按跨度执行，不是只对块内 K。
+    ckn = [r for r in rows if r.op == "ctx_k_norm"]
+    assert len(ckn) == N_LAYERS
+    for r in ckn:
+        assert r.flops == (B * blk) * KV_HEADS_RANK * (4 * D + 2)
+        assert r.act_read == (B * blk) * KV_HEADS_RANK * D
+        assert r.act_write == (B * blk) * KV_HEADS_RANK * D
+    ckr = [r for r in rows if r.op == "ctx_k_rope"]
+    assert len(ckr) == N_LAYERS
+    for r in ckr:
+        assert r.flops == 3 * (B * blk) * KV_HEADS_RANK * D
+        assert r.act_read == (B * blk) * (KV_HEADS_RANK * D + D)
+        assert r.act_write == (B * blk) * KV_HEADS_RANK * D
+    layout = next(r for r in rows if r.op == "ctx_kv_layout_copy")
+    assert layout.formula == "v2.kv_layout_copy"
+    assert layout.act_read == layout.act_write == \
+        (B * blk) * N_LAYERS * 2 * KV_HEADS_RANK * D
     # 草稿层 token 行与 lm_head 候选行不随 E[N] 变（已有口径回归）
     assert by_op["noise_embed"].act_read == B * blk * H
     lm = by_op["draft_lm_head"]
@@ -172,6 +192,14 @@ def test_span_correction_is_strictly_upward_not_kv_double():
     q_old = [r for r in partial if r.op == "q_proj"][0]
     q_full = [r for r in full if r.op == "q_proj"][0]
     assert q_old.flops == q_full.flops
+    # ctx K norm/RoPE/layout copy 也是跨度基：不随 E[N] 变，且 k_norm/rope
+    # 的 flops 与 ctx_kv_proj 的 GEMM 是独立行（防漏计/重复计）。
+    for op in ("ctx_k_norm", "ctx_k_rope", "ctx_kv_layout_copy"):
+        a_rows = [r for r in partial if r.op == op]
+        b_rows = [r for r in full if r.op == op]
+        assert a_rows and len(a_rows) == len(b_rows)
+        assert [r.flops for r in a_rows] == [r.flops for r in b_rows]
+        assert [r.act_read for r in a_rows] == [r.act_read for r in b_rows]
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +240,11 @@ def test_capability_dt_modes_unsupported_no_stack_counterpart():
 
 
 def test_stage_cost_complete_stays_unknown_with_kernel_note():
-    """accept/KV 回退/hidden 提取仍 unknown（in-graph GPU kernel 未计价）。"""
+    """accept/KV 回退/hidden 提取仍 unknown（GPU kernel 未计价，边界分列）。"""
     b = run_v2(ScenarioV2())
     c = _cap(b)["stage_cost_complete"]
     assert c["status"] == "unknown"
-    assert "in-graph" in c["reason"]
+    assert "GPU kernel" in c["reason"] and "eager" in c["reason"]
 
 
 def test_pending_asset_registry_reflects_source_checked_status():
@@ -250,6 +278,25 @@ def test_source_map_serving_entries_registered():
     assert not any("未逐行核对" in u for u in rp["uncovered_domain"])
     assert source_map_json()["pins"]["sglang_dflash"].startswith(
         "sgl-project/sglang@74cb973d")
+    # layout copy 只属于 vLLM 的三条 ctx 分支；SGLang 差异在 source_map 单列。
+    cat = build_catalog()
+    m, d = cat["models"]["qwen36_35b_a3b"], cat["drafts"]["dflash_qwen36_35b_a3b"]
+    for path in ("fused_raw", "mxfp8_context_proj", "per_layer_fallback"):
+        rows = dflash_round_rows("draft_block", d, m.vocab, 3.0, 512, Q8,
+                                 1.0, tp=TP, batch=1, ctx_kv_path=path,
+                                 block_size=5)
+        layout = [r for r in rows if r.op == "ctx_kv_layout_copy"]
+        assert len(layout) == 1, path
+        assert "vLLM" in layout[0].shape, path
+        assert "SGLang 无全局拷贝" in layout[0].shape, path
+    src = (ROOT / "assets/identity/vllm_qwen35_pin/qwen3_dflash.py"
+           ).read_text(encoding="utf-8")
+    assert "_fused_kv_weight is not None" in src
+    assert "_context_kv_proj is not None" in src
+    assert "torch.stack(layer_kv, dim=1)" in src
+    assert "permute(2, 1, 0, 3, 4).contiguous()" in src
+    assert any("layout" in u.lower() for u in s["uncovered_domain"])
+    assert "permute+contiguous" in sm["sm-dflash-cross-attention"]["note"]
 
 
 def test_evidence_registry_entries_exist_not_executed():
@@ -319,3 +366,67 @@ def test_draft_rows_follow_effective_block_size_not_checkpoint():
     assert b8.method_plan["block_size"] == 8
     q8 = [r for r in b8.work["draft_block"]["rows"] if r["op"] == "q_proj"][0]
     assert q8["flops"] == 2 * (B * 8) * H * heads_c * D
+
+
+# ---------------------------------------------------------------------------
+# 7) F5：full 草稿层非因果（pinned HF/vLLM/SGLang 的 layer_types 语义）
+# ---------------------------------------------------------------------------
+
+def test_dflash_causality_matches_pinned_sources():
+    """逐层因果性：5 sliding 因果、1 full 非因果；flops 手算两路。
+
+    证据：HF dflash/model.py L363-366（is_causal = layer_type=="sliding"）；
+    vLLM qwen3_dflash.py L86-97；SGLang models/dflash.py L239-249。
+    非因果 full 层块内可见对 = Q²（不是 Q(Q+1)/2）。
+    """
+    cat = build_catalog()
+    m, d = cat["models"]["qwen36_35b_a3b"], cat["drafts"]["dflash_qwen36_35b_a3b"]
+    assert [bool(layer.attn.causal) for layer in d.layers] == [True] * 5 + [False]
+    B, S, blk = 1, 512, 5
+    rows = dflash_round_rows(
+        "draft_block", d, m.vocab, 3.0, S, Q8, 1.0, tp=TP, batch=B,
+        ctx_kv_path="fused_raw", block_size=blk)
+    attn = {r.layer: r for r in rows if r.op == "draft_attn_core"}
+    heads_c = 32 // TP
+    full = attn[5]
+    assert full.flops == B * (S * blk + blk * blk) * heads_c * (4 * D + 5)
+    sliding = attn[0]
+    pairs = causal_pairs(S + blk, 1, 4096) - causal_pairs(S, 1, 4096)
+    assert sliding.flops == B * pairs * heads_c * (4 * D + 5)
+    assert "causal=False" in full.shape and "causal=True" in sliding.shape
+    # 覆盖优先级：顶层 is_causal=True → 全层因果；dflash_config.causal=False
+    # → 全层非因果（与 pinned 实现同一优先级）。
+    cfg = json.loads((ROOT / "assets/config/qwen36_35b_a3b_dflash__config.json")
+                     .read_text(encoding="utf-8"))
+    cfg_true = json.loads(json.dumps(cfg))
+    cfg_true["is_causal"] = True
+    d_true = parse_dflash_draft(cfg_true, d.source, "test-causal", "test",
+                                full_config=cfg_true)
+    assert all(layer.attn.causal for layer in d_true.layers)
+    cfg_false = json.loads(json.dumps(cfg))
+    cfg_false["dflash_config"]["causal"] = False
+    d_false = parse_dflash_draft(cfg_false, d.source, "test-noncausal", "test",
+                                 full_config=cfg_false)
+    assert all(not layer.attn.causal for layer in d_false.layers)
+
+
+def test_vllm_prepare_inputs_is_eager_not_in_graph():
+    """计时边界：pinned vLLM 的 prepare-inputs 在 graph dispatch 之前 eager
+    启动，不能与 draft FULL 图内 sampler 混写为"均为 in-graph"。
+    """
+    src = (ROOT / "assets/identity/vllm_dflash_serving_pin/dflash_speculator.py"
+           ).read_text(encoding="utf-8")
+    call = src.index("prepare_dflash_inputs(")
+    dispatch = src.index("dispatch_cg_and_sync_dp(")
+    graph = src.index("run_fullgraph(batch_desc)")
+    assert call < dispatch < graph
+    reason = _cap(run_v2(ScenarioV2()))["stage_cost_complete"]["reason"]
+    assert "eager" in reason and "均为 in-graph" not in reason
+
+
+def test_draft_forward_evidence_lists_real_unverified_gaps():
+    """R07a 后"未核"栏不得再放已核对的 serving_integration 结论。"""
+    reason = _cap(run_v2(ScenarioV2()))["draft_forward_evidence"]["reason"]
+    assert "未核：" in reason
+    assert "双栈已逐行核对" not in reason
+    assert "served_deployment" in reason

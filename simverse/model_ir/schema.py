@@ -51,6 +51,10 @@ class AttentionIR:
     output_gated: bool = False
     qk_head_norm: bool = True
     sliding_window: Optional[int] = None   # SLIDING 层的窗口（token 数）
+    # 层内因果性（DFlash 草稿：sliding 层 causal=True、full 层 causal=False；
+    # 由 pinned HF dflash/model.py L364-366、vLLM _dflash_layer_causal、
+    # SGLang models/dflash.py L239-249 同口径解析。普通 decoder 层默认 True。）
+    causal: bool = True
 
     @property
     def q_out(self) -> int:

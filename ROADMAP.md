@@ -86,7 +86,7 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 | ID | 独立交付物与验收标准 | 硬依赖／联合验收点 |
 |---|---|---|
 | R06 | 按模型/模块拆分的小尺寸 forward 对照；独立 oracle；区分源码阅读与 CPU 执行。**部分完成（2026-11-12，Qwen3.6）**：GDN+MoE+full-attn fixture 的几何/算量对账（shape-checked）及独立张量数值 oracle（numeric-checked）已做；prefill/缓存 decode 各 12 张量逐元素核对，最大差 2.98e−7；修正 attn_output_gate 漏计；tests/test_qwen36_forward_r06.py 12 项；[报告](docs/validation/qwen36-gdn-moe-cpu-fixture-r06.md)。**未做**：mrope 位置生成、V4.1 侧（MLA/CSA2/Engram 执行对照）、其他模块、真实 checkpoint、模型级完整 forward | 对应模块源码；现有完整模块可立即验证，不等待 R04/R05 全部完成 |
-| R07a | **已完成 2026-11-12**：vLLM @dc74b8cb（13 文件）+ SGLang @74cb973d（12 文件）双栈逐行核对（SHA256 pin+测试在册）；调度/hidden/KV 回退/拒绝采样/通信字节/计时边界逐项对账；修正 ctx 投影跨度基与草稿生效块（独立 oracle+负例）；colocated=supported(source-checked)、dt 模式=unsupported（无栈对应）。残留（DraftLogitsCache 账本/SGLang 采样可用性/GDN 态回退成本/served 实测）转 G-C3 残留与 R07b。[报告](docs/validation/dflash-serving-audit-20261112.md) | 固定服务栈源码；独立于新设备接入 |
+| R07a | **已完成 2026-11-12**：vLLM @dc74b8cb（13 文件）+ SGLang @74cb973d（12 文件）双栈逐行核对（SHA256 pin+测试在册）；调度/hidden/KV 回退/拒绝采样/通信字节/计时边界逐项对账；修正 ctx 投影跨度基、草稿生效块与 full 层非因果（独立 oracle+负例）；colocated=supported(source-checked)、dt 模式=unsupported（无栈对应）。残留（DraftLogitsCache 账本/SGLang 采样可用性/GDN 态回退成本/served 实测）转 G-C3 残留与 R07b。[报告](docs/validation/dflash-serving-audit-20261112.md) | 固定服务栈源码；独立于新设备接入 |
 | R07b | 接受分布、draft/verify trace 的采集 schema、导入器与真实样本验收 | schema/导入器可先做；真实数据准入需 R07a 与匹配环境 |
 | R08 | 重点模型 GDN/MoE/attention 按算子/设备/精度/TP 扩展覆盖，独立留出与域外回退 | 对应算子语义及设备身份；MoE 分片域依赖 R01，无需等待其他算子 |
 | R09 | 按固定场景做 E2E 对照，披露误差与未校准部分 | 匹配实测记录与已实现的场景语义；无需等待全部算子校准，残差可反向指导 R08 |

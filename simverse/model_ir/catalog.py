@@ -81,10 +81,11 @@ _DFLASH_EVIDENCE = ModelEvidence(
                    "sm-vllm-dflash-norm-dtype",
                    "sm-vllm-dflash-serving", "sm-sglang-dflash-serving"),
     unverified_paths=(
-        "serving_integration: 双栈已逐行核对（R07a 2026-11-12，colocated="
-        "source-checked/dt=unsupported）；served 已部署实测待 R07b",
+        "served_deployment: R07a 双栈源码核对不等于已部署实测；真实 trace 与"
+        "匹配环境待 R07b",
         "rejection_sampling_cost: 拒绝采样/KV 回退/hidden 提取无独立耗时，"
-        "当前显式 0 占位（两栈 in-graph GPU kernel 证据已注记）",
+        "当前显式 0 占位（两栈 GPU kernel 证据已注记；vLLM prepare-inputs "
+        "为图外 eager Triton）",
         "runtime_pool_sizes: workspace/CUDA graph/NCCL 池尺寸无证据",
     ),
     method_status={"dflash_v1": "source-checked"},

@@ -401,10 +401,13 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             cap.add("stage_cost_complete", "unknown",
                     "DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；"
                     "时间线以显式 0 占位，仅为已建模阶段下界。R07a 源码核对："
-                    "两栈 accept/bonus/prepare-inputs 均为 in-graph GPU kernel"
-                    "（vLLM FULL CG 采样核 + _prepare_dflash_inputs_kernel；"
-                    "SGLang in-graph _DflashDraftSampler/accept_bonus Triton），"
-                    "非 host 传输，但 kernel 耗时未计价，仍 unknown",
+                    "两栈 accept/bonus/prepare-inputs 均为 GPU kernel，但计时边界"
+                    "不同——vLLM prepare_dflash_inputs 是图外 eager Triton，"
+                    "draft sampler 在 draft FULL 图内；SGLang draft sampler "
+                    "在 draft 图内，accept/bonus 为独立 Triton launch；"
+                    "均未独立计价，仍 unknown。成本行按 vLLM 实现"
+                    "（layout copy/全量 logits）；SGLang 无全局 layout copy "
+                    "等差异单列 source_map",
                     affected_metrics=["M01 TPOT", "M02 加速比", "M04 轮分解"])
             if scenario.draft_ctx_kv_path == MXFP8_CONTEXT_PROJ:
                 cap.add(
