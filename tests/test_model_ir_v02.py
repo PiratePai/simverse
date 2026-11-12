@@ -98,10 +98,11 @@ def test_v41_structure_and_gaps(cat):
         "vocab_size", "num_embeddings", "layer_ids", "n_heads", "head_dim",
         "max_ngram_size", "compressed_vocab_size", "pad_token_id")}  # R04 已解除
     # 2026-11-10 审查新增：swiglu clamp/candidate block/compress_ratios 尾部/
-    # quantization_config 也是显式缺口，不默认 ignored。
+    # R22：quantization_config 5 叶键已 mapped（quant-pin.json 20 文件），
+    # 不再是 gap；swiglu/尾部/核本体缺口不变。
     # R20（2026-11-12）：CSA2 索引/candidate 键已 mapped（csa2-pin.json 21
     # 文件 source-checked）；剩余缺口不含 candidate/index 拓扑键。
-    assert {"swiglu_limit", "quantization_config"} <= gap_keys
+    assert "swiglu_limit" in gap_keys and "quantization_config" not in gap_keys
     assert not gap_keys & {"candidate_block_size", "candidate_source_layer_id",
                            "candidate_topk_blocks", "index_topk"}
     assert any("compress_ratios[40:43]" in g for g in m.gaps)

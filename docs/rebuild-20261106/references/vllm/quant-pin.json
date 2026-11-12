@@ -1,0 +1,147 @@
+{
+ "commit": "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+ "repo": "vllm-project/vllm",
+ "note": "R22 V4.1 量化映射 pin：路径相对 references/vllm/；blob sha1 对 ../vllm-tree.json 逐项校验（20 文件：dispatch 链 config/model+quantization/__init__+deepseek_v41/quant_config+__init__+transformers_utils config；MXFP8 线性 modelopt+fp8+quant_utils+mxfp8_utils+kernels linear 4 文件；MXFP4 专家 mxfp4+oracle+routed_experts+trtllm 变体；执行域 humming 2 文件；未量化类 vocab_parallel_embedding）",
+ "files": [
+  {
+   "path": "vllm/config/model.py",
+   "size": 114165,
+   "blob_sha1": "01e7223793c79704d8cbca07f2dda27331b1fde4",
+   "sha256": "5e29af1e43efb18aa4afe6cfcd3e941ea4e205082216cffd61a6706c849dcd22",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/quantization/__init__.py",
+   "size": 6959,
+   "blob_sha1": "6bbd7040dc6c20e097a24bc14dcc2e1fa19afa9e",
+   "sha256": "02fff4c7915df1ef3092f2bb7ec1d48d44d9985afaf44f78b2b0c3ac980d8389",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/quantization/fp8.py",
+   "size": 33411,
+   "blob_sha1": "cf8ba94a74f7a3e55bc2d656040dfa93ec36313e",
+   "sha256": "7fc5b708cb73b2eb8ee73436bf50aa8e507f985d249f776e6effce3f79c37d48",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/quantization/mxfp4.py",
+   "size": 43642,
+   "blob_sha1": "d0ba8fd135292a10e4cef0836f21ee2dccd5c47e",
+   "sha256": "5f2f051b3347453bfeccd987846669a705cc4888fc59e732d306bbac695d2b8a",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/quantization/modelopt.py",
+   "size": 113483,
+   "blob_sha1": "380c861fae9912fdc946d51f8ba4b4f7edaca8fc",
+   "sha256": "bfab2beb526aa029bf1e057883e9826f3998b22ab31aef81bfd84da18e583d8a",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/quantization/utils/mxfp8_utils.py",
+   "size": 11435,
+   "blob_sha1": "e49332a6ffaa6fae36ffed89a0777827e0966294",
+   "sha256": "327be3cf903c648bc836a9c5aab9cadf74bbcefd798abd3e5fb28c9fd9e36965",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/quantization/utils/quant_utils.py",
+   "size": 35275,
+   "blob_sha1": "d628c5d01e9690ac8e3e35f86a436c11864fc2a1",
+   "sha256": "c40fea7226640764caec1028acab00116b56958a9926f2b4b8b7b91d2896e354",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/quantization/utils/humming/priority.py",
+   "size": 1735,
+   "blob_sha1": "4a1452c2a96a8a2be6cd94e46eb0d96f6f57c644",
+   "sha256": "d38c749e36da425add3841a0d0f239f72ebcebc99c189c5fb77b5e576ea8cec8",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/kernels/linear/__init__.py",
+   "size": 49744,
+   "blob_sha1": "03c95e160d2c0ad7ef87e6657d34ba5a7b7a1c3d",
+   "sha256": "c7f0918d938d7e99f62652ca283e2a75dceb0830d676996e42a27bfd1a3e3db5",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/kernels/linear/mxfp8/marlin.py",
+   "size": 2181,
+   "blob_sha1": "45824e025877d797bb5efe0ffa8c1db58291145c",
+   "sha256": "299c549e3e3830fe3b52ef83eca565356d6bd42e2a85805300a1bd0fe6a67e0c",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/kernels/linear/mxfp8/emulation.py",
+   "size": 3585,
+   "blob_sha1": "837e75870ad5377adcd8b70ce8dd400dee8d0ec6",
+   "sha256": "b669c32dfb4f7dcd5bff1b54c3048516ddae8d3702606f6827626b737dbdce09",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/kernels/linear/mxfp8/flashinfer.py",
+   "size": 10123,
+   "blob_sha1": "f21d0bf373606749f38bd4bfd2fa488089660503",
+   "sha256": "30dff76ce9545fd799ef64292c51fac2f611303a3c97d3a09e00c1302e7cc278",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/fused_moe/oracle/mxfp4.py",
+   "size": 83780,
+   "blob_sha1": "e7bd2d365319d205bc3fd09046ed452ed025a312",
+   "sha256": "9a782f7e7971aa1fac3bf4626fad6e79f0a20bfe21a4dcbea8005393feeb121e",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/fused_moe/routed_experts.py",
+   "size": 63135,
+   "blob_sha1": "b5a6aa997cc40ccd98e92f594c9c776f1e0b12b3",
+   "sha256": "e8b04a880a283382ffd7d1919eb6eb3ff455c4b6b74f6743c6589be8b7c4967d",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/fused_moe/experts/trtllm_mxfp4_moe.py",
+   "size": 18665,
+   "blob_sha1": "1b4327818a67ded461848f173770b4f51659fd67",
+   "sha256": "4aaaacf318ed7580c976ec085123e989bd8b17027d21d08d065c3b1302ec330a",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/quant_config.py",
+   "size": 10786,
+   "blob_sha1": "b9919e5ff7bab124f61ea01cc6db77bd1be42786",
+   "sha256": "8eae36facb69610005d26b67d9583790d9a0a99ce565c820d1da700da9fb3bee",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/models/deepseek_v41/__init__.py",
+   "size": 625,
+   "blob_sha1": "b69e1c6dcdd8e85a2cef78c751a44ee0738bc201",
+   "sha256": "6b928f07c6f67f4fd1b599a143cd15a1309a177c877f7f08b29d5fa30db659fe",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/model_executor/layers/vocab_parallel_embedding.py",
+   "size": 25923,
+   "blob_sha1": "0913d7913fc8d544f3957c58bb8a4b1aaea0a74c",
+   "sha256": "0e3ca8f24d9d274edfb76a2ca66f7ee63bb92309fc8c6a11e31761685306d2b5",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/transformers_utils/configs/deepseek_v41.py",
+   "size": 2734,
+   "blob_sha1": "f1ed6f9aa89554f0af3cb821dc57d1bacb6a7c0c",
+   "sha256": "0eca0d67503f92e668078626ea60856aaa2a5f2afff87d565f6c02e08eb88630",
+   "tree_match": true
+  },
+  {
+   "path": "vllm/utils/humming.py",
+   "size": 5765,
+   "blob_sha1": "8004812ea4889af91972f665e8a9f4fcbc8e5952",
+   "sha256": "8ba7ebc0107f535bcfad2ffc753f603d59cac62acb0d1129732cdd522613a6fc",
+   "tree_match": true
+  }
+ ]
+}

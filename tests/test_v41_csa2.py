@@ -32,7 +32,7 @@ from simverse.lowering.memory import (kv_allocations,  # noqa: E402
 from simverse.model_ir.catalog import build_catalog  # noqa: E402
 from simverse.scenario import (DeploymentSpec, ScenarioV2,  # noqa: E402
                                V41_INDEX_K_BYTES, V41_KV_RECORDS,
-                               V41_RING_CAPACITY)
+                               V41_QUANT, V41_RING_CAPACITY)
 
 Q8 = {"dense_w": 8, "expert_w": 4, "act": 8, "kv": 8, "state": 32}
 Q16 = {"dense_w": 16, "expert_w": 16, "act": 16, "kv": 16, "state": 32}
@@ -455,24 +455,33 @@ def test_kv_allocations_records_and_ring_oracle():
 
 
 def test_compressor_bf16_weights_independent_of_quant():
-    """compressor/wk/weights_proj 为 quant_config=None bf16：Q8 与 Q16 同字节。"""
+    """R22：V4.1 全部 dense 字节由 extras.quant 配方驱动（quant 位宽 inert）。
+
+    compressor/wk/weights_proj 为 quant_config=None bf16（R20 事实不变）；
+    量化模块按 MXFP8 1B + ue8m0 scale。Q8/Q16 传入不再改变任何 V4.1 字节。
+    """
     m = _model()
     tp = 8
     w8 = sum(a.bytes for a in target_weight_allocations(m, Q8, tp)
              if a.alloc_id.endswith("-w-dense-L2"))
     w16 = sum(a.bytes for a in target_weight_allocations(m, Q16, tp)
               if a.alloc_id.endswith("-w-dense-L2"))
-    # 差异只来自随 quant 缩放的量化模块（fused_wqa_wkv、两 wq_b、o_a/o_b）；
-    # 固定 bf16 三模块（compressor h×1024、wk 512×128、weights_proj 5120×32）
-    # + norm 参数 (512+128) 不随 dense_w 变
+    assert w16 == w8, "V4.1 计价已配方冻结，quant 位宽不得改变字节"
     h, d, di, ih, qrank, orank, groups = 5120, 512, 128, 32, 1280, 1024, 8
     heads_tp, ng = 64 // tp, groups // tp
-    quantized = (h * qrank + h * d                       # fused_wqa_wkv
-                 + qrank * heads_tp * d                  # 主 wq_b
-                 + (64 * d // groups) * orank * ng       # o_a
-                 + ng * orank * h                        # o_b
-                 + qrank * ih * di)                      # indexer wq_b
-    assert w16 - w8 == quantized * (2 - 1), "bf16 固定模块不得随 dense_w 缩放"
+    scale = lambda n, k: n * (k // 32)
+    quantized = (h * qrank + scale(qrank, h)              # fused_wqa_wkv（q_a）
+                 + h * d + scale(d, h)                    # fused_wqa_wkv（kv）
+                 + qrank * heads_tp * d + scale(heads_tp * d, qrank)  # 主 wq_b
+                 + (64 * d // groups) * orank * ng
+                 + ng * scale(orank, 64 * d // groups)    # o_a
+                 + ng * orank * h + scale(h, ng * orank)  # o_b
+                 + qrank * ih * di + scale(ih * di, qrank))  # indexer wq_b
+    bf16_fixed = (2 * h * d * 2                            # compressor（ratio2）
+                  + 2 * d * di + 2 * (d + di)
+                  + 2 * h * ih                             # weights_proj/wk/norm
+                  + 2 * (qrank + d))                       # 主 q_norm/kv_norm
+    assert w8 == quantized + bf16_fixed, (w8, quantized + bf16_fixed)
 
 
 def test_main_attention_norm_weight_capacity_and_read():
@@ -515,7 +524,15 @@ def test_main_attention_norm_weight_capacity_and_read():
                       + 2 * (d + di))            # compressor norm + k_norm
         if a.produces_index:
             terms += (2 * h * ih                 # weights_proj bf16
-                      + qrank * ih * di)         # indexer wq_b（随 dense_w）
+                      + qrank * ih * di)         # indexer wq_b（MXFP8 值）
+        # R22：量化项并入 ue8m0 scale（N×K/32；与 target_weight_allocations
+        # 的 _q_scale 同式，此处为独立复算）
+        scale = lambda n, k: n * (k // 32)
+        terms += (scale(qrank, h) + scale(d, h) + scale(heads_tp * d, qrank)
+                  + scale(orank, heads * d // groups) * ng
+                  + scale(h, ng * orank))
+        if a.produces_index:
+            terms += scale(ih * di, qrank)
         expect += terms
     got = sum(a.bytes for a in target_weight_allocations(m, Q8, tp)
               if "-w-dense-L" in a.alloc_id)
@@ -556,11 +573,11 @@ def test_index_buffers_transient_lower_bound():
 
 def test_scenario_record_field_and_identity():
     base = ScenarioV2(model_id="deepseek_v41_flash", method_id="baseline",
-                      draft_id=None,
+                      draft_id=None, quant=V41_QUANT,
                       deployment={"mode": "baseline", "target_tp": 8})
     assert base.validate().deployment.v41_kv_record == "fp8_ds_mla_sm90"
     bad = ScenarioV2(model_id="deepseek_v41_flash", method_id="baseline",
-                     draft_id=None,
+                     draft_id=None, quant=V41_QUANT,
                      deployment={"mode": "baseline", "target_tp": 8,
                                  "v41_kv_record": "bf16"})
     with pytest.raises(ValueError, match="v41_kv_record"):
@@ -583,6 +600,7 @@ def test_scenario_record_field_and_identity():
 def test_v41_kv_record_rejects_incompatible_device(device, rec):
     sc = ScenarioV2(
         model_id="deepseek_v41_flash", method_id="baseline", draft_id=None,
+        quant=V41_QUANT,
         deployment={"mode": "baseline", "target_tp": 8,
                     "target_device": device, "v41_kv_record": rec})
     with pytest.raises(ValueError, match="v41_kv_record"):
@@ -594,7 +612,7 @@ def test_v41_kv_record_compatible_registered_devices():
     for device in ("h100_sxm", "h200_sxm"):
         sc = ScenarioV2(
             model_id="deepseek_v41_flash", method_id="baseline",
-            draft_id=None,
+            draft_id=None, quant=V41_QUANT,
             deployment={"mode": "baseline", "target_tp": 8,
                         "target_device": device,
                         "v41_kv_record": "fp8_ds_mla_sm90"})

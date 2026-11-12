@@ -258,6 +258,7 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
                    h: int, kvs: dict, quant: dict, prefill: bool, tp: int = 1,
                    v41_kv_record: str = "fp8_ds_mla_sm90",
                    index_run_first: bool = False,
+                   quant_recipe: Optional[dict] = None,
                    ) -> List[OpRow]:
     """V4.1 CSA2 层账本（per-rank）。
 
@@ -283,6 +284,12 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
     m = layer.mla
     a = layer.csa2
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
+    # R22：V4.1 量化配方驱动字节（extras.quant；checkpoint 格式 + 注册设备
+    # ≤SM90 Marlin W8A16 执行域）。量化线性 = MXFP8 1B + ue8m0 (1,32) scale；
+    # 激活 BF16 2B。场景 quant 位宽对 V4.1 已被 validate 钉死为同值。
+    if quant_recipe is not None:
+        b_w = float(quant_recipe["dense_linear"]["value_itemsize"])
+        b_a = float(quant_recipe["act_itemsize"])
     from ..scenario import V41_INDEX_K_BYTES, V41_KV_RECORDS
     rec = V41_KV_RECORDS[v41_kv_record]
     swa_rec, comp_rec = rec["swa_bytes"], rec["compressed_bytes"]
@@ -303,13 +310,22 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
 
     def gemm(op, ic, oc, reps: int = 1, b: float = None):
         """reps>1：分组投影（V4.1 o_a 每 rank ng 组，每组独立权重/激活）。
-        b：显式权重位宽（pinned bf16 模块覆盖场景 dense_w）。"""
+        b：显式权重位宽（pinned bf16 模块覆盖场景 dense_w）。
+        R22：b=None 且量化配方在场时，权重读/容量并入 ue8m0 scale 字节
+        （oc×ic/32 每 rep，ic 须整除 32 否则按域拒绝；运行时展开后口径，
+        quant_layout.mxfp8_linear_bytes）。"""
         bw = b_w if b is None else b
+        scale_b = 0
+        if b is None and quant_recipe is not None:
+            from .quant_layout import mxfp8_linear_bytes
+            _v, scale_b = mxfp8_linear_bytes(oc, ic)
+            scale_b *= reps
         return OpRow(
             stage, li, op, flops=2 * T * ic * oc * reps,
-            weight_read=int(ic * oc * reps * bw),
+            weight_read=int(ic * oc * reps * bw) + scale_b,
             act_read=int(T * ic * reps * b_a), act_write=int(T * oc * reps * b_a),
-            weight_capacity=int(ic * oc * reps * bw), formula=FR.F_GEMM,
+            weight_capacity=int(ic * oc * reps * bw) + scale_b,
+            formula=FR.F_GEMM,
             shape=f"{reps}×[{T},{ic}]@[{ic},{oc}]" if reps > 1
             else f"[{T},{ic}]@[{ic},{oc}]")
 
@@ -546,12 +562,14 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
 def ffn_or_moe_rows(stage: str, li: int, layer: LayerIR, T: int, h: int,
                     quant: dict, tp: int = 1, ep: int = 1,
                     local_experts: Optional[int] = None,
-                    route: Optional[dict] = None) -> List[OpRow]:
+                    route: Optional[dict] = None,
+                    quant_recipe: Optional[dict] = None) -> List[OpRow]:
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
     rows: List[OpRow] = []
     if layer.moe is not None and layer.moe.experts:
         moe_dicts = moe_rows(layer.moe, T, h, quant, tp=tp, ep=ep,
-                             local_experts=local_experts)
+                             local_experts=local_experts,
+                             quant_recipe=quant_recipe)
         if route is not None:
             # R21：V4.1 路由三行（gate/score/topk_renorm）替换通用 moe_router
             # 行（FP32 logits 出口 + sqrtsoftplus/noaux_tc 语义）；routed/
@@ -593,7 +611,8 @@ def norm_add_rows(stage: str, li: int, T: int, h: int, quant: dict) -> List[OpRo
 
 
 def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
-                     quant: dict, first_layer: bool = False) -> List[OpRow]:
+                     quant: dict, first_layer: bool = False,
+                     quant_recipe: Optional[dict] = None) -> List[OpRow]:
     """mHC 全宽复制边界：pinned TileLang 算术 op，未执行 kernel。
 
     字节为 unfused、n_splits=1 逻辑访问参考配方，非实测 HBM；映射见
@@ -611,6 +630,10 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
     mix = (2 + m) * m                     # mix_hc（hc_attn_fn/hc_ffn_fn 行数）
     hc_dim = m * h
     b_a = quant["act"] / 8
+    # R22：V4.1 隐状态沿 model dtype BF16（Marlin W8A16/W4A16 执行域激活
+    # 不量化）；mHC 边界的通用 b_a 部分随配方改 2B，FP32 内部字节不动。
+    if quant_recipe is not None:
+        b_a = float(quant_recipe["act_itemsize"])
     rows: List[OpRow] = []
     if first_layer:
         rows.append(OpRow(
@@ -661,9 +684,12 @@ def hc_boundary_rows(stage: str, li: int, T: int, h: int, hc: dict,
     return rows
 
 
-def hc_exit_rows(stage: str, T: int, h: int, hc: dict, quant: dict) -> List[OpRow]:
+def hc_exit_rows(stage: str, T: int, h: int, hc: dict, quant: dict,
+                 quant_recipe: Optional[dict] = None) -> List[OpRow]:
     """末层 post + carried pre_mix collapse；无 learned hc_head。"""
     m, b = hc["mult"], quant["act"] / 8
+    if quant_recipe is not None:
+        b = float(quant_recipe["act_itemsize"])
     return [
         OpRow(stage, -1, "hc_exit_post", flops=T * (m * h + 2 * m * m * h),
               act_read=int(T * ((m * m + m) * 4 + (m + 1) * h * b)),
@@ -679,7 +705,8 @@ def hc_exit_rows(stage: str, T: int, h: int, hc: dict, quant: dict) -> List[OpRo
 
 def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
                 quant: dict, tp: int = 1,
-                first_engram_layer: bool = False, rank: int = 0) -> List[OpRow]:
+                first_engram_layer: bool = False, rank: int = 0,
+                quant_recipe: Optional[dict] = None) -> List[OpRow]:
     """Engram 注入算子（v41_csa2 专用；per-rank 口径）。
 
     证据（vllm models/deepseek_v41/common/engram.py pin @f358f057，
@@ -707,6 +734,9 @@ def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
     n_heads = int(engram_spec["n_heads"])
     layer_ids = list(engram_spec["layer_ids"])
     b_w = quant["dense_w"] / 8
+    # R22：wkv 值字节由配方驱动（量化 ColumnParallelLinear；与 memory 同口径）
+    if quant_recipe is not None:
+        b_w = float(quant_recipe["dense_linear"]["value_itemsize"])
     # TP 合法性：镜像源码断言 (shards−1)·part < n_hash_cols（L1096-1099）。
     if tp < 1:
         raise ValueError("Engram TP 必须为正整数")
@@ -759,10 +789,17 @@ def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
             f"Engram wkv 输出宽 {wkv_out} 不整除 TP{tp}（ColumnParallelLinear "
             "列切要求整除，L1724-1733；V4.1 部署配方 tp∈{{1,2,4,8}}）")
     oc_r = wkv_out // tp
+    # R22：wkv 为量化 ColumnParallelLinear（quant_config 传入，L1724-1729）
+    # → MXFP8 布局含 ue8m0 scale（oc_r×wkv_in/32；与 memory 同口径）。
+    wkv_scale_b = 0
+    if quant_recipe is not None:
+        from .quant_layout import mxfp8_linear_bytes
+        _v, wkv_scale_b = mxfp8_linear_bytes(oc_r, wkv_in)
     rows.append(OpRow(
         stage, li, "engram_wkv",
         flops=2 * T * wkv_in * oc_r,
-        weight_read=int(wkv_in * oc_r * b_w), weight_capacity=int(wkv_in * oc_r * b_w),
+        weight_read=int(wkv_in * oc_r * b_w) + wkv_scale_b,
+        weight_capacity=int(wkv_in * oc_r * b_w) + wkv_scale_b,
         act_read=int(T * wkv_in * 2), act_write=int(T * oc_r * 2),
         formula=FR.F_ENGRAM_WKV, statistic="exact",
         shape=f"[{T},{wkv_in}]@[{wkv_in},{oc_r}]（列切 25600/tp={oc_r}，"
@@ -783,14 +820,25 @@ def engram_rows(stage: str, li: int, T: int, h: int, engram_spec: dict,
     return rows
 
 
-def head_rows(stage: str, model: ModelIR, T: int, quant: dict, tp: int) -> List[OpRow]:
+def head_rows(stage: str, model: ModelIR, T: int, quant: dict, tp: int,
+              quant_recipe: Optional[dict] = None) -> List[OpRow]:
     h, v = model.hidden, model.vocab
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
+    # R22：V4.1 embed/lm_head/RMSNorm 权重未被量化（get_quant_method 对非
+    # LinearBase/RoutedExperts/Attention 返回 None → 默认方法 BF16；fp8.py
+    # L174-203 + vocab_parallel_embedding.py L322-326），激活 BF16。
+    if quant_recipe is not None:
+        b_w = float(quant_recipe["unquantized_itemsize"])
+        b_a = float(quant_recipe["act_itemsize"])
     rows: List[OpRow] = []
     # final norm（model.norm，每 rank 复制；2026-11-10 补齐——HF/vLLM forward
     # 均有 final RMSNorm，此前缺行）
     ops, w, ar, aw = _norm_row(T, h, b_a)
+    if quant_recipe is not None:
+        # RMSNorm 权重沿 model dtype BF16（quant_config 不覆盖 norm 参数）
+        w = int(h * quant_recipe["unquantized_itemsize"])
     rows.append(OpRow(stage, -1, "final_norm", flops=ops, weight_read=w,
+                      weight_capacity=w,
                       act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
                       shape=f"width={h}（final，replicated）"))
     rows.append(OpRow(stage, -1, "lm_head", flops=2 * T * h * (v // tp),
@@ -810,7 +858,8 @@ def head_rows(stage: str, model: ModelIR, T: int, quant: dict, tp: int) -> List[
 def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                      quant: dict, tp: int = 1, prefill: bool = False,
                      role: str = "target", ep: int = 1, rank: int = 0,
-                     plan=None, v41_kv_record: str = "fp8_ds_mla_sm90"
+                     plan=None, v41_kv_record: str = "fp8_ds_mla_sm90",
+                     quant_recipe: Optional[dict] = None,
                      ) -> List[OpRow]:
     """整模型一个阶段的逻辑账本（**per-rank 口径**，默认 rank=0）。
 
@@ -825,6 +874,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     h = model.hidden
     S, Q = (0, ctx) if prefill else (ctx, queries)
     rows: List[OpRow] = []
+    if quant_recipe is None:
+        quant_recipe = (model.extras or {}).get("quant")
     kvs = (model.extras or {}).get("kv_spec", {})
     hc_spec = (model.extras or {}).get("hc")
     engram_spec = (model.extras or {}).get("engram")
@@ -872,15 +923,17 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         elif layer.kind == MLA_CSA2 and layer.mla and layer.csa2:
             rows += v41_layer_rows(stage, li, layer, B, S, Q, h, kvs, quant,
                                    prefill, tp, v41_kv_record=v41_kv_record,
-                                   index_run_first=run_first)
+                                   index_run_first=run_first,
+                                   quant_recipe=quant_recipe)
         T = B * Q
         rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
                                 local_experts=_local_experts(layer),
-                                route=moe_route)
+                                route=moe_route, quant_recipe=quant_recipe)
         if layer.kind == MLA_CSA2 and hc_spec:
             # mHC 边界核融合 norm+残差（F_MHC_POST_PRE）：不再另计通用 norm/add 行
             rows += hc_boundary_rows(stage, li, T, h, hc_spec, quant,
-                                     first_layer=(li == first_layer_index))
+                                     first_layer=(li == first_layer_index),
+                                     quant_recipe=quant_recipe)
         else:
             rows += norm_add_rows(stage, li, T, h, quant)
         # Engram 注入（R04；层位 extras.engram.layer_ids，与 hc_spec 同源 extras；
@@ -889,10 +942,12 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                 and layer.kind == MLA_CSA2):
             rows += engram_rows(stage, li, T, h, engram_spec, quant, tp,
                                 first_engram_layer=(li == engram_spec["layer_ids"][0]),
-                                rank=rank)
+                                rank=rank, quant_recipe=quant_recipe)
     if hc_spec and any(layer.kind == MLA_CSA2 for layer in model.layers):
-        rows += hc_exit_rows(stage, B * Q, h, hc_spec, quant)
-    rows += head_rows(stage, model, B * Q, quant, tp)
+        rows += hc_exit_rows(stage, B * Q, h, hc_spec, quant,
+                             quant_recipe=quant_recipe)
+    rows += head_rows(stage, model, B * Q, quant, tp,
+                      quant_recipe=quant_recipe)
     for r in rows:
         r.role = role
     return rows

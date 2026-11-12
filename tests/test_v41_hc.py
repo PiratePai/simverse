@@ -176,35 +176,42 @@ def test_v41_tp_must_divide_o_groups():
 def test_v41_oa_proj_group_count_absolute_oracle_tp1_2_4_8():
     """F2 独立绝对值 oracle：o_a 每 rank ng=o_groups/tp 组，不许只算一组。
 
-    逐 TP 手算：2·T·(heads·d/groups)·orank·ng FLOPs；
-    权重/容量 = (heads·d/groups)·orank·ng·2B；激活读/写同样乘 ng。
+    R22 起 V4.1 行字节由 extras.quant 配方驱动（与传入 quant 位宽无关）：
+    o_a 权重 = MXFP8 1B/elem + ue8m0 scale（orank×group_in/32 每组）；
+    激活 BF16 2B。逐 TP 手算。
     """
     m = _model()
     h, heads, d, groups, orank = 5120, 64, 512, 8, 1024
     group_in = heads * d // groups          # 4096
-    b = 2                                  # Q16
     T = 1
     for tp in (1, 2, 4, 8):
         ng = groups // tp
         rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp)
                 if r.op == "o_a_proj"]
         assert len(rows) == 40
+        w_expect = group_in * orank * ng * 1 + ng * (orank * group_in // 32)
         for r in rows:
             assert r.flops == 2 * T * group_in * orank * ng
-            assert r.weight_read == group_in * orank * ng * b
-            assert r.act_read == T * group_in * ng * b
-            assert r.act_write == T * orank * ng * b
-            assert r.weight_capacity == group_in * orank * ng * b
+            assert r.weight_read == w_expect
+            assert r.act_read == T * group_in * ng * 2
+            assert r.act_write == T * orank * ng * 2
+            assert r.weight_capacity == w_expect
         # 每层一组值；TP1 是 TP8 的 8 倍（同一层、同一 token）
         assert sum(r.flops for r in rows) == 40 * 2 * T * group_in * orank * ng
 
 
 def test_v41_oa_proj_memory_absolute_oracle_tp1_2_4_8():
-    """memory 与 work 同步乘 ng：独立复算每层 dense 权重字节。"""
+    """memory 与 work 同步乘 ng：独立复算每层 dense 权重字节。
+
+    R22 布局：q_a/kv/q_b/o_a/o_b/wq_b = MXFP8 1B + ue8m0 scale (N·K/32)；
+    norm/compressor/wk/weights_proj = bf16 2B 固定。"""
     m = _model()
     kvs = m.extras["kv_spec"]
     h, heads, d, groups, orank = 5120, 64, 512, 8, 1024
     qrank, di, ih = 1280, 128, 32
+    assert (kvs["head_dim"], kvs["index_head_dim"], kvs["index_heads"]) \
+        == (d, di, ih)
+    scale = lambda n, k: n * (k // 32)
     for tp in (1, 2, 4, 8):
         ng = groups // tp
         heads_tp = heads // tp
@@ -212,20 +219,22 @@ def test_v41_oa_proj_memory_absolute_oracle_tp1_2_4_8():
         for layer in m.layers:
             a = layer.csa2
             mlt = 2 if a.ratio == 2 else 1
-            terms = (h * qrank + h * d + qrank * heads_tp * d
-                     + (heads * d // groups) * orank * ng
-                     + ng * orank * h
-                     # 主 attention q_norm(qrank)/kv_norm(d) 均为 bf16 常驻
-                     + qrank + d)
+            q = (h * qrank + scale(qrank, h)          # q_a
+                 + h * d + scale(d, h)                # kv_proj
+                 + qrank * heads_tp * d + scale(heads_tp * d, qrank)
+                 + (heads * d // groups) * orank * ng
+                 + ng * scale(orank, heads * d // groups)   # o_a
+                 + ng * orank * h + scale(h, ng * orank)    # o_b
+                 # 主 attention q_norm(qrank)/kv_norm(d) bf16 常驻
+                 + (qrank + d) * 2)
             if a.produces_kv:
                 # R20：compressor/wk/norm 为 quant_config=None 的 bf16 常驻
-                #（Q16 下与量化档同 2B，数值不变但来源固定）；norm 参数
-                #（compressor norm 512 + indexer k_norm 128）入册
-                terms += h * d * mlt + d * di + (d + di)
+                #（数值 2B 与来源固定）；norm 参数入册
+                q += (h * d * mlt + d * di + (d + di)) * 2
             if a.produces_index:
-                # R20：weights_proj 亦 bf16（quant_config=None）
-                terms += h * ih + qrank * ih * di
-            expect += terms * 2          # Q16 dense
+                # R20：weights_proj 亦 bf16（quant_config=None）；wq_b 量化
+                q += h * ih * 2 + qrank * ih * di + scale(ih * di, qrank)
+            expect += q
         got = sum(a.bytes for a in target_weight_allocations(m, Q16, tp)
                   if "-w-dense-L" in a.alloc_id)
         assert got == expect, (tp, got, expect)
@@ -445,7 +454,12 @@ def test_replay_preserves_engram_and_non_hc_rows():
     from simverse.validation.registry import build_registry
     folder = ROOT / "docs/evidence/r05-mhc"
     before = json.loads((folder / "before.json").read_text(encoding="utf-8"))
-    scenario = ScenarioV2.from_json(json.loads((folder / "scenario.json").read_text(encoding="utf-8")))
+    sc_data = json.loads((folder / "scenario.json").read_text(encoding="utf-8"))
+    # R22：历史场景文件（act=8）早于量化配方冻结校验；V4.1 行字节已由
+    # extras.quant 配方驱动（act 位宽对本模型 inert），此处按现行契约把
+    # 场景 act 提到 16 再加载。before.json 的字节身份不受影响（磁盘未改）。
+    sc_data["quant"]["act"] = 16
+    scenario = ScenarioV2.from_json(sc_data)
     current = [r.to_json() for r in build_model_work(
         _model(), "target_decode", 1, 32768, 1, scenario.quant, tp=8)]
     # 排除 stage 名差异；冻结 R04 行与非 hc/非 R20 审计行（含 final_norm/
@@ -462,7 +476,14 @@ def test_replay_preserves_engram_and_non_hc_rows():
         "compressed_cache_write", "compressed_insert", "index_k_proj",
         "index_k_norm", "index_k_rope", "index_cache_write", "index_k_store",
         "swa_cache_write", "sparse_attention", "q_norm", "k_norm",
-        "moe_router", "moe_gate", "moe_score", "moe_topk_renorm"}
+        "moe_router", "moe_gate", "moe_score", "moe_topk_renorm",
+        # R22（2026-11-13）：量化映射改写通用行字节（MXFP8+scale/激活 BF16/
+        # embed-lm_head-norm BF16/专家 MXFP4+scale+Marlin 对齐/engram wkv
+        # scale）。由 tests/test_v41_quant.py 的 replay 归因单独冻结
+        #（docs/evidence/quant-map）。
+        "q_a_proj", "kv_proj", "q_b_proj", "o_a_proj", "o_b_proj",
+        "index_q_proj", "q_rope", "k_rope", "o_rope", "moe_routed",
+        "moe_shared", "engram_wkv", "final_norm", "lm_head", "embed_lookup"}
     def non_hc(rows):
         return [{k: v for k, v in r.items() if k != "stage"}
                 for r in rows

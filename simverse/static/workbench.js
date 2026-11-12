@@ -14,6 +14,10 @@
     w8a8: { dense_w: 8, expert_w: 8, act: 8, kv: 8, state: 32 },
     w8a8_fp4e: { dense_w: 8, expert_w: 4, act: 8, kv: 8, state: 32 }
   };
+  // R22：V4.1 checkpoint 量化格式 identity 冻结（MXFP8 线形/MXFP4 专家）+
+  // 注册设备（≤SM90 Marlin W8A16/W4A16）执行域 → 激活 BF16。后端
+  // scenario.validate 同值校验（V41_QUANT），选择器对该模型不生效。
+  var V41_QUANT = { dense_w: 8, expert_w: 4, act: 16, kv: 8, state: 32 };
 
   function fmt(v, unit, digits) {
     if (v === null || v === undefined) return '–';
@@ -131,7 +135,9 @@
       // 精度档 → 后端量化契约（scenario.validate 允许 4/8/16；state 固定 32bit）。
       // 注意：这是**场景输入精度**；profile 域门禁按其自身采集精度（如 BF16）
       // 独立核对，不匹配即回退并披露原因——不把“profile 需要 BF16”转成输入。
-      quant: QUANT_PRESETS[$('sel-prec') ? $('sel-prec').value : 'w8a8_fp4e'],
+      quant: ($('sel-model').value === 'deepseek_v41_flash')
+        ? V41_QUANT
+        : QUANT_PRESETS[$('sel-prec') ? $('sel-prec').value : 'w8a8_fp4e'],
       draft_quant: { dense_w: 8, expert_w: 8, act: 8, kv: 8, state: 32 },
       // 显式实现路径（活跃草稿无 quantization_config → raw 融合副本）；
       // dense_w 只是计价位宽，不决定该分支。

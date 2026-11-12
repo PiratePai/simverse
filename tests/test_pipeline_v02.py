@@ -17,7 +17,7 @@ from simverse.experiments import compare_runs, default_policy, sweep_1d, variant
 from simverse.methods import build_method_plan, acceptance_summary  # noqa: E402
 from simverse.model_ir import build_catalog  # noqa: E402
 from simverse.pipeline import run_v2  # noqa: E402
-from simverse.scenario import ScenarioV2  # noqa: E402
+from simverse.scenario import ScenarioV2, V41_QUANT  # noqa: E402
 
 import importlib.util
 _spec = importlib.util.spec_from_file_location("golden_v02", ROOT / "golden" / "oracles_v02.py")
@@ -124,6 +124,7 @@ def test_v41_structure_gap_blocks_ranking():
     sc = ScenarioV2(model_id="deepseek_v41_flash", method_id="chain_draft",
                     draft_id=None, k=4, deployment={"mode": "colocated",
                                                     "target_tp": 8},
+                    quant=V41_QUANT,
                     acceptance={"kind": "geometric", "alpha": 0.75})
     b = run_v2(sc, allow_internal_methods=True)
     assert b.manifest.status == "completed"
@@ -265,7 +266,7 @@ def test_missing_stage_cost_rejected_and_unpinned_mtp_fails_cleanly():
     with pytest.raises(ValueError, match="decode"):
         build_serial_round(plan, {}, 1.0)
     bundle = run_v2(ScenarioV2(model_id="deepseek_v41_flash",
-                               method_id="mtp", k=3))
+                               method_id="mtp", k=3, quant=V41_QUANT))
     assert bundle.manifest.status == "failed"
     assert "MTP" in bundle.metrics["error"].reason
 

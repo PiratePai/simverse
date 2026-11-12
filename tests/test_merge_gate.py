@@ -294,7 +294,18 @@ def test_g9_complete_config_leaves_registered_no_default_ignore():
     # 剩余显式缺口原样保留（不因 Engram 解除而整体放行）
     # R20：candidate_block_size 已 mapped（CSA2 索引/candidate pin）；剩余
     # 缺口不含 candidate 族键
-    assert {"quantization_config", "swiglu_limit"} <= gap_keys
+    # R22：quantization_config 5 叶键已按 quant-pin.json（20 文件）
+    # source-checked → mapped，不再是 gap（同 R04 Engram 先例的合法门禁
+    # 更新；swiglu/尾部/核本体缺口不变，仍在阻断）。
+    assert "quantization_config" not in gap_keys
+    assert "swiglu_limit" in gap_keys
+    quant_cov = {k.split(".")[-1]: v["status"]
+                 for k, v in m.coverage.items()
+                 if k.startswith("quantization_config.")}
+    assert set(quant_cov.values()) == {"mapped"}
+    assert set(quant_cov) == {"quant_method", "activation_scheme",
+                              "weight_block_size", "scale_fmt",
+                              "expert_dtype"}
     assert not gap_keys & {"candidate_block_size", "candidate_source_layer_id",
                            "candidate_topk_blocks", "index_topk",
                            "index_n_heads", "index_head_dim",
@@ -354,6 +365,8 @@ def test_g11_v41_oa_group_flops_absolute_tp1_2_4_8():
     from simverse.model_ir import build_catalog
     m = build_catalog()["models"]["deepseek_v41_flash"]
     Q16 = {"dense_w": 16, "expert_w": 16, "act": 16, "kv": 16, "state": 32}
+    # R22：o_a 为量化线性 → MXFP8 1B 值 + ue8m0 scale（1024×4096/32 每
+    # 组）；quant 位宽对 V4.1 inert（配方驱动）
     for tp in (1, 2, 4, 8):
         ng = 8 // tp
         rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp)
@@ -361,7 +374,7 @@ def test_g11_v41_oa_group_flops_absolute_tp1_2_4_8():
         assert len(rows) == 40
         for r in rows:
             assert r.flops == 2 * 1 * 4096 * 1024 * ng
-            assert r.weight_capacity == 4096 * 1024 * ng * 2
+            assert r.weight_capacity == 4096 * 1024 * ng * 1 + ng * (1024 * 4096 // 32)
 
 
 def test_g12_qwen36_shared_gate_row_every_moe_layer():
@@ -441,8 +454,10 @@ def test_g14_evidence_refs_are_model_specific_and_registered():
     known = set(build_registry())
     cat = build_catalog()
     q = run_v2(ScenarioV2()).to_json()
+    from simverse.scenario import V41_QUANT
     v = run_v2(ScenarioV2(model_id="deepseek_v41_flash",
                           method_id="baseline", draft_id=None,
+                          quant=V41_QUANT,
                           deployment={"mode": "baseline",
                                       "target_tp": 8})).to_json()
     assert set(q["evidence_refs"]) <= known

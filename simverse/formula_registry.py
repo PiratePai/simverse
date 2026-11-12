@@ -290,6 +290,45 @@ F_MOE_ROUTE_SCORE = _f(
     "steers selection only）；model.py L303-320（e_score_correction_bias/"
     "bias_vl 创建条件）",
     "moe_score 行（每 MoE 层；选择列含 bias、权重列不含——noaux_tc）")
+F_QUANT_MXFP8_LINEAR = _f(
+    "v2.quant_mxfp8_linear",
+    "值 = N·K·1B（e4m3）；scale = N·(K/32)·1B（ue8m0，运行时 (1,32) 展开"
+    "后口径；checkpoint 为 (N/32, K/32) 32×32 块）；weight_read/capacity "
+    "= 值+scale；激活 = T·K·2B（BF16；≤SM90 Marlin W8A16 执行域激活不"
+    "量化）；K 每 rank 整除 32 否则拒绝",
+    "deepseek_v41/quant_config.py L221-243（线性分支）；modelopt.py "
+    "L2424-2479（KMxfp8Static：weight (N,K) e4m3 + weight_scale (N,K/32) "
+    "uint8、K%32 断言 L2450-2454、ckpt 32×32 展开 L2430-2445、"
+    "weight_block_size=[1,32]）；quant_utils.py L246-251（kMxfp8Static="
+    "fp8+uint8(1,32)）；marlin.py L13-40（SM80+ W8A16）+flashinfer.py "
+    "L47-53/L126-139（SM100+ 门）",
+    "V4.1 量化线性（dense/attention 投影/共享专家；count/work.gemm scale"
+    " 项与 count/moe.moe_shared、memory dense/shared 对象）")
+F_QUANT_MXFP4_EXPERT = _f(
+    "v2.quant_mxfp4_expert",
+    "每专家值 = I_eff·H + H·I_eff/2 = 1.5·H·I_eff（w13 (2I,H/2)+w2 "
+    "(H,I/2) uint8 打包 2 值/byte）；scale = 3·H·I_eff/32（w13 (2I,H/32)"
+    "+w2 (H,I/32) ue8m0）；I_eff = roundup(inter_per_rank, 128)、H_eff = "
+    "roundup(H,256)（Marlin 分配对齐；EP 开时 inter 不分片）；FLOPs 仍按"
+    "逻辑 inter 精确计（补齐块不算算量）；激活 BF16 2B（W4A16）",
+    "mxfp4.py L765-840（create_weights 形状）+L713-731（maybe_roundup）；"
+    "routed_experts.py L190-203（create_weights 前调用 roundup）；"
+    "oracle/mxfp4.py L850-855（MARLIN I→128/H→256；TRTLLM 同 128/256 "
+    "L856-858）；L461-486（SM90 落 Marlin/Humming 的优先级域）",
+    "moe_routed 行 weight_capacity/weight_read_expected 与 memory experts"
+    " 对象（per-expert/per-shard 字节）")
+F_QUANT_UNQUANTIZED = _f(
+    "v2.quant_unquantized_classes",
+    "embed/lm_head/RMSNorm/gate/ compressor-wk-weights_proj/mHC/engram 表 "
+    "= 未量化，沿 model dtype BF16 2B（容量与读同口径）；不随场景 "
+    "dense_w/act 位宽缩放",
+    "fp8.py L174-203（get_quant_method 仅 LinearBase/RoutedExperts/"
+    "Attention，其他返回 None → 默认方法）；vocab_parallel_embedding.py "
+    "L318-340（quant fallback → UnquantizedEmbeddingMethod）；R21/R20/R05/"
+    "R04 各自 pin（gate/compressor/wk/weights_proj/mHC/engram 事实）",
+    "head_rows embed/lm_head/final_norm、q_norm/k_norm、各 bf16 固定行与"
+    " memory 对象（R22 修正：此前 embed/lm_head/final_norm 随场景 "
+    "dense_w=1B 计价，低估 2×）")
 F_MOE_ROUTE_TOPK = _f(
     "v2.moe_route_topk",
     "ops = T·[k·(5E+3) + 2k+4]——k 轮平坦偏置 argmax（每轮 max 归约 E−1、"

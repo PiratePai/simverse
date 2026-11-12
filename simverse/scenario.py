@@ -42,6 +42,23 @@ V41_KV_RECORDS = {
                            "logits_itemsize": 2, "family": "sm100"},
 }
 V41_INDEX_K_BYTES = 132
+# R22（2026-11-13）：V4.1 checkpoint 量化格式是 identity 冻结的——
+# quantization_config（official 资产）经 pinned dispatch 决定各层存储/执行
+# 字节，行构建按 extras["quant"] 配方计价，场景 quant 位宽不再自由定价：
+#   * dense_w=8 / expert_w=4：MXFP8 e4m3 1B + MXFP4 打包 0.5B（R22
+#     quant-pin.json；量化/未量化变体不存在，故其他值拒绝）；
+#   * act=16：注册设备（H100/H200=SM90、L40=SM89）上 FlashInfer MXFP8
+#     kernel 均要求 SM100+，stock 路径为 Marlin W8A16/W4A16——激活保持
+#     BF16，无运行时激活量化（marlin.py L14"SM80+"、flashinfer.py
+#     L47-53/L126-139 SM100 门、oracle/mxfp4.py L461-486 优先级）。把 act
+#     设为 8 等于宣称 SM100 激活量化部署，无注册设备可承载 → 拒绝。
+# kv/state 不受限：V4.1 KV 宽度由 v41_kv_record 配方决定，state 非 V4.1
+# 语义，两者不进 V4.1 行计价。
+V41_QUANT = {"dense_w": 8, "expert_w": 4, "act": 16}
+# 通用默认精度档（quant/draft_quant 字段缺省值；部分覆盖时补齐用）
+_DEFAULT_QUANT = {"dense_w": 8, "expert_w": 4, "act": 8, "kv": 8, "state": 32}
+_DEFAULT_DRAFT_QUANT = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
+                        "state": 32}
 # V4.1 压缩器 ratio-2 环形状态：每请求 capacity 行 × 4096 B fp32
 # （2×512 kv+score = 1024 个 fp32 元素；capacity = max(8, next_pow2(num_spec+2))；
 # compressor.py L250-252；无投机 = 8）。
@@ -166,6 +183,15 @@ class ScenarioV2:
             self.deployment = _deploy_from(self.deployment)
         if isinstance(self.workload, dict):
             self.workload = WorkloadHypothesis(**self.workload)
+        # R22：部分覆盖 quant/draft_quant 时按默认档补齐缺键（V41_QUANT
+        # 只钉 dense_w/expert_w/act 三键，便于显式书写；缺键取默认档后再
+        # 走 validate 的域校验）。
+        for field_name in ("quant", "draft_quant"):
+            given = getattr(self, field_name)
+            if given and len(given) < len(_DEFAULT_QUANT):
+                merged = dict(_DEFAULT_QUANT)
+                merged.update(given)
+                setattr(self, field_name, merged)
 
     def validate(self) -> "ScenarioV2":
         if self.deployment.mode not in DEPLOY_MODES:
@@ -230,6 +256,19 @@ class ScenarioV2:
                     f"{dev_fam or '未登记 family'}；注册设备 H100/H200=SM90、"
                     "L40=SM89，当前无 SM100 设备。该组合不能作为可部署场景"
                     "运行（pinned attention.py L198-199）。")
+            # R22：checkpoint 量化格式冻结（MXFP8/MXFP4）+ 注册设备执行域
+            # （≤SM90 Marlin W8A16/W4A16 → BF16 激活）；位宽不允许脱离
+            # 配方虚构（无 BF16/未量化 checkpoint 变体，也无 SM100 激活
+            # 量化设备）。行计价由 extras["quant"] 配方驱动。
+            for key, want in V41_QUANT.items():
+                got = self.quant.get(key)
+                if got != want:
+                    raise ValueError(
+                        f"V4.1 场景 quant.{key}={got} 与冻结配方冲突："
+                        f"checkpoint 量化 + 注册设备（≤SM90）执行域要求 "
+                        f"{key}={want}（R22 quant-pin.json：MXFP8 线性/"
+                        "MXFP4 专家/BF16 激活；行字节按 extras.quant 配方"
+                        "计价，场景位宽不能另定价）")
         # 一致性护栏（不是用位宽选分支）：raw 融合副本要求未量化权重；
         # 4bit 计价档与 fused_raw 矛盾，必须显式改为 per_layer_fallback。
         if path == FUSED_RAW and (self.draft_quant or {}).get("dense_w", 16) < 8:

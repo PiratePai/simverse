@@ -1,0 +1,8 @@
+{
+  "head": "a23a6dbf4b146876c2a5253ed8f585e9b131d004",
+  "captured_before_edits": true,
+  "worktree": "D:\\Github\\new-viewer",
+  "git_status_porcelain": "?? docs/evidence/quant-map/\n?? docs/rebuild-20261106/references/vllm/quant-pin.json\n?? docs/rebuild-20261106/references/vllm/vllm/config/model.py\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/kernels/linear/\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/fused_moe/experts/\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/fused_moe/oracle/\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/fused_moe/routed_experts.py\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/quantization/\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/vocab_parallel_embedding.py\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v41/__init__.py\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v41/quant_config.py\n?? docs/rebuild-20261106/references/vllm/vllm/utils/\n?? simverse/count/quant_layout.py\n?? tmp_fetch_out.json\n?? tools/replay_v41_quant.py\n",
+  "note": "R22 基线：HEAD a23a6db（main，R21 合入后）+ 未提交 R22 改动stash 后的生产代码；quant-pin.json 20 文件 pin 源码已在工作区（不影响 simverse 行为）；simverse 生产代码与 main 相同",
+  "before_sha256": "9f09ae43e2bf4d29971235b13b5c248172df8c8d103d9a483b3d96407fe26be8"
+}

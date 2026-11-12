@@ -166,7 +166,8 @@ def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int) -> list:
 
 
 def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 1,
-             local_experts: int | None = None) -> list:
+             local_experts: int | None = None,
+             quant_recipe: dict | None = None) -> list:
     """一层 MoE 的账本行（router/routed/shared(+gate)）——**per-rank 口径**。
 
     tp/ep/local_experts 来自 lowering/parallel.ParallelPlan：
@@ -175,6 +176,13 @@ def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 
       * EP 开：E_l = local_experts（余数 rank +1）、整专家 inter；
         期望 distinct 本地专家 = E_l·(1−(1−k/E)^M)；流量按本地 assignment
         份额 k·E_l/E（均匀路由期望，登记 expectation）。
+    R22 quant_recipe（V4.1 extras.quant）在场时：
+      * 专家字节 = MXFP4 打包 0.5B + ue8m0 scale，并按 Marlin 分配对齐
+        （intermediate→128、hidden→256；routed_experts.py L190-203 于
+        create_weights 前调用 maybe_roundup_sizes）——FLOPs 仍按逻辑
+        inter 精确计，不把补齐块算成算量；
+      * 激活字节 = BF16 2B（≤SM90 Marlin W8A16/W4A16 执行域）；
+      * shared 字节并入 ue8m0 scale（3·h·I_r/32）。
     返回 list[dict]，字段与 count.work.OpRow 对齐；期望字段单列
     weight_read_expected（float），不与精确整数列混排。
     """
@@ -182,31 +190,60 @@ def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 
     b_router = quant["dense_w"] / 8
     b_expert = quant["expert_w"] / 8
     b_act = quant["act"] / 8
+    if quant_recipe is not None:
+        # R22：V4.1 shared 值字节随配方（MXFP8 1B；router 行对 V4.1 被 R21
+        # 三行替换，不消费 b_router）
+        b_act = float(quant_recipe["act_itemsize"])
+        b_router = float(quant_recipe["dense_linear"]["value_itemsize"])
+        b_expert = float(quant_recipe["routed_experts"]["value_itemsize"])
     T = tokens
     ep_on = ep != 1
     E_l = local_experts if local_experts is not None else E
     inter_rank = inter if ep_on else inter // tp
+    from .quant_layout import (marlin_round_up_hidden,
+                               marlin_round_up_intermediate,
+                               mxfp4_expert_bytes)
     if ep_on:
         share = E_l / E                       # 本地 assignment 份额（期望）
         routed_flops = int(2 * T * k * 3 * hidden * inter * share)
-        per_expert_bytes = int(3 * hidden * inter * b_expert)
+        if quant_recipe is not None:
+            i_eff = marlin_round_up_intermediate(inter)
+            h_eff = marlin_round_up_hidden(hidden)
+            v_b, s_b = mxfp4_expert_bytes(h_eff, i_eff)
+            per_expert_bytes = v_b + s_b
+            note = (f"MXFP4 0.5B+ue8m0 scale，I_eff={i_eff}/H_eff={h_eff}"
+                    "（Marlin 对齐，R22）")
+        else:
+            per_expert_bytes = int(3 * hidden * inter * b_expert)
+            note = ""
         # 期望 distinct 本地专家命中数 × 整专家字节
         exp_union_local = E_l * (1.0 - (1.0 - k / E) ** T)
         w_expected = exp_union_local * per_expert_bytes
         cap = int(E_l * per_expert_bytes)
         act_assign = T * k * share            # 期望本地 assignment 行数
         shape = (f"E={E} top-{k} M={T} EP{ep} E_local={E_l} → "
-                 f"E[U_local]={exp_union_local:.3f}（均匀路由假设）")
+                 f"E[U_local]={exp_union_local:.3f}（均匀路由假设）"
+                 + (f"；{note}" if note else ""))
     else:
         routed_flops = 2 * T * k * 3 * hidden * inter_rank
-        per_expert_shard_bytes = int(3 * hidden * inter_rank * b_expert)
+        if quant_recipe is not None:
+            i_eff = marlin_round_up_intermediate(inter_rank)
+            h_eff = marlin_round_up_hidden(hidden)
+            v_b, s_b = mxfp4_expert_bytes(h_eff, i_eff)
+            per_expert_shard_bytes = v_b + s_b
+            note = (f"MXFP4 0.5B+ue8m0 scale，I_eff={i_eff}/H_eff={h_eff}"
+                    f"（{inter_rank}→{i_eff}，Marlin 128 对齐，R22）")
+        else:
+            per_expert_shard_bytes = int(3 * hidden * inter_rank * b_expert)
+            note = ""
         # 每 rank 持全部专家的 inter/tp 分片：期望并集仍在全 E 上取
         exp_union = expected_union(E, k, T)
         w_expected = exp_union * per_expert_shard_bytes
         cap = int(E * per_expert_shard_bytes)
         act_assign = T * k
         shape = (f"E={E} top-{k} M={T} TP{tp} inter/tp={inter_rank} → "
-                 f"E[U]={exp_union:.3f}（分片字节口径）")
+                 f"E[U]={exp_union:.3f}（分片字节口径）"
+                 + (f"；{note}" if note else ""))
     rows = [{
         # router gate：Replicated（vLLM GateLinear），每 rank 全量
         "layer_op": "moe_router", "flops": 2 * T * hidden * E,
@@ -230,14 +267,26 @@ def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 
     if moe.shared_intermediate:
         si = moe.shared_intermediate
         si_rank = si // tp                    # dense MLP 配方：inter/tp（EP 不改）
+        shared_scale_b = 0
+        shared_note = ""
+        if quant_recipe is not None:
+            # R22：共享专家与 dense 线性同 dispatch（DeepseekV4MLP 传
+            # quant_config）→ MXFP8 值 1B + ue8m0 scale（gate_up (2I,h) +
+            # down (h,I) 各按 (1,32) 块）；权重 pad 到 TP×32 整数倍在官方
+            # 维度（2304%256=0）无补齐（model.py _pad_shared_expert_weight）。
+            from .quant_layout import mxfp8_linear_bytes
+            _v1, s1 = mxfp8_linear_bytes(2 * si_rank, hidden)
+            _v2, s2 = mxfp8_linear_bytes(hidden, si_rank)
+            shared_scale_b = s1 + s2
+            shared_note = "；MXFP8 1B+ue8m0 scale（R22）"
         rows.append({
             "layer_op": "moe_shared", "flops": 2 * T * 3 * hidden * si_rank,
-            "weight_read": int(3 * hidden * si_rank * b_router),
-            "weight_capacity": int(3 * hidden * si_rank * b_router),
+            "weight_read": int(3 * hidden * si_rank * b_router) + shared_scale_b,
+            "weight_capacity": int(3 * hidden * si_rank * b_router) + shared_scale_b,
             "act_read": int(T * hidden * b_act + 6 * T * si_rank * b_act),
             "act_write": int(T * hidden * b_act),
             "formula": FR.F_GEMM, "statistic": "exact",
-            "shape": f"shared inter={si}/tp{tp}={si_rank}",
+            "shape": f"shared inter={si}/tp{tp}={si_rank}{shared_note}",
         })
         if moe.shared_gate:
             rows.append({

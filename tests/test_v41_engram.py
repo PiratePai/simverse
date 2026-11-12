@@ -38,7 +38,7 @@ from simverse.lowering.sharding import model_collectives  # noqa: E402
 from simverse.lowering.parallel import validate_parallel  # noqa: E402
 from simverse.model_ir.catalog import build_catalog  # noqa: E402
 from simverse.pipeline import run_v2  # noqa: E402
-from simverse.scenario import ScenarioV2  # noqa: E402
+from simverse.scenario import ScenarioV2, V41_QUANT  # noqa: E402
 
 Q16 = {"dense_w": 16, "expert_w": 16, "act": 16, "kv": 16, "state": 32}
 Q8 = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8, "state": 32}
@@ -422,11 +422,11 @@ def test_ledger_delta_is_exactly_engram_rows():
     assert (t_on["weight_read_expected"] - t_off["weight_read_expected"]
             == pytest.approx(sum(r.weight_read_expected or 0.0
                                  for r in delta_rows)))
-    # 独立手算（TP8，b_w=b_a=2）
+    # 独立手算（TP8；R22：wkv 值 1B + ue8m0 scale 3200×6144/32=614,400/层；post_wkv q/k bf16 不变）
     per_common = (3 * 256 + 2 * 6144 * 3200 + 4 * (10 * 5120 + 5))
     assert t_on["flops"] - t_off["flops"] == 2 * per_common + 112
     assert t_on["weight_read"] - t_off["weight_read"] == \
-        2 * (6144 * 3200 * 2 + 81920)
+        2 * (6144 * 3200 * 1 + 3200 * (6144 // 32) + 81920)
     assert t_on["act_read"] - t_off["act_read"] == \
         2 * (3 * 4 + 6144 * 2 + (4 * 5120 + 5 * 5120) * 2 + 1) + 4
     assert t_on["act_write"] - t_off["act_write"] == \
@@ -487,24 +487,28 @@ def test_table_placement_cpu_offload_excluded_from_gpu_peak():
     rep = cpu.peak_vs_budget()
     assert rep["known_peak_bytes"] == gpu_steady        # 表不在 GPU 峰值
     assert "host_resident_bytes" in rep
-    # 显式 gpu 驻留：表计入 GPU → 下界超标称 → oom（§R03b 不依赖预算）
+    # 显式 gpu 驻留：表计入 GPU。R22 量化映射（MXFP4 打包 0.5B+scale +
+    # Marlin 对齐）后 TP8 已知下界 75.4 GiB < H100 标称 80 GiB——不再按
+    # 下界判 OOM；可分配预算仍 unknown → 判定保持 unknown（R03b 四态链
+    # 路不变，只是数值不再超界）。旧 Q16 口径（2B 专家）曾为 oom。
     gpu = _rank_memory(8, "gpu")
     assert gpu.host_resident_bytes() == 0
     rep_gpu = gpu.peak_vs_budget()
-    assert rep_gpu["status"] == "oom"
+    assert rep_gpu["status"] == "unknown"
     assert rep_gpu["known_peak_bytes"] == gpu_steady + cpu.host_resident_bytes()
-    assert rep_gpu["known_peak_bytes"] > rep_gpu["nominal_bytes"]
+    assert rep_gpu["known_peak_bytes"] < rep_gpu["nominal_bytes"]
+    assert rep_gpu["known_peak_bytes"] == 75_410_707_008   # R22 手算对账
 
 
 def test_scenario_engram_table_placement_validation():
     """非法值拒绝（镜像 draft_ctx_kv_path 模式）；默认 cpu_offload 可跑。"""
     with pytest.raises(ValueError, match="engram_table_placement"):
         ScenarioV2(model_id="deepseek_v41_flash", method_id="baseline",
-                   draft_id=None,
+                   draft_id=None, quant=V41_QUANT,
                    deployment={"mode": "baseline", "target_tp": 8,
                                "engram_table_placement": "hbm"}).validate()
     sc = ScenarioV2(model_id="deepseek_v41_flash", method_id="baseline",
-                    draft_id=None,
+                    draft_id=None, quant=V41_QUANT,
                     deployment={"mode": "baseline", "target_tp": 8})
     assert sc.validate().deployment.engram_table_placement == "cpu_offload"
     # 默认 V4.1 run 的内存块披露 host 表 + staged 下界

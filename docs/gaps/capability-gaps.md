@@ -9,7 +9,9 @@ DFlash 服务栈核对部分解除；R21：G-C13 V4.1 MoE scoring/top-k/分组�
 2026-11-13 三轮复核（G-C13 证据链修正：EP 只按 mega 断言、共享专家独立相加、
 ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
 （GateLinear 权重沿 loader BF16、输入由 mHC layer_input BF16；新增
-linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）。
+linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）；
+2026-11-13 R22：G-C14 新增（量化映射主干已解除、执行变体登记），
+quantization_config 5 叶键 mapped（见 G-C14）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 
@@ -39,12 +41,13 @@ linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）。
   TLB/GB200 排序阈值 36864/4096）未建模；amd/engram.py 变体未 pin；mhc
   kernel/CPU/GPU 执行、实际 split-k 与部署变体未验证（源码已由 R05 pin 入册）。
   CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE
-  scoring/top-k/分组路由已由 R21 解除（见 G-C13）；量化映射、swiglu clamp、
-  稀疏 MLA 注意力核本体、compress_ratios 尾部仍为独立缺口。
+  scoring/top-k/分组路由已由 R21 解除（见 G-C13）；量化映射已由 R22 解除
+  （见 G-C14）；swiglu clamp、稀疏 MLA 注意力核本体、compress_ratios 尾部
+  仍为独立缺口。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
   mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需
-  量化/稀疏 MLA 核本体/compress_ratios 尾部缺口闭环（CSA2 索引与 MoE 路由
-  已分别由 R20/R21 解除）。
+  swiglu/稀疏 MLA 核本体/compress_ratios 尾部缺口闭环（CSA2 索引、MoE 路由
+  与量化映射已分别由 R20/R21/R22 解除）。
 - **当前降级**：structure gate 拦截（capability 可见；Engram 单机/hc 部分已不再缺）。
 - **优先级**：P0（必需模型场景）。
 
@@ -105,7 +108,41 @@ linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）。
   （E∈{256,384}/k=6）外的 E/k 值未独立核；DSpark 草稿层 MoE（E=128/k=3）
   方法层不建模；padding skip/CUDA-graph 整宽路由缓冲未入账；
   defer_finalize 需 scaling==1.0（V4.1-Flash=1.5 不适用）；量化专家
-  权重布局（quantization_config 独立缺口）。
+  权重布局已由 R22 解除（G-C14）。
+
+## G-C14 ~~V4.1 量化映射（quantization_config → 布局/字节/执行域）~~ → 主干已解除（2026-11-13 R22）⭐P0
+
+- **解除交付**：quant-pin.json 20 文件 pin（vllm @f358f057，blob sha1 对
+  vllm-tree.json 逐项校验 + SHA256；dispatch 链 5 文件 + MXFP8 线性 4 文件 +
+  MXFP4 专家 4 文件 + kernel 域 5 文件 + 未量化类 1 文件 +
+  transformers config 1 文件）。覆盖：quant_method=fp8+deepseek_v41* →
+  DeepseekV41FP8Config override；expert_dtype 由 config 类提升、fp4 派生
+  is_scale_e8m0；线性 ModelOptLinearMethod(kMxfp8Static,kMxfp8Dynamic)——
+  e4m3 1B + ue8m0 (1,32) scale（checkpoint 32×32 块装载展开、K 每 rank
+  整除 32）；路由专家 Mxfp4MoEMethod——打包 2 值/byte + ue8m0 scale、
+  Marlin 分配对齐 I→128/H→256；embed/lm_head/RMSNorm 未量化 BF16；
+  执行域注册设备（≤SM90）= Marlin W8A16/W4A16 → 激活 BF16（FlashInfer
+  MXFP8/SM100 kernel 与 TRTLLM/DeepGEMM 专家核均 SM100+）；KV 缓存不受
+  quantization_config 影响（无缓存叶键）。scale_fmt 键 loader 不消费
+  （from_config 键表无该键），非 ue8m0 值按声明矛盾拒绝。落地：
+  count/quant_layout 字节公式、work/moe/head/hc/engram 行 recipe 计价、
+  memory scale/打包/对齐对象与 embed-lm_head-norm BF16、pipeline 集合通信
+  载荷 BF16、model_ir extras.quant + 5 叶键 mapped、scenario V41_QUANT
+  冻结校验；独立 oracle 31 项（tests/test_v41_quant.py）+ replay 逐 op
+  归因（evidence/quant-map；--check 无漂移）。证据 ev-vllm-v41-quant；
+  source_map sm-v41-quant-dispatch；公式 v2.quant_*；
+  [报告](../validation/v41-quant-map-20261113.md)。
+- **仍缺（登记不冒充，执行变体）**：Humming W4A8（cc=90 优先于 Marlin、
+  可选外部 humming 包、I→64 对齐、block-FP8(128) 激活）；SM100
+  TRTLLM/DeepGEMM/FlashInfer W8A8 mxfp8 动态激活（1B+K/32/行；注册设备
+  无 SM100）；emulation 反量化驻留（默认 env 开 → BF16 2B）；NVFP4
+  moe_quant_algo 专家；expert_dtype=fp8 Flash-Base 块量化专家；Marlin
+  重排/补齐字节与 workspace（驻留按 create_weights 分配口径计）；
+  marlin_moe/marlin_utils_fp8 is_supported_config 细节未逐项 pin；成本层
+  gemm 峰值档未随 W8A16（bf16 TC）改路由（乐观算力上限，登记）。
+- **当前降级**：无（执行域按注册设备固定为 Marlin W8A16/W4A16，变体以
+  extras.quant 披露）；structure_complete 仍由 swiglu/核本体/尾部缺口阻断。
+- **优先级**：P0（必需模型场景）。
 
 ## G-C12 ~~V4.1 CSA2 索引打分/top-k/candidate block~~ → 已解除（2026-11-12 R20）⭐P0
 
