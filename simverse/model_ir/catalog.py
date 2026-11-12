@@ -79,7 +79,7 @@ _V41_EVIDENCE = ModelEvidence(
     note="Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 "
          "cpu_offload 运行时行为未覆盖）；CSA2 索引打分/top-k/candidate block/"
          "压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json "
-         "20 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；"
+         "21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；"
          "MoE scoring/量化映射/注意力核本体仍缺口；hc 仅 source-checked，未执行。")
 
 _DFLASH_EVIDENCE = ModelEvidence(

@@ -43,25 +43,31 @@
 
 ## G-C12 ~~V4.1 CSA2 索引打分/top-k/candidate block~~ → 已解除（2026-11-12 R20）⭐P0
 
-- **解除交付**：csa2-pin.json 20 文件 pin（vllm @f358f057，blob sha1 对
-  vllm-tree.json 逐项校验；其中 12 文件为任务书预置、8 文件网络拉取后同验）。
+- **解除交付**：csa2-pin.json 21 文件 pin（vllm @f358f057，blob sha1 对
+  vllm-tree.json 逐项校验；其中 13 文件为任务书预置、8 文件网络拉取后同验；
+  补入 sparse_attn_indexer 直接 import 的 v1 backend，移除未入 tree 的重复
+  candidate_blocks 副本）。
   count：index_select 拆为 index_score（2·pairs·(ih·di+ih) + fp32 logits）与
   index_topk（2·pairs+T·topk 选择惯例）；candidate_publish → candidate_select
   （源层 20：top-2048×8 压缩位块，块最大值 NaN 传播、最新块 +inf 钉扎、−1
   填充）+ candidate_mask（消费层 24/28/32/36 mask 后自有 top-k）；短上下文
   旁路 end//r≤512 走 index_fill（0 flops 纯 store，修正旧式 T·topk 误计）；
-  compress_pool（r2 softmax 门控 7d+9/group + 环形 state cap8×1024B fp32/请求/
-  层，r1 纯 norm exact）；compressed_insert / index_k_store（132B/行）合并行；
-  sparse_index_build（decode 每 (kv源:索引源:r) 等键运行首层一次）。memory：
-  SWA/压缩缓存按打包记录 584|528 B/token（显式 v41_kv_record 场景配方，进
-  身份）、索引 K 132B、ratio2 环形 state、compressor/wk/weights_proj bf16
-  固定权重、topk/candidate 共享缓冲下界（模型级单例）。
-- **验收**：tests/test_v41_csa2.py 20 项——pin 完整性、拓扑/运行首层/candidate
+  compress_pool（r2 softmax 门控 7d+9/group + 环形 state cap8×4096B fp32/行/
+  请求，r1 纯 norm exact）；compressed_insert / index_k_store（132B/行）合并行；
+  sparse_index_build（decode 每 (kv源:索引源:r) 等键运行首层一次，128 对齐）。
+  memory：SWA/压缩缓存按打包记录 584|528 B/token（显式 v41_kv_record 场景
+  配方，进身份）、索引 K 132B、ratio2 环形 state、compressor/wk/weights_proj
+  bf16 固定权重（输入/输出激活字节同按 pinned dtype）、主 attention
+  q_norm/kv_norm bf16 常驻（40 层 143,360 B）、topk/candidate 共享缓冲下界
+  （模型级单例）。`v41_kv_record` 与目标设备 family 强校验：H100/H200 只允许
+  sm90，L40（SM89）拒绝 sm90，当前无 SM100 设备故 sm100/nvfp4 一律拒绝。
+- **验收**：tests/test_v41_csa2.py 31 项——pin 完整性、拓扑/运行首层/candidate
   所有权独立推导、短上下文两侧分支（含混合 ctx=800：r2 旁路 r1 全打分）、
-  decode/prefill 打分独立复算、select/mask/fill stdlib 独立语义（NaN 排序
-  最前、钉扎、-1/-inf、候选含 -1 不掩块负例）、记录宽度/环形/缓冲对账、
-  bf16 权重不随 dense_w 缩放、config 域负例 4 项、replay 冻结。
-  证据 ev-vllm-v41-csa2（source-checked，executed=False）。
+  decode/prefill 打分与 prefill 候选独立复算、select/mask/fill stdlib 独立
+  语义（NaN 排序最前、钉扎、-1/-inf、候选含 -1 不掩块负例）、记录宽度/环形/
+  缓冲/128 对齐对账、bf16 权重与激活一致性、主 attention q_norm/kv_norm
+  单层/整模型 oracle、记录族设备兼容 6 负例+1 正例、config 域负例 4 项、
+  replay 冻结。证据 ev-vllm-v41-csa2（source-checked，executed=False）。
 - **仍缺（登记不冒充）**：稀疏 MLA 注意力核本体（flops 4d+5 仍 v0.1 移植）；
   SM100 sparse-logits（消费层只打分候选块，O(候选) 而非全候选）、decode_topk
   CuTe BF16 直选、bf16 logits/deep_select、chunk_decode 预算、fused_mqa_topk、

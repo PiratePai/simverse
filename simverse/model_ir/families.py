@@ -114,7 +114,7 @@ _ENGRAM_KEY_NOTES = {
 }
 
 # R20（2026-11-12）：CSA2 索引打分/top-k/candidate block 键的 mapped 注记
-# （证据 csa2-pin.json 20 文件 + ev-vllm-v41-csa2；消费者
+# （证据 csa2-pin.json 21 文件 + ev-vllm-v41-csa2；消费者
 # count/work.v41_layer_rows、lowering/memory、scenario.v41_kv_record）。
 _CSA2_KEY_NOTES = {
     "index_topk":
@@ -604,7 +604,7 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     （count/work.engram_rows + lowering/memory engram 表/wkv/qk 对象）；
     表布局 FP8+E8M0 264B/行、素数桶、TP head 切分、wkv/qk 投影与门控注入
     语义见 extras["engram"]。
-    CSA2 索引打分/top-k/candidate block：2026-11-12 R20 按 20 文件 pin
+    CSA2 索引打分/top-k/candidate block：2026-11-12 R20 按 21 文件 pin
     （csa2-pin.json，vllm @f358f057，blob sha1 对 vllm-tree.json 逐项校验）
     source-checked 建模 → mapped（count/work.v41_layer_rows + lowering/
     memory 记录/环形状态/缓冲对象；公式 v2.csa2_*；短上下文旁路、
@@ -684,7 +684,7 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         if path in coverage and coverage[path]["status"] == "mapped":
             coverage[path] = {"status": "mapped", "consumer": "model_ir+count+memory",
                               "note": note}
-    # R20：CSA2 索引/candidate 键的 mapped 注记（同上替换；20 文件 pin
+    # R20：CSA2 索引/candidate 键的 mapped 注记（同上替换；21 文件 pin
     # csa2-pin.json，source-checked 2026-11-12）
     for key, note in _CSA2_KEY_NOTES.items():
         path = f"{text_prefix}.{key}" if text_prefix else key

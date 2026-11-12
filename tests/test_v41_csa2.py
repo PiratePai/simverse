@@ -1,9 +1,10 @@
 """V4.1 CSA2 索引打分/top-k/candidate block（R20，2026-11-12）。
 
-证据链：csa2-pin.json 20 文件 pin（vllm @f358f057，blob sha1 对
-vllm-tree.json 逐项校验；source-checked，kernel/CPU/GPU 均未执行）。
+证据链：csa2-pin.json 21 文件 pin（vllm @f358f057，blob sha1 对
+vllm-tree.json 逐项校验；含 sparse_attn_indexer 直接 import 的 v1 backend；
+source-checked，kernel/CPU/GPU 均未执行）。
 测试分层（不 import 生产公式复算的地方均独立推导）：
-  * pin 完整性：20 文件固定路径集合 + blob sha1（防清单删项/漂移）；
+  * pin 完整性：21 文件固定路径集合 + blob sha1（防清单删项/漂移）；
   * 拓扑 oracle：从官方 config 独立推导 kv/index/candidate 源与
     SparseIndexTables 等键运行首层，对照 Csa2IR 与账本行；
   * 分支 oracle：短上下文旁路（r=1/r=2 阈值、混合 ctx）两侧行集合；
@@ -106,9 +107,13 @@ def test_csa2_pin_blob_sha1_matches_tree():
         "sparse_mla.py",
         "vllm/models/deepseek_v41/nvidia/specialized_decode/attention/step.py",
         "vllm/models/deepseek_v41/sparse_mla.py",
+        "vllm/v1/attention/backends/mla/indexer.py",
         "tests/models/deepseek_v41/nvidia/specialized_decode/test_decode_topk.py",
     }
     assert pinned == expected, "pin 清单漂移"
+    # 上游 tree 中不存在该路径；此前误入目录的重复副本不应留在 pin 目录
+    assert not (BASE / "vllm/vllm/model_executor/layers/"
+                "candidate_blocks.py").exists()
     for f in pin["files"]:
         data = (BASE / "vllm" / f["path"]).read_bytes()
         sha1 = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
@@ -246,9 +251,32 @@ def test_prefill_score_pairs_oracle():
     # _sum_floor(n, r) = Σ_{t=1..n} floor(t/r)（独立求和对照）
     manual = sum(t // r for t in range(1, ctx + 1))
     score = next(x for x in _layer_rows(rows, li) if x.op == "index_score")
-    assert score.flops == 2 * manual * (_IH * _DI + _IH) + 2 * manual * _IH * 0
-    # kv/gather 为上界口径（prefill 标注），值等于 B×n×132 的 gather 拷贝
+    assert score.flops == 2 * manual * (_IH * _DI + _IH)
+    # gather 工作区按一次读/写计（不按每个 query 行重复）
     assert score.kv_read == 1 * n * V41_INDEX_K_BYTES
+    # prefill 的 logits 按有效 (query, candidate) 对 pairs 写，而非仅 B 行
+    assert score.act_read == 1 * n * V41_INDEX_K_BYTES
+    assert score.act_write == 1 * n * V41_INDEX_K_BYTES + manual * 4
+    topk = next(x for x in _layer_rows(rows, li) if x.op == "index_topk")
+    assert topk.act_read == manual * 4
+    assert topk.act_write == ctx * _TOPK * 4
+
+
+def test_prefill_candidate_rows_oracle():
+    """prefill candidate select/mask 按 tokens 行计（不是 decode 的 B 行）。"""
+    B, ctx = 1, 2048
+    rows = _rows(B=B, ctx=ctx, Q=ctx, prefill=True)
+    r = 1
+    n = ctx // r
+    manual = sum(t // r for t in range(1, ctx + 1))
+    nblocks = math.ceil(n / _CB)
+    sel = next(x for x in _layer_rows(rows, _CAND) if x.op == "candidate_select")
+    assert sel.act_read == manual * 4
+    assert sel.act_write == ctx * (nblocks * 4 + 4 + _CTB * 4)
+    assert sel.flops == ctx * (7 * nblocks + 2 * nblocks + _CTB)
+    msk = next(x for x in _layer_rows(rows, 24) if x.op == "candidate_mask")
+    assert msk.act_read == ctx * _CTB * 4
+    assert msk.act_write == manual * 4
 
 
 # ---- candidate 语义：stdlib 独立实现（select/mask/fill 的小尺寸对照）----
@@ -344,11 +372,54 @@ def test_candidate_rows_oracle():
 # 5. 打包记录 / 环形 state / 权重 bf16 / memory 账本
 # ---------------------------------------------------------------------------
 
+def test_sparse_index_build_width_alignment_128():
+    """combine_topk_swa_indices 按 128 对齐（不是 256）；SWA-only topk=0。"""
+    rows = _rows(B=1, ctx=32768)
+    build = {r.layer: r for r in rows if r.op == "sparse_index_build"}
+    # L0 为 swa-only：topk=0，仅 min(ctx,swa)=128 项 → 128 对齐宽
+    assert build[0].act_write == 1 * (128 * 4 + 4)
+    # L2/L20 等压缩运行首：topk 512 + 窗 128 = 640（已对齐）
+    assert build[2].act_write == 1 * (640 * 4 + 4)
+    for li, row in build.items():
+        r = _RATIOS[li]
+        win = min(32769, _SWA)
+        w_c = -(-((_TOPK if r else 0) + win) // 128) * 128
+        assert row.act_write == 1 * (w_c * 4 + 4), li
+
+
+def test_bf16_module_activation_bytes_producer_consumer():
+    """quant_config=None 的 compressor/wk/weights_proj 输入输出均 bf16；
+    wq_b 输出 bf16 与 index_q_rope 读取对齐（不随场景 act 缩放）。"""
+    B, S = 2, 3000          # r2: 1500>512、r1: 3001>512，均非旁路
+    rows = _rows(B=B, ctx=S)
+    T = B
+    h, d, di, ih, qrank = 5120, 512, 128, 32, 1280
+    for li in _KV_SRC:
+        r = _RATIOS[li]
+        mlt = 2 if r == 2 else 1
+        cp = next(x for x in _layer_rows(rows, li) if x.op == "compress_proj")
+        assert cp.act_read == T * h * 2
+        assert cp.act_write == T * d * mlt * 4
+        kp = next(x for x in _layer_rows(rows, li) if x.op == "index_k_proj")
+        assert kp.act_read == T * d * 2 and kp.act_write == T * di * 2
+    for li in _IX_SRC:
+        wp = next(x for x in _layer_rows(rows, li)
+                  if x.op == "index_weights_proj")
+        assert wp.act_read == T * h * 2 and wp.act_write == T * ih * 2
+        qp = next(x for x in _layer_rows(rows, li) if x.op == "index_q_proj")
+        assert qp.act_write == T * ih * di * 2
+        qr = next(x for x in _layer_rows(rows, li) if x.op == "index_q_rope")
+        assert qr.act_read == T * ih * di * 2 + T * ih * 2
+
+
 def test_packed_record_widths_pinned():
     assert V41_KV_RECORDS["fp8_ds_mla_sm90"]["swa_bytes"] == 584
     assert V41_KV_RECORDS["fp8_ds_mla_sm90"]["compressed_bytes"] == 584
+    assert V41_KV_RECORDS["fp8_ds_mla_sm90"]["family"] == "sm90"
     assert V41_KV_RECORDS["fp8_ds_mla_sm100"]["swa_bytes"] == 528
+    assert V41_KV_RECORDS["fp8_ds_mla_sm100"]["family"] == "sm100"
     assert V41_KV_RECORDS["nvfp4_ds_mla_sm100"]["compressed_bytes"] == 288
+    assert V41_KV_RECORDS["nvfp4_ds_mla_sm100"]["family"] == "sm100"
     assert V41_INDEX_K_BYTES == 132
     # 584 = 448 fp8 + 64 bf16 rope + 7×ue8m0 + pad（attention.py L196-199）
     assert 448 + 128 + 7 + 1 == 584 or 448 + 64 * 2 + 8 == 584
@@ -369,7 +440,7 @@ def test_kv_allocations_records_and_ring_oracle():
         if i in _KV_SRC:
             total += (ctx // r) * 584 + (ctx // r) * 132
             if r > 1:
-                total += V41_RING_CAPACITY * 2 * _D * 4   # ring cap8×1024B fp32
+                total += V41_RING_CAPACITY * 2 * _D * 4   # ring cap8×4096B fp32
     assert kv.bytes == total * B
     # sm100 记录族只改字节不改结构；nvfp4 只改压缩缓存
     a100 = kv_allocations(m, Q8, B, ctx, tp=8,
@@ -402,6 +473,53 @@ def test_compressor_bf16_weights_independent_of_quant():
                  + ng * orank * h                        # o_b
                  + qrank * ih * di)                      # indexer wq_b
     assert w16 - w8 == quantized * (2 - 1), "bf16 固定模块不得随 dense_w 缩放"
+
+
+def test_main_attention_norm_weight_capacity_and_read():
+    """q_norm(q_lora_rank)/kv_norm(head_dim) 为 bf16 常驻，独立对账。
+
+    单层：q_norm 1280×2=2560 B、k_norm 512×2=1024 B（共 3584 B）；
+    整模型 40 层 = 143,360 B。weight_read/weight_capacity 不随场景 act
+    位宽变化；整模型 memory dense 用独立公式复算并包含该固定项。
+    """
+    m = _model()
+    B, S = 2, 3000
+    rows8 = _rows(B=B, ctx=S, quant=Q8)
+    rows16 = _rows(B=B, ctx=S, quant=Q16)
+    qn8 = [r for r in rows8 if r.op == "q_norm"]
+    kn8 = [r for r in rows8 if r.op == "k_norm"]
+    assert len(qn8) == 40 and len(kn8) == 40
+    assert all(r.weight_read == r.weight_capacity == 1280 * 2 for r in qn8)
+    assert all(r.weight_read == r.weight_capacity == 512 * 2 for r in kn8)
+    total8 = sum(r.weight_read for r in qn8 + kn8)
+    total16 = sum(r.weight_read for r in rows16
+                  if r.op in ("q_norm", "k_norm"))
+    assert total8 == total16 == 40 * (1280 * 2 + 512 * 2) == 143_360
+
+    # 整模型 memory 独立复算（TP8/Q8）：所有 dense 项 + 主 norm/compressor/
+    # indexer bf16 固定项；不调用生产 target_weight_allocations 的公式。
+    h, heads, d, groups, orank = 5120, 64, 512, 8, 1024
+    qrank, di, ih, tp = 1280, 128, 32, 8
+    ng, heads_tp = groups // tp, heads // tp
+    expect = 0
+    for layer in m.layers:
+        a = layer.csa2
+        mlt = 2 if a.ratio == 2 else 1
+        terms = (h * qrank + h * d + qrank * heads_tp * d
+                 + (heads * d // groups) * orank * ng
+                 + ng * orank * h
+                 + 2 * (qrank + d))              # 主 q_norm + kv_norm bf16
+        if a.produces_kv:
+            terms += (2 * h * d * mlt            # compressor bf16
+                      + 2 * d * di               # wk bf16
+                      + 2 * (d + di))            # compressor norm + k_norm
+        if a.produces_index:
+            terms += (2 * h * ih                 # weights_proj bf16
+                      + qrank * ih * di)         # indexer wq_b（随 dense_w）
+        expect += terms
+    got = sum(a.bytes for a in target_weight_allocations(m, Q8, tp)
+              if "-w-dense-L" in a.alloc_id)
+    assert got == expect
 
 
 def test_compress_pool_and_ring_oracle():
@@ -447,16 +565,40 @@ def test_scenario_record_field_and_identity():
                                  "v41_kv_record": "bf16"})
     with pytest.raises(ValueError, match="v41_kv_record"):
         bad.validate()
-    other = ScenarioV2(model_id="deepseek_v41_flash", method_id="baseline",
-                       draft_id=None,
-                       deployment={"mode": "baseline", "target_tp": 8,
-                                   "v41_kv_record": "fp8_ds_mla_sm100"})
-    assert other.validate().scenario_digest() != base.scenario_digest()
-    # 非 V4.1 模型不受该字段影响（记录宽度只进 v41 行）
+    # 非 V4.1 模型不受该字段影响（记录宽度只进 v41 行；但进场景身份）
     q = ScenarioV2(model_id="qwen36_35b_a3b", method_id="dflash_v1")
     q2 = ScenarioV2(model_id="qwen36_35b_a3b", method_id="dflash_v1",
                     deployment=DeploymentSpec(v41_kv_record="nvfp4_ds_mla_sm100"))
-    assert q.validate().scenario_digest() != q2.validate().scenario_digest()  # 进身份
+    assert q.validate().scenario_digest() != q2.validate().scenario_digest()
+
+
+@pytest.mark.parametrize("device,rec", [
+    ("h100_sxm", "fp8_ds_mla_sm100"),      # H100 是 SM90，不是 SM100
+    ("h200_sxm", "nvfp4_ds_mla_sm100"),    # H200 是 SM90
+    ("h100_sxm", "nvfp4_ds_mla_sm100"),
+    ("l40", "fp8_ds_mla_sm90"),            # L40 是 Ada SM89
+    ("l40", "fp8_ds_mla_sm100"),
+    ("b200", "fp8_ds_mla_sm100"),          # 未注册设备 → 未登记 family
+])
+def test_v41_kv_record_rejects_incompatible_device(device, rec):
+    sc = ScenarioV2(
+        model_id="deepseek_v41_flash", method_id="baseline", draft_id=None,
+        deployment={"mode": "baseline", "target_tp": 8,
+                    "target_device": device, "v41_kv_record": rec})
+    with pytest.raises(ValueError, match="v41_kv_record"):
+        sc.validate()
+
+
+def test_v41_kv_record_compatible_registered_devices():
+    # 注册的 SM90 设备只允许 sm90 记录；当前无 SM100 设备
+    for device in ("h100_sxm", "h200_sxm"):
+        sc = ScenarioV2(
+            model_id="deepseek_v41_flash", method_id="baseline",
+            draft_id=None,
+            deployment={"mode": "baseline", "target_tp": 8,
+                        "target_device": device,
+                        "v41_kv_record": "fp8_ds_mla_sm90"})
+        assert sc.validate().deployment.v41_kv_record == "fp8_ds_mla_sm90"
     rows_q = build_model_work(_CAT["models"]["qwen36_35b_a3b"], "decode", 1, 1024,
                               1, Q8, 8, v41_kv_record="nvfp4_ds_mla_sm100")
     rows_q2 = build_model_work(_CAT["models"]["qwen36_35b_a3b"], "decode", 1,

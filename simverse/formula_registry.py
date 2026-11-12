@@ -198,7 +198,8 @@ F_CSA2_INDEX_SCORE = _f(
     "v2.csa2_index_score",
     "FLOPs = 2·pairs·(ih·di + ih)（每 (行,压缩位) ih 头 di 维 MQA MAC + ih "
     "权重折算）；kv_read = B·n_eff·132B（decode 直读分页 K）；prefill 另计 "
-    "gather 工作区读写下界；logits 写 = B·n_eff·logits_itemsize",
+    "gather 工作区读/写 B·n_eff·132B（一次 gather 口径）；logits 写 = "
+    "pairs·logits_itemsize（decode Q=1 时 pairs=B·n_eff）",
     "sparse_attn_indexer.py L825-900（prefill chunk：cp_gather + "
     "fp8_fp4_mqa_logits）、L1076-1112（decode：fp8_fp4_paged_mqa_logits + "
     "mqa_logits_mx_inputs 权重折入）；n_eff = end//r（有效前缀）",
@@ -207,7 +208,7 @@ F_CSA2_INDEX_SCORE = _f(
 F_CSA2_INDEX_TOPK = _f(
     "v2.csa2_index_topk",
     "ops = 2·pairs + T·topk（选择惯例：每候选 2 扫描 op + 每 token topk 写；"
-    "文档化分析口径，非 kernel 指令数）；读 = B·n_eff·logits_itemsize；"
+    "文档化分析口径，非 kernel 指令数）；读 = pairs·logits_itemsize；"
     "写 = T·topk·4B（共享 topk_indices_buffer）",
     "indexer_topk.py L264-312（auto 链 cooperative(≤64 行)→persistent→"
     "per_row）；sparse_attn_indexer.py L1135-1140（topk_indices_buffer 散写）；"
@@ -222,8 +223,8 @@ F_CSA2_INDEX_FILL = _f(
 F_CSA2_CANDIDATE_SELECT = _f(
     "v2.csa2_candidate_select",
     "ops/行 = 7·nblocks + 2·nblocks + ctb（8 元块 NaN 传播 max 7 比较 + "
-    "选择 2·nblocks + 写 ctb）；读 = n_eff·logits_itemsize；写 = "
-    "nblocks·4 + 4 + ctb·4（scores+lengths+候选 ids，-1 填充）",
+    "选择 2·nblocks + 写 ctb）；读 = pairs·logits_itemsize；写 = "
+    "T·(nblocks·4 + 4 + ctb·4)（scores+lengths+候选 ids，-1 填充）",
     "candidate_blocks.py L31-73（_block_scores_kernel：块最大值、最新块钉 "
     "+inf、-inf 块不选）+ L168-215（select_candidate_blocks：topk/min(k,"
     "nblocks)、_store_candidates -inf→-1）；消费端 cooperative 变体 "
@@ -232,7 +233,7 @@ F_CSA2_CANDIDATE_SELECT = _f(
 F_CSA2_CANDIDATE_MASK = _f(
     "v2.csa2_candidate_mask",
     "ops/行 = 4·n_eff + ctb + nblocks（flags 建/查 + 逐列 block 索引≈2 + "
-    "掩码判定≈2）；读 = ctb·4B（候选 ids）；写 ≤ n_eff·logits_itemsize"
+    "掩码判定≈2）；读 = T·ctb·4B（候选 ids）；写 = pairs·logits_itemsize"
     "（有效前缀口径；CUDA-graph 静态整宽 -inf 尾写未建模）",
     "candidate_blocks.py L75-136（_candidate_flags_kernel + "
     "_mask_candidates_kernel：候选外/因果外列写 -inf，width−1 边缘列保留）；"
@@ -242,11 +243,12 @@ F_CSA2_CANDIDATE_MASK = _f(
 F_CSA2_SPARSE_INDEX_BUILD = _f(
     "v2.csa2_sparse_index_build",
     "ops = T·(topk+win)·3（整数核惯例）；读 = T·topk·4 + T·8；写 = "
-    "T·⌈(topk+win)/256⌉·256·4 + T·4（对齐宽合并索引 + lens）",
-    "common/ops/cache_utils.py L822-896（combine_topk_swa_indices：topk 压缩"
-    "索引 + SWA 窗索引合并、256 对齐宽度）；specialized sparse_mla.py "
-    "L159-250（SparseIndexTables：等键 (kv源:索引源:r) 运行首层一次、"
-    "后继复用；index source 覆写前 join）",
+    "T·⌈(topk+win)/128⌉·128·4 + T·4（128 对齐合并索引 + lens；SWA-only "
+    "topk=0）",
+    "common/ops/cache_utils.py L819/L837-841（combine_topk_swa_indices："
+    "_SPARSE_PREFILL_TOPK_ALIGNMENT=128 对齐；L898-910 SWA-only TOP_K=0）、"
+    "specialized sparse_mla.py L159-250（SparseIndexTables：等键 "
+    "(kv源:索引源:r) 运行首层一次、后继复用；index source 覆写前 join）",
     "sparse_index_build 行（decode 每 (kv源,索引源,r) 运行首层一次；"
     "SWA-only 运行首 L0 topk=0）")
 

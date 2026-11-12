@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
 from .contracts import RngScheme, digest
+from .devices import V41_DEVICE_FAMILY
 from .draft_quant import FUSED_RAW, UNKNOWN, normalize_ctx_kv_path
 from .lowering.memory import ENGRAM_TABLE_PLACEMENTS
 
@@ -34,16 +35,16 @@ BUDGET_KINDS = ("measured", "hypothesis", "unknown")
 # 为显式引擎 opt-in 变体，未建模）。
 V41_KV_RECORDS = {
     "fp8_ds_mla_sm90": {"swa_bytes": 584, "compressed_bytes": 584,
-                        "logits_itemsize": 4},
+                        "logits_itemsize": 4, "family": "sm90"},
     "fp8_ds_mla_sm100": {"swa_bytes": 528, "compressed_bytes": 528,
-                         "logits_itemsize": 2},
+                         "logits_itemsize": 2, "family": "sm100"},
     "nvfp4_ds_mla_sm100": {"swa_bytes": 528, "compressed_bytes": 288,
-                           "logits_itemsize": 2},
+                           "logits_itemsize": 2, "family": "sm100"},
 }
 V41_INDEX_K_BYTES = 132
-# V4.1 压缩器 ratio-2 环形状态：每请求 capacity 行 × 1024 B fp32
-# （2×512 kv+score）；capacity = max(8, next_pow2(num_spec+2))
-# （compressor.py L250-252；无投机 = 8）。
+# V4.1 压缩器 ratio-2 环形状态：每请求 capacity 行 × 4096 B fp32
+# （2×512 kv+score = 1024 个 fp32 元素；capacity = max(8, next_pow2(num_spec+2))；
+# compressor.py L250-252；无投机 = 8）。
 V41_RING_CAPACITY = 8
 
 
@@ -215,6 +216,20 @@ class ScenarioV2:
                 f"v41_kv_record={dep.v41_kv_record!r} 非法：必须 ∈ "
                 f"{sorted(V41_KV_RECORDS)}（pinned attention.py L583-589；"
                 "记录宽度不随场景 kv 位宽缩放）")
+        # R20 验收：记录族由设备 capability family 决定，不能静默把 SM100
+        # 记录配到注册的 SM90/SM89 设备（pinned attention.py L198-199
+        # `is_device_capability_family(100)`）。当前注册设备无 SM100，
+        # 因此 sm100/nvfp4 记录在可运行场景中一律拒绝（不是研究假设）。
+        if self.model_id == "deepseek_v41_flash":
+            dev_fam = V41_DEVICE_FAMILY.get(dep.target_device)
+            rec_fam = V41_KV_RECORDS[dep.v41_kv_record]["family"]
+            if dev_fam != rec_fam:
+                raise ValueError(
+                    f"v41_kv_record={dep.v41_kv_record!r} 需要 {rec_fam} 设备，"
+                    f"target_device={dep.target_device!r} 是 "
+                    f"{dev_fam or '未登记 family'}；注册设备 H100/H200=SM90、"
+                    "L40=SM89，当前无 SM100 设备。该组合不能作为可部署场景"
+                    "运行（pinned attention.py L198-199）。")
         # 一致性护栏（不是用位宽选分支）：raw 融合副本要求未量化权重；
         # 4bit 计价档与 fused_raw 矛盾，必须显式改为 per_layer_fallback。
         if path == FUSED_RAW and (self.draft_quant or {}).get("dense_w", 16) < 8:

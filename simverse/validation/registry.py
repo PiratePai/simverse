@@ -137,7 +137,7 @@ _PINNED_ASSETS = [
       "split-k 运行时值及 overlap/mega/fused-AR/ROCm/CPU/XPU 部署变体未建模；"
       "capture_aux 仅 speculative，流均值工作未建模"], False, "2026-11-12"),
     ("ev-vllm-v41-csa2", "source-checked",
-     "R20 CSA2 索引打分/top-k/candidate block：20 文件 pin（attention.py/"
+     "R20 CSA2 索引打分/top-k/candidate block：21 文件 pin（attention.py/"
      "sparse_mla.py/compressor.py/common ops/specialized_decode 7 文件/"
      "sparse_attn_indexer/candidate_blocks/indexer_topk/backends indexer/"
      "deepseek_v4 attention/config attention + test_decode_topk）。覆盖：层型"
@@ -150,7 +150,7 @@ _PINNED_ASSETS = [
      "SparseIndexTables 等键运行首层 combine_topk_swa_indices 复用、共享"
      " topk/candidate 缓冲（模型级单例）",
      str(REFS / "vllm" / "csa2-pin.json"),
-     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；20 文件 blob SHA1 对 "
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；21 文件 blob SHA1 对 "
      "vllm-tree.json 逐项校验 + SHA256 清单",
      "V4.1 CSA2 索引管线（count/work.v41_layer_rows、lowering/memory 记录/"
      "环形/缓冲、scenario.v41_kv_record、公式 v2.csa2_*）",

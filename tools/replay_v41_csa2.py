@@ -28,7 +28,7 @@ FOLDER = ROOT / "docs/evidence/csa2"
 # 本轮审计面内的行组；index_select/compress_norm/candidate_publish 等旧行名
 # 被拆分/更名后的新行也在内。除这些外任何行变化 = 归因失败。
 EXPECTED_CHANGED_OPS = {
-    "index_weights_proj", "index_q_rope",
+    "index_weights_proj", "index_q_proj", "index_q_rope",
     "index_select",          # 旧合并行（before 侧）
     "index_score", "index_topk", "index_fill", "sparse_index_build",
     "candidate_publish",     # 旧行（before 侧）
@@ -37,6 +37,8 @@ EXPECTED_CHANGED_OPS = {
     "compressed_rope", "compressed_cache_write", "compressed_insert",
     "index_k_proj", "index_k_norm", "index_k_rope", "index_cache_write",
     "index_k_store", "swa_cache_write", "sparse_attention",
+    # R20 验收修复：主 attention q_norm/kv_norm 常驻容量/读取（weight_capacity）
+    "q_norm", "k_norm",
 }
 
 
@@ -56,7 +58,7 @@ def capture_baseline() -> None:
         "worktree": str(ROOT),
         "git_status_porcelain": status,
         "note": "R20 基线：HEAD 7928e18（main，R05 合入后）+ 预置 CSA2 pin 源码"
-                "（csa2-pin.json 20 文件，blob 对 vllm-tree.json 校验）；"
+                "（csa2-pin.json 21 文件，blob 对 vllm-tree.json 校验）；"
                 "simverse 生产代码未改动",
     }
     (FOLDER / "before.json").write_text(

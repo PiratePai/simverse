@@ -250,6 +250,8 @@ ENTRIES: List[SourceMapEntry] = [
                         "indexer.py:91-123（ROW_SHARD_MIN_ROWS=12）、"
                         "sparse_mla.py:159-250（SparseIndexTables）；"
                         "common/ops/cache_utils.py:822-896（combine）；"
+                        "v1/attention/backends/mla/indexer.py（backend/indexer "
+                        "导入与 prefill buffer 定义）；"
                         "nvidia/model.py:780-800（共享缓冲）；"
                         "config/attention.py:101-150（sparse_logits/logits_dtype）",
         branch_predicate="produces_index → 打分器存在；compress_ratio>0 非源层"
@@ -262,7 +264,7 @@ ENTRIES: List[SourceMapEntry] = [
         thresholds="index_topk=512、candidate_topk_blocks=2048、"
                    "candidate_block_size=8、index_n_heads=32、index_head_dim=128、"
                    "swa=128、ROW_SHARD_MIN_ROWS=12、AUTO_COOPERATIVE_MAX_ROWS=64、"
-                   "combine 对齐 256",
+                   "combine 对齐 128",
         input_domain="V4.1 主干 40 层（r: L0-1=0、L2-19=2、L20-39=1）；"
                      "decode B·Q=1 与 prefill 整段；H100/H200（SM90，fp8_ds_mla"
                      " 584B）默认配方",
@@ -278,7 +280,8 @@ ENTRIES: List[SourceMapEntry] = [
                           "cooperative 候选 top-k 在值相等边界 bin 为近似选择"
                           "（≤k/1024 每簇）；选择/整数核 op 为文档化口径",
                           "稀疏 MLA 注意力核本体（flops 4d+5）仍 v0.1 移植"],
-        note="R20；20 文件 blob SHA1 对 tree + SHA256（csa2-pin.json）；"
+        note="R20；21 文件 blob SHA1 对 tree + SHA256（csa2-pin.json；含 "
+             "sparse_attn_indexer 直接 import 的 v1 backend）；"
              "count/work.v41_layer_rows + lowering/memory + scenario."
              "v41_kv_record；默认场景前后差异见 docs/evidence/csa2/"
              "attribution.json 与 v41-csa2-indexer-20261112.md"),

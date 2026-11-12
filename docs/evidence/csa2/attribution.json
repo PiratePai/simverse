@@ -17,8 +17,8 @@
     "flops": 7175852742,
     "weight_read": 1570196928,
     "weight_read_expected": 530843184.0,
-    "act_read": 10182846,
-    "act_write": 6253168,
+    "act_read": 10246334,
+    "act_write": 6282096,
     "kv_read": 42467988,
     "kv_write": 24076,
     "state_read": 12288,
@@ -29,8 +29,8 @@
     "flops": 14662520,
     "weight_read": 19926784,
     "weight_read_expected": 0.0,
-    "act_read": 1096032,
-    "act_write": 1429840,
+    "act_read": 1159520,
+    "act_write": 1458768,
     "kv_read": 2609172,
     "kv_write": -9332,
     "state_read": 12288,
@@ -260,7 +260,7 @@
         "flops": 36700160,
         "weight_read": 36700160,
         "weight_read_expected": 0.0,
-        "act_read": 20480,
+        "act_read": 40960,
         "act_write": 14336,
         "kv_read": 0,
         "kv_write": 0,
@@ -272,7 +272,7 @@
         "flops": 0,
         "weight_read": 18350080,
         "weight_read_expected": 0.0,
-        "act_read": 0,
+        "act_read": 20480,
         "act_write": 10752,
         "kv_read": 0,
         "kv_write": 0,
@@ -282,7 +282,7 @@
       },
       "rows_before": 4,
       "rows_after": 4,
-      "t_ms_delta": 0.005480845373134328
+      "t_ms_delta": 0.005486958805970149
     },
     "compressed_cache_write": {
       "before": {
@@ -506,8 +506,8 @@
         "flops": 524288,
         "weight_read": 524288,
         "weight_read_expected": 0.0,
-        "act_read": 2048,
-        "act_write": 512,
+        "act_read": 4096,
+        "act_write": 1024,
         "kv_read": 0,
         "kv_write": 0,
         "state_read": 0,
@@ -518,8 +518,8 @@
         "flops": 0,
         "weight_read": 262144,
         "weight_read_expected": 0.0,
-        "act_read": 0,
-        "act_write": 0,
+        "act_read": 2048,
+        "act_write": 512,
         "kv_read": 0,
         "kv_write": 0,
         "state_read": 0,
@@ -528,7 +528,7 @@
       },
       "rows_before": 4,
       "rows_after": 4,
-      "t_ms_delta": 7.825194029850748e-05
+      "t_ms_delta": 7.901611940298509e-05
     },
     "index_k_rope": {
       "before": {
@@ -611,6 +611,47 @@
       "rows_before": 0,
       "rows_after": 4,
       "t_ms_delta": 4.215770244281372e-07
+    },
+    "index_q_proj": {
+      "before": {
+        "flops": 83886080,
+        "weight_read": 41943040,
+        "weight_read_expected": 0.0,
+        "act_read": 10240,
+        "act_write": 32768,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 8
+      },
+      "after": {
+        "flops": 83886080,
+        "weight_read": 41943040,
+        "weight_read_expected": 0.0,
+        "act_read": 10240,
+        "act_write": 65536,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 8
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 32768,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 8,
+      "rows_after": 8,
+      "t_ms_delta": 9.781492537313391e-06
     },
     "index_q_rope": {
       "before": {
@@ -793,8 +834,8 @@
         "flops": 2621440,
         "weight_read": 2621440,
         "weight_read_expected": 0.0,
-        "act_read": 40960,
-        "act_write": 256,
+        "act_read": 81920,
+        "act_write": 512,
         "kv_read": 0,
         "kv_write": 0,
         "state_read": 0,
@@ -805,8 +846,8 @@
         "flops": 0,
         "weight_read": 1310720,
         "weight_read_expected": 0.0,
-        "act_read": 0,
-        "act_write": 0,
+        "act_read": 40960,
+        "act_write": 256,
         "kv_read": 0,
         "kv_write": 0,
         "state_read": 0,
@@ -815,7 +856,7 @@
       },
       "rows_before": 8,
       "rows_after": 8,
-      "t_ms_delta": 0.0003912597014925373
+      "t_ms_delta": 0.00040356298507462685
     },
     "sparse_attention": {
       "before": {
@@ -876,7 +917,7 @@
         "weight_read": 0,
         "weight_read_expected": 0.0,
         "act_read": 16456,
-        "act_write": 25636,
+        "act_write": 21028,
         "kv_read": 0,
         "kv_write": 0,
         "state_read": 0,
@@ -888,7 +929,7 @@
         "weight_read": 0,
         "weight_read_expected": 0.0,
         "act_read": 16456,
-        "act_write": 25636,
+        "act_write": 21028,
         "kv_read": 0,
         "kv_write": 0,
         "state_read": 0,
@@ -897,7 +938,7 @@
       },
       "rows_before": 0,
       "rows_after": 9,
-      "t_ms_delta": 1.256636722602249e-05
+      "t_ms_delta": 1.1190844837962788e-05
     },
     "swa_cache_write": {
       "before": {
@@ -941,7 +982,7 @@
       "t_ms_delta": 6.97313432835821e-06
     }
   },
-  "t_ms_delta": 0.0074871749453535585,
+  "t_ms_delta": 0.007514761811023618,
   "before_memory": {
     "steady_bytes": 35663340992,
     "transient_peak_bytes": 3072,
@@ -954,7 +995,7 @@
     "allocatable_kind": "unknown"
   },
   "after_memory": {
-    "steady_bytes": 35689949632,
+    "steady_bytes": 35690092992,
     "transient_peak_bytes": 13312,
     "peak_complete": false,
     "unknown_components": [
@@ -965,7 +1006,7 @@
     "allocatable_kind": "unknown"
   },
   "before_known_peak": 35663344064,
-  "after_known_peak": 35689962944,
+  "after_known_peak": 35690106304,
   "expected_changed_ops": [
     "candidate_mask",
     "candidate_publish",
@@ -982,11 +1023,14 @@
     "index_k_proj",
     "index_k_rope",
     "index_k_store",
+    "index_q_proj",
     "index_q_rope",
     "index_score",
     "index_select",
     "index_topk",
     "index_weights_proj",
+    "k_norm",
+    "q_norm",
     "sparse_attention",
     "sparse_index_build",
     "swa_cache_write"

@@ -427,6 +427,9 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             dense_b += model.hidden * qrank * b_dense             # q_a_proj
             dense_b += model.hidden * d * b_dense                 # kv_proj
             dense_b += qrank * heads * d * b_dense                # q_b_proj
+            # q_norm(q_lora_rank)/kv_norm(head_dim) 为普通 RMSNorm bf16 参数
+            #（attention.py L440-450），每层常驻、不随 TP/场景 dense_w 缩放。
+            dense_b += (qrank + d) * 2
             # o_a（每 rank ng 组；F2：旧式漏乘 ng，TP1 少 8×）
             dense_b += (kvs["heads"] * d // kvs["o_groups"]) * orank * ng * b_dense
             dense_b += ng * orank * model.hidden * b_dense        # o_b（组切分）

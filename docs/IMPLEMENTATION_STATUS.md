@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R20：V4.1 CSA2 索引打分/top-k/candidate block 按 20 文件 pin source-checked 建模并修正记录宽度/bf16 权重/环形 state；同日 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-12（R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；同日 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #5/#7 已合入 main；本轮验收修复分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R20 全量 **284 passed**，exit 0；历史：R06 264、R06 初版 262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：284**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R20；264→284 为 R20 CSA2 索引 oracle 新增 20 项；此前 236→252 为 R05 新增 16 项，252→262 为 R06 几何/算量对账新增 10 项，262→264 为独立张量 oracle 的 hermetic/live 两项）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R20 全量 **295 passed**，exit 0；本次 DSH 验收沙箱对 6 个 `tmp_path` 用例 setup PermissionError，实际 289 passed / 6 errors——均为沙箱临时目录 ACL 限制而非代码失败，见 §3.9；历史：R06 264、R06 初版 262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：295**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R20；264→295 为 R20 CSA2 索引 oracle 新增 31 项；此前 236→252 为 R05 新增 16 项，252→262 为 R06 几何/算量对账新增 10 项，262→264 为独立张量 oracle 的 hermetic/live 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -17,8 +17,10 @@ fixture、manifest 与文件字节三者一致；同时修正 fixture `SourceIde
 发现 R06 初版未提供独立输出数值 oracle，几何证据等级由 numeric-checked
 降为 shape-checked；随后新增独立数值产物与对应证据（见下）。
 
-**2026-11-12 R20 CSA2 索引打分/top-k/candidate block**：csa2-pin.json 20 文件
-（blob SHA1 对 vllm-tree.json 逐项校验 + SHA256）source-checked 入册
+**2026-11-12 R20 CSA2 索引打分/top-k/candidate block**：csa2-pin.json 21 文件
+（blob SHA1 对 vllm-tree.json 逐项校验 + SHA256；补入 sparse_attn_indexer
+直接 import 的 v1 backend，移除未入 tree 的重复 candidate_blocks 副本）
+source-checked 入册
 （ev-vllm-v41-csa2，executed=False；sm-v41-csa2-indexer + 短上下文旁路条目
 重写）。修正/新建 count 行：index_select 拆为 index_score（全候选 paged MQA
 logits 2·pairs·(ih·di+ih) + fp32 logits 写）+ index_topk（2·pairs+T·topk 选择
@@ -28,14 +30,19 @@ logits 2·pairs·(ih·di+ih) + fp32 logits 写）+ index_topk（2·pairs+T·topk
 compress_norm → compress_pool（r2 门控池化 7d+9/group 精确式 + 环形 state
 cap8，r1 纯 norm exact）；compressed_rope+compressed_cache_write 合并为
 compressed_insert；index_k_* 合并为 index_k_store（132B/行）；SWA/压缩缓存
-改按打包记录 584|528 B/token（显式 v41_kv_record 配方，进场景身份）；
-compressor/wk/weights_proj 为 quant_config=None bf16 固定权重；
-sparse_index_build 行（decode 每 (kv源:索引源:r) 运行首层 combine 一次，
-等键后继复用）；topk/candidate 共享缓冲模型级单例下界入 transient。
+改按打包记录 584|528 B/token（显式 v41_kv_record 配方，进场景身份；并与
+目标设备 family 强校验：H100/H200 只允许 sm90，L40 拒绝 sm90，当前无
+SM100 设备故 sm100/nvfp4 拒绝）；
+compressor/wk/weights_proj 为 quant_config=None bf16 固定权重，输入/输出
+激活字节亦按 pinned bf16/FP32 与消费行对齐；主 attention q_norm/kv_norm
+bf16 常驻权重入 count/memory（40 层 143,360 B）；sparse_index_build 行
+（decode 每 (kv源:索引源:r) 运行首层 combine 一次，128 对齐宽，等键后继
+复用）；topk/candidate 共享缓冲模型级单例下界入 transient。
 默认 TP8/B1/ctx32768 replay：op 7,161,190,222→7,175,856,742（Δ 归因
-attribution.json 逐 op 验证，审计面外行逐字段冻结）；steady +26.6MB、
-transient +10,240B、M01 +0.0075ms。structure_complete 仍 False
-（MoE scoring/量化映射/注意力核本体/MTP 尾部缺口不变）。新增 20 项独立
+attribution.json 逐 op 验证，审计面外行逐字段冻结）；steady +26,752,000B、
+transient +10,240B、known_peak +26,762,240B、M01 +0.0075ms。
+structure_complete 仍 False
+（MoE scoring/量化映射/注意力核本体/MTP 尾部缺口不变）。新增 31 项独立
 oracle（tests/test_v41_csa2.py）。[报告](validation/v41-csa2-indexer-20261112.md)。
 
 **2026-11-12 R06 独立数值续验**：新增纯张量参考路径，复用 pinned HF

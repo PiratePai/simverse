@@ -214,7 +214,9 @@ def test_v41_oa_proj_memory_absolute_oracle_tp1_2_4_8():
             mlt = 2 if a.ratio == 2 else 1
             terms = (h * qrank + h * d + qrank * heads_tp * d
                      + (heads * d // groups) * orank * ng
-                     + ng * orank * h)
+                     + ng * orank * h
+                     # 主 attention q_norm(qrank)/kv_norm(d) 均为 bf16 常驻
+                     + qrank + d)
             if a.produces_kv:
                 # R20：compressor/wk/norm 为 quant_config=None 的 bf16 常驻
                 #（Q16 下与量化档同 2B，数值不变但来源固定）；norm 参数
@@ -252,7 +254,9 @@ def test_v41_attention_weight_conservation_count_vs_memory():
                           "q_a_proj", "kv_proj", "q_b_proj", "o_a_proj",
                           "o_b_proj", "compress_proj", "index_k_proj",
                           "index_weights_proj", "index_q_proj",
-                          # R20：norm/k_norm 常驻由这两行持有（bf16）
+                          # R20：主 attention q_norm/kv_norm 与 compressor/
+                          # indexer norm 参数均由这些行持有（bf16）
+                          "q_norm", "k_norm",
                           "compress_pool", "index_k_store"))
             assert cap == allocs[str(li)], (tp, li)
 
@@ -448,13 +452,13 @@ def test_replay_preserves_engram_and_non_hc_rows():
     # head）。R20（2026-11-12）重写的 CSA2 索引/压缩行由
     # tests/test_v41_csa2.py 的 replay 归因单独冻结（docs/evidence/csa2）。
     AUDITED = {
-        "index_weights_proj", "index_q_rope", "index_select", "index_score",
-        "index_topk", "index_fill", "sparse_index_build", "candidate_publish",
-        "candidate_select", "candidate_mask", "compress_proj", "compress_norm",
-        "compress_pool", "compressed_rope", "compressed_cache_write",
-        "compressed_insert", "index_k_proj", "index_k_norm", "index_k_rope",
-        "index_cache_write", "index_k_store", "swa_cache_write",
-        "sparse_attention"}
+        "index_weights_proj", "index_q_proj", "index_q_rope", "index_select",
+        "index_score", "index_topk", "index_fill", "sparse_index_build",
+        "candidate_publish", "candidate_select", "candidate_mask",
+        "compress_proj", "compress_norm", "compress_pool", "compressed_rope",
+        "compressed_cache_write", "compressed_insert", "index_k_proj",
+        "index_k_norm", "index_k_rope", "index_cache_write", "index_k_store",
+        "swa_cache_write", "sparse_attention", "q_norm", "k_norm"}
     def non_hc(rows):
         return [{k: v for k, v in r.items() if k != "stage"}
                 for r in rows
