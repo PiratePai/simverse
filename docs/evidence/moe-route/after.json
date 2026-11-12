@@ -1,15 +1,15 @@
 {
  "schema_version": "0.2",
  "manifest": {
-  "run_id": "sha256:214bcb06f8ecd331e11a3ba33b48cba97788301db5926bb564c30ea7bb21bdfa",
+  "run_id": "sha256:c14dd12d66241c940a69fb65f4ae35d10c09b9bac39848fb309d88384fb5f629",
   "status": "completed",
   "input_digest": "sha256:f51b4110ccfdc0014f63c5c5a42b824bd53294c0e56ee7c0ad54d3101159faea",
-  "model_ir_digest": "sha256:8bf762bddffb31b8f6b4028b763a034dd6dabf94cd86074fca861362edb6e50f",
+  "model_ir_digest": "sha256:595c7958a55f3995c8ef4ac7f04c6e28dc45a707b35f4831656b31c1518560bb",
   "method_digest": "sha256:bc10470a78cc508de34929445a502d43bcccdcfe6562ea1dee44c6a3a5f477e2",
   "lowering_digest": "",
   "cost_digest": "sha256:88dd8e1cfa72f4798537a815bbc71708639ae57c03c3436c570972cc5268ad74",
   "device_snapshot_digest": "sha256:ad4b44a3f2ce32dcbe660392989d9a2fb7501aaa0046279e76ba8a95cbc68abc",
-  "code_revision": "53b04fd7f1ba23726041c2500ec15a3cc4c981a7",
+  "code_revision": "9fbade24177b4d84aba10b8667cc640d196a8220",
   "parent_run_id": null,
   "created_at": "",
   "progress": 0.0,
@@ -102,7 +102,7 @@
     "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）",
     "mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模",
     "csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核",
-    "moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）",
+    "moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 14 文件）；gate 权重/输入 BF16 2B 已 R21 修正；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）",
     "csa2_deploy_variants: SM100 sparse-logits（indexer_sparse_logits 消费层只打分候选块）/decode_topk CuTe 路径/TP 行分片 all-gather/PCP/DCP/fused_mqa_topk/FlashInfer plain-row bf16 变体未建模；CUDA-graph 静态整宽 logits 缓冲与 -inf 尾写、cooperative 候选值相等边界近似未入账",
     "quantization_config: FP8/FP4 配置未映射到本仓计算精度（compressor/weights_proj/wk 的 bf16 固定与打包记录宽度为 pinned 事实，其余量化路径仍缺）"
    ],
@@ -111,7 +111,7 @@
     "dflash_v1": "unsupported",
     "mtp": "unverified"
    },
-   "note": "Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 cpu_offload 运行时行为未覆盖）；CSA2 索引打分/top-k/candidate block/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json 21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件；count 三行+路由偏置对象+EP 保守整除域（仅 mega 断言））；量化映射/注意力核本体仍缺口；hc 仅 source-checked，未执行。"
+   "note": "Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 cpu_offload 运行时行为未覆盖）；CSA2 索引打分/top-k/candidate block/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json 21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 14 文件；count 三行 + gate BF16 权重/输入 + 路由偏置对象 + EP 保守整除域（仅 mega 断言））；量化映射/注意力核本体仍缺口；hc 仅 source-checked，未执行。"
   },
   "gaps": [
    "quantization_config: 量化配置未映射（场景精度独立输入，不冒充已消费）",
@@ -586,7 +586,7 @@
     "note": "视觉塔不在本仓文本推理 scope；未执行，不作为结构完备证据"
    }
   },
-  "digest": "sha256:8bf762bddffb31b8f6b4028b763a034dd6dabf94cd86074fca861362edb6e50f"
+  "digest": "sha256:595c7958a55f3995c8ef4ac7f04c6e28dc45a707b35f4831656b31c1518560bb"
  },
  "method_plan": {
   "method_id": "baseline",
@@ -24621,7 +24621,7 @@
    "formula_ref": "v2.roofline",
    "input_refs": [],
    "assumption_refs": [],
-   "reason": "不参与排名：配置覆盖/forward 源码证据未同时完备（详见 model_config_coverage 与 model_forward_evidence）; config 覆盖不完整：4 项缺口；未登记键不得默认 ignored; forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）; 当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; Engram host 查表与预取时延未知；阶段耗时仅为 GPU 侧解析下界; target_r0 known_peak=35768872384B（steady=35768859072）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
+   "reason": "不参与排名：配置覆盖/forward 源码证据未同时完备（详见 model_config_coverage 与 model_forward_evidence）; config 覆盖不完整：4 项缺口；未登记键不得默认 ignored; forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 14 文件）；gate 权重/输入 BF16 2B 已 R21 修正；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）; 当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; Engram host 查表与预取时延未知；阶段耗时仅为 GPU 侧解析下界; target_r0 known_peak=35768872384B（steady=35768859072）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
    "interval": null,
    "sample": null
   },
@@ -25040,7 +25040,7 @@
    },
    "model_forward_evidence": {
     "status": "approximated",
-    "reason": "forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）",
+    "reason": "forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 14 文件）；gate 权重/输入 BF16 2B 已 R21 修正；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）",
     "affected_metrics": [
      "M02 部署排名资格",
      "M04 轮分解"
@@ -25350,7 +25350,7 @@
    "version": "0.2"
   },
   "v2.moe_route_gate": {
-   "expr": "FLOPs = 2·T·h·E；weight_read = h·E·B_gate + 输入 T·h·B_act；B_gate=B_act=2（BF16 model dtype）；写 = T·E·4B（FP32 logits）",
+   "expr": "FLOPs = 2·T·h·E；weight_read = h·E·B_gate；act_read = T·h·B_act；B_gate=B_act=2（BF16 model dtype）；写 = T·E·4B（FP32 logits）",
    "source": "deepseek_v4/nvidia/model.py L270-277（GateLinear(input=h, output=E, bias=False, out_dtype=torch.float32，未传 quant_config/params_dtype）；linear.py L287-295（params_dtype=torch.get_default_dtype()，quant_config None→UnquantizedLinearMethod）L179-199（weight dtype=params_dtype）；base_loader.py L86（set_default_torch_dtype(model_config.dtype)）；router/gate_linear.py L26/L306-341（Replicated 子类；bf16/fp32 输入分支）",
    "applies": "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；权重/输入 按 BF16 2B，FP32 仅 logits 出口）",
    "version": "0.2"
