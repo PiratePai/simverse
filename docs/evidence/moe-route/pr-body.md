@@ -69,3 +69,18 @@ M02/M04/M05/M06 降级与 unknown 传播不变；**structure_complete 仍 False*
 2. 部署变体未建模：native MegaMoE（bf16_mega_gate，需 EP+fp4+SP）、FP32/bf16x3 router GEMM 分层、dsv4_topk Triton 档约束（E∈{256,384}/k=6）外的 E/k 值未独立核。
 3. DSpark 草稿层 MoE（E=128/k=3）方法层字段；padding skip/CUDA-graph 整宽路由缓冲、defer_finalize（需 scaling==1.0，本模型 1.5 不适用）未入账。
 4. quantization_config（fp8/FP4 专家）不在本 PR；input_ids 按 int64 上界计。
+
+
+---
+
+### 首轮 Codex 验收（2026-11-12）：不通过 → 已修复（commit b5688fa）
+
+| 意见 | 处置 |
+|---|---|
+| 高｜报告 §2 行号指错 | 全部对实销行号更正（sqrtsoftplus dsv4 L85、bias L86-87、无偏 gather L96-98、归一 L104-107、共享追加 L447-464/默认 L383-385）；报告/公式注册/source_map/证据 claim/代码注释同步 |
+| 高｜replay 后工作区漂移 | 工具新增 `--check` 无漂移复算模式；plain run 的 manifest 身份字段刷新（code_revision/run_id）注明为登记性漂移；`--check` 验证账本确定性与归因仍成立 |
+| 中｜oracle −87 阈值无源码依据 | 标注为 IEEE-754 单精度解析假设（2^−126 → ln≈−87.3，非 pinned 断言）；NaN→−1e30 主张收窄到有限候选 score+bias > −1e30 域 |
+| 中｜（复核补充）EP 依据不实 | fused 路径实为 floor 除法（L419-421）无断言；EP 校验改写为 mega 断言（L357-362）+ fused 覆盖性的保守域规则，全部文档同步 |
+| 附带 | baseline-provenance 补 before_sha256（3addaa5f…）；PR 描述副本入仓 docs/evidence/moe-route/pr-body.md |
+
+修复后：332 passed；node check OK；`tools/replay_v41_moe.py --check` 通过。详见报告 §8。
