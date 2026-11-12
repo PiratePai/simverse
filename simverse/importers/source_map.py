@@ -16,6 +16,9 @@ VLLM_PIN = "vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5"
 VLLM_PARALLEL_PIN = "vllm@dc74b8cbbbe3dbb9399fe369757d63defd614cc2"
 HF_TF_PIN = "huggingface/transformers@b6401d6605d16620e0f95b54fb2906f92de7e33f"
 DFLASH_PIN = "z-lab/dflash@07ebd93db9f472af339b644bb70221ad8428328a"
+# R07a（2026-11-12）服务栈 pin：逐文件 SHA256 见 assets/identity/
+# vllm_dflash_serving_pin/manifest.json 与 sglang_dflash_pin/manifest.json
+SGLANG_DFLASH_PIN = "sgl-project/sglang@74cb973d78dfa4af85a90d2841891fec27e78db2"
 
 
 @dataclass
@@ -242,8 +245,12 @@ ENTRIES: List[SourceMapEntry] = [
         thresholds="block_size 16（config）/ 服务端可用 8 覆盖",
         input_domain="贪心与随机采样两验收分支",
         both_sides_covered=True,
-        uncovered_domain=["SGLang/vLLM 服务端集成未逐行核对（pending asset）"],
-        note="methods/dflash.py 依此生成 MethodPlan 与消息量"),
+        uncovered_domain=["两服务栈的 fc/hidden_norm/ctx-KV 投影按整块跨度 "
+                          "B×blk 执行而非 HF 的 [:produced] 前缀（R07a 修正 "
+                          "count/draft.py 后保留差异注记）"],
+        note="methods/dflash.py 依此生成 MethodPlan 与消息量；服务栈逐行 "
+             "核对 2026-11-12 R07a 完成（sm-vllm-dflash-serving / "
+             "sm-sglang-dflash-serving）"),
     SourceMapEntry(
         entry_id="sm-dflash-cross-attention",
         model_or_method="dflash v1",
@@ -254,6 +261,132 @@ ENTRIES: List[SourceMapEntry] = [
         input_domain="全部草稿层（5 sliding + 1 full）",
         both_sides_covered=True,
         note="计数按 ctx+q_len 两段 KV；fc 投影 8·h→h 入账"),
+    SourceMapEntry(
+        entry_id="sm-vllm-dflash-serving",
+        model_or_method="DFlash v1 服务栈（vLLM）",
+        semantic="colocated proposer：每轮目标 verify 前向后 in-process 调 "
+                 "propose()；每请求 1 bonus+N mask 查询块（num_query_per_req"
+                 "=1+num_speculative_steps）；aux hidden（dflash_config."
+                 "target_layer_ids，+1 capture-after）经 combine_hidden_states"
+                 "=fc(concat) 投影；ctx K/V 每轮对**整 verify 跨度 B×blk** "
+                 "投影（_precompute_context_kv(0,num_target_tokens)；FULL "
+                 "graph 路径 _num_graph_context_tokens=num_reqs×(N+1)），"
+                 "被拒后缀行 PAD_SLOT 不落缓存（无物理 crop）；拒绝采样走"
+                 "共享 RejectionSampler（greedy=target argmax 前缀匹配；"
+                 "random=log p>log u+log q 比值检验；bonus 取目标分布）；"
+                 "draft_sample_method 默认 greedy（全量 logits gather），"
+                 "probabilistic 需 DraftLogitsCache；PIECEWISE CG 不支持"
+                 "（FULL 或 eager）",
+        source_pin=VLLM_PARALLEL_PIN,
+        source_location="vllm/v1/worker/gpu/spec_decode/dflash/speculator.py"
+                        "（L66/L157-168/L379-381/L452-663/L727-1009 "
+                        "prepare_dflash_inputs 内核；逐文件 SHA256 "
+                        "assets/identity/vllm_dflash_serving_pin/manifest.json）、"
+                        "dflash/config.py（num_lookahead_tokens=N+1、"
+                        "uses_aux_hidden_states）、dflash/cudagraph.py"
+                        "（DFlashCudaGraphManager）、eagle/eagle3_utils.py"
+                        ":77-114（target_layer_ids+1→aux 层）、上级 "
+                        "spec_decode/speculator.py（DraftModelSpeculator "
+                        "L568-628 sample_draft/greedy_argmax/gumbel、"
+                        "L332-360 DraftLogitsCache sharded）、"
+                        "rejection_sampler.py L260-312 + "
+                        "rejection_sampler_utils.py L630-755、"
+                        "vllm/config/speculative.py L582/720（默认 greedy）；"
+                        "tests/v1/spec_decode/test_dflash_prepare_inputs.py"
+                        "（被拒后缀 PAD 负例）、test_dflash_causality.py、"
+                        "test_dflash_lookahead.py、"
+                        "tests/v1/e2e/spec_decode/acceptance_rates/dflash/"
+                        "test_dflash.py（GSM8K≥0.8/接受长度门槛）",
+        branch_predicate="method=dflash 且 draft config 含 dflash_config；"
+                         "colocated（proposer 与 target 同进程同 TP 组）；"
+                         "draft_sample_method∈{greedy,probabilistic}；"
+                         "use_local_argmax_reduction 默认 False 且与 "
+                         "probabilistic 互斥",
+        thresholds="num_speculative_tokens=候选数 N（查询块=N+1）；"
+                   "DraftLogitsCache[max_num_reqs,N,V] 仅 probabilistic",
+        input_domain="Qwen3.6+DFlash colocated TP{1,2,4,8}；greedy 与 "
+                     "probabilistic 两采样分支",
+        both_sides_covered=True,
+        uncovered_domain=["DraftLogitsCache（probabilistic 跨轮缓冲，"
+                          "sharded 按 owned rows）未入 R02b 账本——场景无"
+                          " draft_sample_method 键，登记缺口不擅自加键",
+                          "target KV 被拒行的回收（v1 引擎通用 spec-decode "
+                          "路径）非 DFlash 专属，未单独建模",
+                          "FULL graph 的 batch padding 行（graph 桶取整）"
+                          "未计——按未取整跨度计，图模式下界"],
+        note="R07a（2026-11-12）逐行核对；source-checked 非 CPU 执行/实测。"
+             "草稿 greedy 全量 logits gather 与 local_argmax_reduction"
+             "（O(2·tp)）两路径存在，默认前者——本仓 logits_gather 行按"
+             "默认路径计"),
+    SourceMapEntry(
+        entry_id="sm-sglang-dflash-serving",
+        model_or_method="DFLASH v1 服务栈（SGLang）",
+        semantic="DFlashWorkerV2 驱动 overlap 与非 overlap 两调度（spec-v2；"
+                 "FutureMap 中继 bonus/new_seq_lens）；轮结构：prepare 块"
+                 "（bonus+mask）→ 噪声 embedding（借目标 embedding）→ 草稿"
+                 "前向（TARGET_VERIFY 模式、非因果块注意力、独立 draft "
+                 "runner）→ 借目标 lm_head 产候选（greedy in-graph "
+                 "_DflashDraftSampler：tp>1 时每 rank 局部 (max,id) → "
+                 "all-gather → 首最大选择，**非全量 logits gather**）→ "
+                 "目标 verify（因果、capture_hidden FULL）→ accept/bonus"
+                 "（greedy Triton 前缀匹配 + bonus=目标 argmax，"
+                 "new_seq_lens=prefix+commit）→ 全跨度 hidden "
+                 "project_target_hidden（fc+hidden_norm）→ 逐层 "
+                 "kv_proj_only/融合前缀直写（只写 committed 行）→ "
+                 "next_draft_input；mamba/GDN 目标态回退（last_steps="
+                 "commit−1 + _update_target_mamba_state_after_verify）；"
+                 "greedy verify 可跳过 logits 聚合（vocab 分片不 gather，"
+                 "deferred_argmax）",
+        source_pin=SGLANG_DFLASH_PIN,
+        source_location="python/sglang/srt/speculative/dflash_worker_v2.py"
+                        "（L143-227 _DflashDraftSampler/_commit_accept、"
+                        "L2456-2533 prefill 即刻物化草稿 KV、L2618-2796 "
+                        "草稿块、L2933-3008 verify、L3040-3125 accept+ctx "
+                        "KV 追加、L2202-2251 mamba 态回退）、dflash_info.py"
+                        "（DFlashVerifyInput：线性非树 topk=1、"
+                        "TARGET_VERIFY）、dflash_info_v2.py（overlap 数据"
+                        "结构）、models/dflash.py（DFlashDraftModel L1015-"
+                        "1208：fc=ReplicatedLinear(8h→h)+hidden_norm、"
+                        "project_target_hidden；L260-530 GQA/MLA 注意力、"
+                        "write_context_kv/kv_proj_only）、dflash_utils.py"
+                        "（block_size 解析/attention_mode 校验）、"
+                        "kernels/ops/speculative/dflash.py（L9-56 mamba "
+                        "commit、L60-190 accept_bonus Triton）、"
+                        "dflash_candidates.py（vocab 分片 top-k + 单次 "
+                        "all-gather [k vals|k ids]）、dflash_dp.py、"
+                        "dflash_disaggregation.py（target 侧 PD 中继，"
+                        "非 DT）、spec_info.py（L221-330 DFLASH 算法/"
+                        "worker 选择）；test/registered/spec/dflash/"
+                        "test_dflash.py（GSM8K≥0.75/accept≥2.8、overlap 与"
+                        "非 overlap 变体）；逐文件 SHA256 assets/identity/"
+                        "sglang_dflash_pin/manifest.json",
+        branch_predicate="--speculative-algorithm DFLASH + "
+                         "--speculative-draft-model-path + 可选 "
+                         "--speculative-dflash-block-size（默认取 checkpoint "
+                         "block_size）；DraftParallelSpec(tp_execution="
+                         "SINGLE_GROUP)——草稿与目标同 TP 组；非贪婪采样"
+                         "需 is_dflash_sampling_verify_available()（CUDA JIT），"
+                         "不可用时**降级 greedy 验证**（分布不保持，显式"
+                         " warning）",
+        thresholds="block_size 服务端可覆盖（README 建议 8/16）；"
+                   "gsm8k_accept_length_thres=2.8（e2e 门槛）",
+        input_domain="Qwen3.6+DFlash colocated（SINGLE_GROUP）；greedy 主路径"
+                     "（采样路径按 kernel 可用性分支）",
+        both_sides_covered=True,
+        uncovered_domain=["草稿/verify 的 greedy (max,id) all-gather 字节"
+                          "（O(tp·(dtype+8)·行)）未入本仓通信行——本仓 "
+                          "logits_gather 按 vLLM 全量口径计，两栈差异在 "
+                          "R07a 报告披露",
+                          "采样验证 kernel（compute_dflash_sampling_correct_"
+                          "drafts_and_bonus）运行时可用性未知（构建/设备相关）",
+                          "DP attention（dflash_dp.py）与 target 侧 PD "
+                          "disagg 场景未建模",
+                          "mamba/GDN 目标态回退（extra_buffer 策略）的额外"
+                          "拷贝成本未计价——unknown"],
+        note="R07a（2026-11-12）逐行核对；source-checked 非 CPU 执行/实测。"
+             "DFLASH 与 vLLM PR#40898 路径已在源级区分（见 "
+             "sm-vllm-dflash-serving）；dt_serial/dt_pipeline 无 SGLang "
+             "对应（disagg 是 target PD）"),
     SourceMapEntry(
         entry_id="sm-vllm-moe-tp-ep-recipe",
         model_or_method="qwen3_5_moe/qwen3_moe MoE 并行",
@@ -416,5 +549,6 @@ ENTRIES: List[SourceMapEntry] = [
 def source_map_json() -> dict:
     return {"schema_version": "0.2",
             "pins": {"vllm": VLLM_PIN, "vllm_parallel": VLLM_PARALLEL_PIN,
-                     "hf_transformers": HF_TF_PIN, "dflash": DFLASH_PIN},
+                     "hf_transformers": HF_TF_PIN, "dflash": DFLASH_PIN,
+                     "sglang_dflash": SGLANG_DFLASH_PIN},
             "entries": [e.to_json() for e in ENTRIES]}

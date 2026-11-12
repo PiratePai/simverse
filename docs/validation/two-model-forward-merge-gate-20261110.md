@@ -100,8 +100,10 @@ DFlash/MTP B>1 草稿计数、model/draft/profile 证据引用、source_map 行�
 - **Qwen3.6 MTP**：HF 忽略 `mtp.*`，vLLM 主模型丢弃 `mtp.`；只有 config +
   目标首层模板，无原生 forward pin。
 - **Qwen3.6 mrope**：文本位置 id 选择语义未执行；本仓计数不变，但未实测。
-- **DFlash 服务端集成**：SGLang DFLASH / vLLM PR#40898 未逐行核对；拒绝采样/
-  KV 回退/hidden 提取仍显式 0 占位；运行时池尺寸未知。
+- **DFlash 服务端集成**：（2026-11-12 R07a 更新：双栈已逐行核对，colocated=
+  source-checked/dt=unsupported，见
+  [R07a 报告](dflash-serving-audit-20261112.md)）；拒绝采样/KV 回退/hidden
+  提取仍显式 0 占位；运行时池尺寸未知。
 - **CPU/GPU 执行**：Qwen3.6 固定 HF 源码的两层随机权重 CPU shape probe 已执行；
   真实 40 层 checkpoint、MTP、V4.1 和 DFlash 服务端未执行，两款主模型无 GPU/部署实测。
 - 远端 required check/PR review 未配置；候选分支已推送并建 PR #1（2026-11-10）。

@@ -638,15 +638,19 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
                           ctx_kv_path: str = "unknown") -> List[Allocation]:
     """结构化临时缓冲（R02b；尺寸来自 pinned 形状，非运行时测量）。
 
-    phase:draft（草稿前向，一轮内与 verify 串行）：
+    phase:draft（草稿前向，一轮内与 verify 串行；R07a 2026-11-12 起
+    fc 输入/ctx 归一/ctx 投影临时按 **verify 跨度 B·blk** 计——两服务栈
+    均对全跨度物化：vLLM _aux_staging[:num_graph_context_tokens] +
+    _project_context_kv 的 all_k/all_v[L, span,…]；SGLang
+    project_target_hidden/kv_proj_only 全跨度后被拒行不落缓存）：
       * noise embedding 行 B·blk·h（act 精度）；
-      * fc 输入拼接 B·E[N]·8h（act 精度）；
-      * ctx 归一化副本 B·E[N]·h；ctx 投影输出按显式路径：
-          - fused_raw / mxfp8_context_proj：B·E[N]·L·2·kvh_rank·d
+      * fc 输入拼接 B·blk·8h（act 精度）；
+      * ctx 归一化副本 B·blk·h；ctx 投影输出按显式路径：
+          - fused_raw / mxfp8_context_proj：B·blk·L·2·kvh_rank·d
             （qwen3_dflash.py L680/L685 的一次输出）；
           - per_layer_fallback：逐层**完整** qkv 输出
-            B·E[N]·L·(q_rank+2·kvh_rank)·d（Q 随后被切掉但仍形成缓冲）
-            + stack 后的 KV 副本 B·E[N]·L·2·kvh_rank·d（L688-697）；
+            B·blk·L·(q_rank+2·kvh_rank)·d（Q 随后被切掉但仍形成缓冲）
+            + stack 后的 KV 副本 B·blk·L·2·kvh_rank·d（L688-697）；
       * 草稿 logits B·blk·(V/tp)·4B（fp32，logits_processor 输出口径）。
     phase:verify（目标块验证）：
       * 目标 logits B·blk·(V/tp)·4B（fp32）；
@@ -675,17 +679,20 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
                 q_rank = a.heads // tp
                 d_head = a.head_dim
                 break
+    # R07a：verify 跨度基（两栈全跨度物化；见 docstring）；E[N] 只保留在
+    # cross-round target_hidden 前缀（HF [:produced] 口径）。
+    span_rows = int(batch * blk)
     draft_noise = int(batch * blk * h * b_a)
-    fc_in = int(batch * max(1.0, e_produced) * 8 * h * b_a)
-    normed_ctx = int(batch * max(1.0, e_produced) * h * b_a)
+    fc_in = int(span_rows * 8 * h * b_a)
+    normed_ctx = int(span_rows * h * b_a)
     n_draft_layers = len(draft_ir.layers) if draft_ir is not None else 0
-    fused_kv_out = int(batch * max(1.0, e_produced) * n_draft_layers
+    fused_kv_out = int(span_rows * n_draft_layers
                        * 2 * kv_rank * d_head * b_a)
     qkv_staging = 0
     staging_note = "ctx投影输出为最终 K/V"
     if path == PER_LAYER_FALLBACK:
         # 逐层 qkv 输出（含 Q）在 stack 前全部存活；stack 后再产生 KV 副本。
-        qkv_staging = int(batch * max(1.0, e_produced) * n_draft_layers
+        qkv_staging = int(span_rows * n_draft_layers
                           * (q_rank + 2 * kv_rank) * d_head * b_a)
         staging_note = ("逐层完整 qkv 输出（含 Q，随后切掉）暂存 "
                         f"{qkv_staging}B + stack 后 K/V {fused_kv_out}B")
@@ -698,7 +705,8 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
         live_note=f"noise {draft_noise}B + fc输入 {fc_in}B + ctx归一副本 "
                   f"{normed_ctx}B + {staging_note} + "
                   f"logits(fp32) {draft_logits}B"
-                  f"（B={batch} blk={blk} E[N]={e_produced:.2f} path={path}）"))
+                  f"（B={batch} blk={blk} 跨度基 span={span_rows} 行；"
+                  f"E[N]={e_produced:.2f} path={path}）"))
     verify_logits = int(batch * blk * target_vocab_per_rank * 4)
     allocs.append(Allocation(
         "t-verify-buffers", "transient", "target",

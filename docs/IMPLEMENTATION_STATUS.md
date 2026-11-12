@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到同日先合入的 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-12（R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基与草稿生效块两修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #5/#7 已合入 main；本轮验收修复分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R06 独立数值续验全量 **264 passed**，exit 0；历史：R06 初版 262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：264**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R06 独立数值续验；236→252 为 R05 新增 16 项，252→262 为 R06 几何/算量对账新增 10 项，262→264 为独立张量 oracle 的 hermetic/live 两项）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R07a 全量 **277 passed**，exit 0；历史：R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：277**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R07a；264→277 为 R07a 新增 test_dflash_serving_r07a.py 13 项；236→252 为 R05 新增 16 项，252→262 为 R06 新增 10 项，262→264 为 R06 oracle 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -450,8 +450,12 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
    仍为显式缺口；mHC 仅 source-checked、tilelang kernel 未执行。G-C1。
 2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
    丢弃 `mtp.` → method status=unverified，不进入部署排名。
-3. **DFlash**：服务端集成（SGLang DFLASH/vLLM PR#40898）未逐行核对；拒绝采样/
-   KV 回退/hidden 提取仍 0 占位；workspace/graph/NCCL 池尺寸未知。G-C3。
+3. **DFlash**：服务端集成已双栈逐行核对（R07a 2026-11-12：vLLM @dc74b8cb +
+   SGLang @74cb973d，colocated=supported(source-checked)/dt=unsupported；
+   ctx 投影改 verify 跨度基、草稿行改生效块两修正已回放）。
+   残留：拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位 unknown（两栈
+   in-graph 证据已注记）；DraftLogitsCache 账本、SGLang 采样可用性、GDN 态
+   回退成本、served 实测待 R07b；workspace/graph/NCCL 池尺寸未知。G-C3 残留。
 4. **设备可分配预算/价格**：无来源 → feasible=unknown、成本 null+reason。
    H200 两闭环绑定已归档的 30B-tiny/235B，不能跨模型使用。G-D7/G-D9。
 5. **CPU/GPU 执行**：Qwen 固定 HF 源码两层随机权重 CPU shape probe 已执行；

@@ -257,10 +257,11 @@ def test_fused_ctx_kv_path_and_k_norm_stack():
 
 
 def test_transient_ctx_and_aux_hidden():
-    """二轮审计补齐的结构化临时（pinned 形状）：
+    """二轮审计补齐的结构化临时（pinned 形状；R07a 2026-11-12 跨度基）：
 
-    phase:draft += ctx 归一副本 B·E[N]·h + 融合 ctx-KV 输出
-    B·E[N]·L·2·kvh_rank·d（qwen3_dflash.py L665/L680）；
+    phase:draft += ctx 归一副本 B·blk·h + 融合 ctx-KV 输出
+    B·blk·L·2·kvh_rank·d（qwen3_dflash.py L665/L680；两栈对整 verify 跨度
+    物化，被拒行只是不落缓存）；
     phase:verify += aux hidden B·blk·n_feat·h（speculator _store_hidden_states，
     [:produced] 截断前全块行）。手算与账本逐项对账。
     """
@@ -275,10 +276,11 @@ def test_transient_ctx_and_aux_hidden():
                                    m.vocab // tp, ctx_kv_path="fused_raw")
     draft = next(a for a in allocs if a.alloc_id == "t-draft-buffers")
     n_feat = len(d.target_layer_ids)
-    normed = int(B * e_n * h * 1)
-    fused_out = int(B * e_n * 6 * 2 * kv_rank * a0.head_dim * 1)
+    span = int(B * blk)                       # R07a：verify 跨度基
+    normed = int(span * h * 1)
+    fused_out = int(span * 6 * 2 * kv_rank * a0.head_dim * 1)
     noise = int(B * blk * h * 1)
-    fc_in = int(B * e_n * 8 * h * 1)
+    fc_in = int(span * 8 * h * 1)
     logits = int(B * blk * (m.vocab // tp) * 4)
     assert draft.bytes == noise + fc_in + normed + fused_out + logits
     aux = next(a for a in allocs if a.alloc_id == "t-verify-aux-hidden")

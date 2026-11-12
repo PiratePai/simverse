@@ -3,7 +3,8 @@
 与 [数据缺口清单](data-gaps.md) 分开维护：本页只列**工程实现**缺口（不依赖新数据，
 或先有实现才能消费数据）。每项含：影响面/缺什么/旧仓为何不足/需要什么实现/
 验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
-新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）。
+新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）；
+2026-11-12 更新（R07a：G-C3 核对部分解除）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 
@@ -49,15 +50,33 @@
 - **当前降级**：verify 注意力解析回退（reason 记录）。
 - **优先级**：P1；依赖：G-D4 数据（蒸馏侧可先行）。
 
-## G-C3 DFlash 服务端集成逐行核对（SGLang DFLASH / vLLM PR#40898）
+## G-C3 DFlash 服务端集成逐行核对（SGLang DFLASH / vLLM PR#40898）—— 核对部分解除（2026-11-12 R07a）
 
-- **影响**：部署矩阵"已部署验证"标记（当前 unknown，不冒充）。
-- **缺什么**：对两个引擎实现的逐行阅读证据（块调度、KV 回退、协议常数字节）。
-- **旧仓不足**：无 DFlash 集成分析。
-- **需要**：source_map 增条目 + 协议字节对账（6B/token 等估算升级为按实现核对）。
-- **验收**：dflash_serving_integration 从 unknown → supported/unsupported 带证据。
-- **当前降级**：capability unknown + "模拟按 HF 语义"注记。
-- **优先级**：P1；依赖：无。
+- **2026-11-12 R07a 进展**：**逐行核对已完成**——vLLM @dc74b8cb（13 文件
+  SHA256 pin，与 vllm_qwen35_pin 同提交）与 SGLang @74cb973d（12 文件 pin）
+  双栈审计：draft/verify 调度、hidden 传递（8 层拼接+fc 复制权重）、KV 回退
+  （被拒后缀不落缓存）、拒绝采样（greedy 前缀/随机比值检验+目标分布 bonus）、
+  通信字节、计时边界（两栈 accept/prepare 均 in-graph GPU kernel）。
+  对账修正两处：ctx 投影按 **verify 跨度 B×blk** 计（两栈全跨度投影、只写
+  committed 行；原按 E[N] 前缀计属漏计）与草稿行按**生效块**
+  plan.block_size（原按 checkpoint 16 与 verify 双口径）。e2e 测试两侧在册
+  （GSM8K 精度/接受长度门槛）。`dflash_serving_integration`：colocated →
+  **supported（source-checked，非已部署实测）**；dt_serial/dt_pipeline →
+  **unsupported（两栈均无 DT 分离；SGLang disagg 是 target 侧 PD）**。
+  证据 ev-vllm-dflash-serving / ev-sglang-dflash-serving；source_map
+  sm-vllm-dflash-serving / sm-sglang-dflash-serving；
+  [R07a 报告](../validation/dflash-serving-audit-20261112.md)。
+- **仍缺（G-C3 残留）**：served 已部署实测（R07b 真实 trace+匹配环境）；
+  SGLang 采样验证 kernel 可用性（构建/设备相关，不可用降级 greedy 分布不保持）；
+  SGLang GDN/mamba 目标态回退（extra_buffer）拷贝成本；vLLM
+  DraftLogitsCache（probabilistic [max_reqs,N,V] 跨轮缓冲）未入 R02b 账本
+  （场景无 draft_sample_method 键，待键登记后接）；两栈 logits/候选通信
+  字节口径分歧（本仓行=vLLM 全量 gather；SGLang greedy 为局部 (max,id)
+  all-gather，差异公式已登记未入行）。
+- **影响**：部署矩阵 served 标记（source-checked ≠ 已部署；R07b 前不冒充）。
+- **当前降级**：colocated supported（源码核对）/dt unsupported；accept 与
+  KV 回退 kernel 耗时仍 unknown（stage_cost_complete）。
+- **优先级**：P1（核对部分已解除；残留按 R07b/后续键登记推进）。
 
 ## G-C4 请求级事件轨迹 + 单请求超前（lookahead）
 
