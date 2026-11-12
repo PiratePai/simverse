@@ -290,23 +290,99 @@ ENTRIES: List[SourceMapEntry] = [
              "attribution.json 与 v41-csa2-indexer-20261112.md"),
     SourceMapEntry(
         entry_id="sm-v41-csa2-moe-unverified",
-        model_or_method="deepseek_v41_flash MoE/量化/注意力核",
-        semantic="MoE sqrtsoftplus/noaux_tc/分组路由未建模；稀疏 MLA 注意力核"
-                 "本体（flops 4d+5、bmm 尺度）仍 v0.1 移植；quantization_config"
-                 " 未映射到计算精度（CSA2 索引管线 R20 已另立 "
-                 "sm-v41-csa2-indexer）",
+        model_or_method="deepseek_v41_flash 量化/注意力核",
+        semantic="稀疏 MLA 注意力核本体（flops 4d+5、bmm 尺度）仍 v0.1 移植；"
+                 "quantization_config 未映射到计算精度（CSA2 索引管线 R20 已"
+                 "另立 sm-v41-csa2-indexer；MoE 路由 R21 已另立 "
+                 "sm-v41-moe-route）",
         source_pin=VLLM_PIN,
-        source_location="vllm/models/deepseek_v41/nvidia/model.py:131-200 "
-                        "(DeepseekV4MoE)、204-327（sparse-MLA 选择）",
+        source_location="vllm/models/deepseek_v41/nvidia/model.py:204-327"
+                        "（sparse-MLA 选择）；quantization_config（config "
+                        "JSON，未映射）",
         branch_predicate="config scoring_func=sqrtsoftplus、topk_method=noaux_tc",
         input_domain="V4.1-Flash 全 40 层",
         both_sides_covered=False,
-        uncovered_domain=["MoE scoring/top-k/分组路由未消费",
-                          "稀疏 MLA 注意力核本体未独立逐行核（flops 4d+5 为"
+        uncovered_domain=["稀疏 MLA 注意力核本体未独立逐行核（flops 4d+5 为"
                           "v0.1 移植口径）",
                           "quantization_config 未映射到计算精度"],
-        note="2026-11-10 审查、R20 缩窄：索引/候选路径已解除；剩余路径不能因"
-             " config 通过而标完整或参与部署排名"),
+        note="2026-11-10 审查、R20 缩窄（索引/候选）、R21 缩窄（MoE 路由已"
+             "解除）；剩余路径不能因 config 通过而标完整或参与部署排名"),
+    SourceMapEntry(
+        entry_id="sm-v41-moe-route",
+        model_or_method="deepseek_v41_flash MoE 路由",
+        semantic="V4.1 MoE 路由：GateLinear(h→E, out_dtype=fp32) Replicated "
+                 "GEMM（权重沿 model loader BF16；输入由 pinned mHC "
+                 "layer_input_cur BF16 证明；均 2B；fp32 只是 logits 出口；"
+                 "有效域 official V4.1 bf16）→ sqrtsoftplus 打分 "
+                 "sqrt(softplus(logits))（>20 护栏）"
+                 "→ noaux_tc 偏置平坦 top-6（选择列=score+bias、权重=无偏 "
+                 "score、平手最小 id、NaN→−1e30；无分组）→ sum→1 归一 ×"
+                 "routed_scaling_factor（sum≤0/NaN 时分母取 1）→ FP32 "
+                 "weights + int32 ids；共享专家（1, inter 2304, 无 gate）在"
+                 "routed 归一后以权重 1.0 **独立相加**（moe_output.py "
+                 "L151-175 的 shared_output 契约）",
+        source_pin=VLLM_PIN,
+        source_location="vllm/model_executor/layers/fused_moe/router/"
+                        "dsv4_topk.py:21-38/63-76/85-107/149-150（can_use "
+                        "约束、HAS_VL 哨兵、sqrtsoftplus+bias+NaN、选择循环+"
+                        "归一、FP32/int32 输出）；fused_topk_bias_router.py:"
+                        "98-464（fused_topk_bias 分派 + FusedTopKBiasRouter "
+                        "通用共享槽 L447-464，默认权重 1.0 L383-385；本模型"
+                        "调用未启用，见 model.py L426-449）；"
+                        "router_factory.py:166-173/215-238（分组守卫与 "
+                        "FusedTopKBiasRouter 选择 L230）；deepseek_v4/nvidia/"
+                        "model.py:240/253/270-277/303-320/357-362/419-421"
+                        "（scaling/renormalize/GateLinear fp32/bias 创建/"
+                        "mega EP 断言/fused start_idx 仅赋值未用于所有权）；"
+                        "linear.py:179-199/287-295（params_dtype 默认、"
+                        "quant_config None→UnquantizedLinearMethod、"
+                        "weight dtype=params_dtype）；base_loader.py:86"
+                        "（set_default_torch_dtype(model_config.dtype)）；"
+                        "fused_moe/layer.py:77-86/101/129-130"
+                        "（determine_expert_counts、use_grouped_topk/"
+                        "n_shared_experts/fuse_shared_experts 默认）；"
+                        "kernels/mhc/tilelang.py:900/1096（R05 pin："
+                        "layer_input_cur dtype=torch.bfloat16）；"
+                        "model.py:731-816（fused_post_pre 输出直接 "
+                        "self.ffn(x)）；"
+                        "moe_output.py:151-175（shared_output 独立相加）；"
+                        "gate_linear.py:26/306-341（ReplicatedLinear，"
+                        "bf16/fp32 输入分支）；cpu_router.py:"
+                        "81-134（biased_topk_cpu 同语义）",
+        branch_predicate="scoring_func=sqrtsoftplus 且 topk_method=noaux_tc 且 "
+                         "norm_topk_prob=true 且（非 native mega moe）→ "
+                         "FusedTopKBiasRouter→dsv4_topk/topk_hash_softplus_"
+                         "sqrt；分组仅 use_grouped_topk（V4.1 无 n_group/"
+                         "topk_group 键；pinned model 调用未传该参数，"
+                         "FusedMoEFactory 默认 False 已随 fused_moe/layer.py "
+                         "入 pin）；"
+                         "num_hash_layers=0（v41/nvidia/model.py L155，"
+                         "无 hash MoE）",
+        thresholds="dsv4_topk Triton 档：E∈{256,384}、k=6、fp32 logits、"
+                   "renormalize、bias 必须存在（不满足落 ops.topk_hash_"
+                   "softplus_sqrt/CPU biased_topk_cpu，语义相同）；mega 路径"
+                   "需 EP+fp4 专家+sqrtsoftplus+renorm（model.py L248-263）",
+        input_domain="V4.1-Flash 全 40 MoE 层，文本 token（VL 哨兵判定逐行"
+                     "执行，图像 token 走 bias_vl 未单列）",
+        both_sides_covered=True,
+        evidence_kind="source-checked",
+        uncovered_domain=["kernel/CPU forward/GPU 未执行（op 为解析算术口径）",
+                          "ExpertMapManager 未入 moe-pin：fused EP 余数分配"
+                          "是未入 pin 读取点；本 PR 不据 fused 余数路径建模",
+                          "部署变体未建模：native MegaMoE bf16_mega_gate 大批"
+                          "路径（EP+fp4+SP）；GateLinear 的 bf16 专核/cuBLAS"
+                          "档未执行（fp32/bf16x3 分层只适用 fp32 router 权重）",
+                          "dsv4_topk 与专核的指令构成差异",
+                          "DSpark 草稿层 MoE（E=128/k=3）方法层字段不建模",
+                          "padding skip（VLLM_MOE_SKIP_PADDING）/CUDA-graph "
+                          "整宽路由缓冲未入账"],
+        note="R21（2026-11-12/13）14 文件 pin（moe-pin.json）；count 三行 "
+             "moe_gate/moe_score/moe_topk_renorm（gate 权重沿 model loader "
+             "BF16、输入由 mHC layer_input BF16 证明；每层 3,932,160 B；"
+             "域 official V4.1 bf16）+ memory router_b/路由偏置对象 + 保守 EP "
+             "整除域（仅 mega 断言 L357-362；fused 通用余数映射未入 pin/"
+             "未建模，不主张 fused 非法）；共享专家独立相加"
+             "（moe_output.py）；量化映射/swiglu clamp 仍为独立缺口"),
     SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",

@@ -10,6 +10,13 @@ per-rank 配方（R01，vLLM @dc74b8cb pin；lowering/parallel.py 证据）：
   * EP 关（ep=1）：每 rank 全部 E 个专家、inter/tp 分片；
   * EP 开（ep=tp）：每 rank E//ep(+余数) 个整专家；期望流量按均匀路由
     的本地份额计算（E_l/E 比例），显式登记 expectation。
+
+V4.1 路由细化（R21，vllm @f358f057 moe-pin.json 14 文件 source-checked）：
+  * v41_moe_route_rows：sqrtsoftplus 打分 + noaux_tc 偏置平坦 top-k（无分组）
+    + sum→1 归一 ×routed_scaling 三行替换通用 moe_router 行，per-rank 复制；
+  * V4.1 EP 取保守整除域（require_divisible_ep）：mega 路径有 pinned
+    断言；fused 路径的通用余数映射未入 pin、未建模，因此非整除组合不在
+    本 PR 的声明域内（不等于宣称 vLLM fused 路径非法）。
 """
 from __future__ import annotations
 
@@ -48,6 +55,114 @@ def routed_flops_exact(M: int, k: int, hidden: int, inter: int) -> int:
 def routed_capacity_bytes(E: int, hidden: int, inter: int, expert_bytes: int) -> int:
     """全部 routed 专家驻留容量（精确整数）。"""
     return E * 3 * hidden * inter * expert_bytes
+
+
+def require_divisible_ep(E: int, ep: int) -> None:
+    """V4.1 EP 保守整除域（**本仓建模域**，不是"vLLM 两路径均有断言"）。
+
+    依据（vllm @f358f057 deepseek_v4/nvidia/model.py）：
+      * mega 路径 L357-362：显式断言 n_physical_experts % ep_size == 0
+        （eplb 冗余专家默认 0）——这是直接源码证据；
+      * fused 路径 L419-421 计算 experts_start_idx = ep_rank·(n_physical//ep)
+        的 floor 值，但该属性**未被 FusedMoE 的专家所有权消费**（本仓 grep
+        仅见初始化赋值；实际 EP 映射由 FusedMoE/ExpertMapManager 负责，
+        该文件未入 moe-pin，本 PR 不据它建模非整除域）。
+    因此这里只把"整除组合"纳入 V4.1 的声明/建模域：mega 路径有 pinned
+    断言，fused 路径的通用余数映射未入 pin、未建模。非整除组合（如
+    384%7）被保守拒绝，但这**不**表示 vLLM fused 路径本身非法；若要
+    放开，需另 pin ExpertMapManager 并单独核对。
+    """
+    if ep != 1 and E % ep:
+        raise ValueError(
+            f"V4.1 MoE EP{ep} 不整除专家数 {E}（保守建模域：mega 路径 "
+            f"pinned 断言；fused 通用余数映射未入 pin/未建模。"
+            f"eplb 冗余默认 0）")
+
+
+def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int) -> list:
+    """V4.1 MoE 路由三行（gate/score/topk_renorm）——**per-rank 全量复制**。
+
+    证据（moe-pin.json 14 文件，vllm @f358f057，blob sha1 对 vllm-tree.json
+    逐项校验；source-checked 2026-11-12/13 R21，未执行 kernel/CPU/GPU）：
+      * gate：GateLinear(h→E, bias=False, out_dtype=fp32) 为 ReplicatedLinear
+        子类（deepseek_v4/nvidia/model.py L270-277，out_dtype 在 L274；
+        router/gate_linear.py L26）→ 每 rank 全量 GEMM，router logits
+        **FP32**；**gate 权重 2B**：GateLinear 未传 quant_config/
+        params_dtype → LinearBase `params_dtype =
+        torch.get_default_dtype()`、`quant_config is None →
+        UnquantizedLinearMethod`（linear.py L287-295、L179-199）；
+        base_loader 在 `set_default_torch_dtype(model_config.dtype)` 内
+        实例化（base_loader.py L86），官方 V4.1 config dtype=bfloat16 →
+        BF16 权重 2B。**gate 输入也 2B，但不是由 model dtype 推出**：
+        pinned mHC tilelang.py 的 `layer_input_cur` 硬编码
+        `dtype=torch.bfloat16`（R05 pin L900/L1096），
+        DeepseekV4Layer.forward 把它直接传给 `self.ffn(x)`
+        （model.py L731-816）。有效域固定为 official V4.1 bf16，
+        full_config 非 BF16 由 parse_v41_csa2 拒绝；
+      * scoring sqrtsoftplus：weights = sqrt(softplus(logits))，logits>20 取
+        sqrt(logits) 数值护栏（dsv4_topk.py L85）；选择列 = weights +
+        e_score_correction_bias（L86），NaN→−1e30（L87）；CPU 侧
+        biased_topk_cpu 同语义（cpu_router.py L90-95 docstring："bias
+        steers selection only"）；
+      * 选择：k 轮平坦 argmax（**无分组**：V4.1 config 无 n_group/topk_group
+        键，router_factory.py L166-173 仅 use_grouped_topk 时走
+        GroupedTopKRouter），平手取最小专家 id（L94-95 min(candidate)），
+        权重取**无偏** score（L96-98）；
+      * 归一化：selected_weights *= routed_scaling/sum（sum≤0 除 1 护栏，
+        L104-107）；输出 FP32 weights + int32 ids（L149-150）；
+      * VL 分支：V4.1-Flash 为视觉 checkpoint（vision_n_layers=32>0）→
+        bias_vl 存在且 HAS_VL=True，文本 token 也逐行加载 input_ids +
+        bias_vl 做 is_image 判定（L63-76，5 个哨兵 id 才走 bias_vl）。
+    op 口径：解析算术 op（exp/log/sqrt/比较各 1），非 kernel 指令数；
+    字节为 unfused 逻辑访问参考，非实测 HBM。
+    返回 list[dict]，字段与 count.work.OpRow 对齐。
+    """
+    E, k = moe.experts, moe.top_k
+    T = tokens
+    # GateLinear 权重沿 model loader BF16；输入由 mHC layer_input BF16
+    # 证明；不是场景 quant 的 dense_w/act；logits 出口才是 FP32 4B。
+    gate_w_bytes = int(route["gate_weight_itemsize"])
+    gate_a_bytes = int(route["gate_act_itemsize"])
+    has_vl = bool(route.get("bias_vl_bytes"))
+    vl_ops = (E + 2) if has_vl else 0            # where E + 哨兵 2 比较/token
+    vl_ids_read = T * 8 if has_vl else 0         # input_ids int64 上界
+    bias_cnt = 2 if has_vl else 1                # e_score_correction_bias(+bias_vl)
+    scale = float(route.get("routed_scaling", 1.0))
+    score_ops = T * (8 * E + vl_ops)             # 打分 5 + bias 加 1 + NaN 护栏 2
+    topk_ops = T * (k * (5 * E + 3) + 2 * k + 4)  # k 轮选择 + 归一/缩放
+    return [{
+        # GateLinear：Replicated，每 rank 全量 h×E；BF16 权重/输入，
+        # FP32 logits 出口
+        "layer_op": "moe_gate", "flops": 2 * T * hidden * E,
+        "weight_read": int(hidden * E * gate_w_bytes),
+        "weight_capacity": int(hidden * E * gate_w_bytes),
+        "act_read": int(T * hidden * gate_a_bytes),
+        "act_write": int(T * E * 4),
+        "formula": FR.F_MOE_ROUTE_GATE, "statistic": "exact",
+        "shape": f"[{T},{hidden}]@[{hidden},{E}] replicated（GateLinear "
+                 f"{route['gate_weight_dtype']} 权重/输入 "
+                 f"{gate_w_bytes}B，out_dtype=fp32；不随 tp/ep 缩放）",
+    }, {
+        # sqrtsoftplus 打分 + 偏置加 + NaN 护栏（+ VL 哨兵判定）
+        "layer_op": "moe_score", "flops": score_ops,
+        "weight_read": int(bias_cnt * E * 4),
+        "weight_capacity": int(bias_cnt * E * 4),
+        "act_read": int(T * E * 4 + vl_ids_read), "act_write": 0,
+        "formula": FR.F_MOE_ROUTE_SCORE, "statistic": "exact",
+        "shape": f"sqrt(softplus(logits)) {T}×{E}（>20 护栏；+bias 选择列，"
+                 "NaN→−1e30）"
+                 + (f"；HAS_VL 哨兵判定（bias_vl {E}×4B 复制，input_ids "
+                    "int64 上界）" if has_vl else ""),
+    }, {
+        # k 轮平坦偏置 argmax + 权重取无偏 score + sum→1 归一 ×routed_scaling
+        "layer_op": "moe_topk_renorm", "flops": topk_ops,
+        "weight_read": 0, "weight_capacity": 0,
+        "act_read": 0, "act_write": int(T * k * 8),
+        "formula": FR.F_MOE_ROUTE_TOPK, "statistic": "exact",
+        "shape": f"top-{k}/{E} 平坦偏置 argmax（无分组，平手最小 id）；"
+                 f"权重=无偏 score；sum 归一 ×{scale}（sum≤0 除 1）；"
+                 f"写 FP32 weights+int32 ids {T}×{k}",
+    }]
 
 
 def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 1,

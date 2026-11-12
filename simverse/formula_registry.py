@@ -256,6 +256,60 @@ F_CSA2_SPARSE_INDEX_BUILD = _f(
     "sparse_index_build 行（decode 每 (kv源,索引源,r) 运行首层一次；"
     "SWA-only 运行首 L0 topk=0）")
 
+# ---- V4.1 MoE 路由（DeepSeek-V4.1-Flash；证据 moe-pin.json 14 文件 pin
+#       @f358f057 blob 对 vllm-tree.json，source-checked 2026-11-12 R21；
+#       op 口径同 R04/R05/R20：解析算术 op（exp/log/sqrt/比较各 1），非
+#       kernel 指令数；字节为 unfused 逻辑访问参考，非实测 HBM）----
+F_MOE_ROUTE_GATE = _f(
+    "v2.moe_route_gate",
+    "FLOPs = 2·T·h·E；weight_read = h·E·B_gate；act_read = T·h·B_act；"
+    "B_gate=2（model loader BF16）；B_act=2（mHC layer_input BF16）；"
+    "写 = T·E·4B（FP32 logits）。有效域：official V4.1 bf16",
+    "deepseek_v4/nvidia/model.py L270-277（GateLinear(input=h, output=E, "
+    "bias=False, out_dtype=torch.float32，未传 quant_config/params_dtype）；"
+    "linear.py L287-295（params_dtype=torch.get_default_dtype()，"
+    "quant_config None→UnquantizedLinearMethod）L179-199（weight dtype="
+    "params_dtype）；base_loader.py L86（set_default_torch_dtype("
+    "model_config.dtype)）；**gate 输入**：mHC tilelang.py L900/L1096"
+    "（layer_input_cur dtype=torch.bfloat16，R05 pin）+ model.py L731-816"
+    "（fused_post_pre 输出直接 self.ffn(x)）；router/gate_linear.py "
+    "L26/L306-341（Replicated 子类；bf16/fp32 输入分支）",
+    "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；权重沿 "
+    "model loader BF16、输入由 mHC layer_input BF16 证明，均 2B；"
+    "FP32 仅 logits 出口；非 official bf16 的 dtype 拒绝）")
+F_MOE_ROUTE_SCORE = _f(
+    "v2.moe_route_score",
+    "ops = T·(8E + vl)；vl = E+2（视觉 checkpoint HAS_VL，文本 token 亦逐行"
+    "哨兵判定）否则 0——每元素：sqrtsoftplus 打分 5（>20 护栏比较+exp+加一"
+    "+log+sqrt）+ bias 加 1 + NaN 护栏 2；读 = T·E·4（FP32 logits）+ "
+    "T·8（HAS_VL 时 input_ids int64 上界，否则 0）；weight = n_bias·E·4"
+    "（FP32 复制）",
+    "dsv4_topk.py L63-87（HAS_VL 哨兵/bias_vl where L63-76、weights="
+    "sqrt(softplus)（>20 护栏）L85、current=weights+bias L86、NaN→−1e30 "
+    "L87）；cpu_router.py L90-95（biased_topk_cpu 同语义 docstring：bias "
+    "steers selection only）；model.py L303-320（e_score_correction_bias/"
+    "bias_vl 创建条件）",
+    "moe_score 行（每 MoE 层；选择列含 bias、权重列不含——noaux_tc）")
+F_MOE_ROUTE_TOPK = _f(
+    "v2.moe_route_topk",
+    "ops = T·[k·(5E+3) + 2k+4]——k 轮平坦偏置 argmax（每轮 max 归约 E−1、"
+    "相等选择 E、min 平手 E−1、无偏权重 gather 2E、移除 E ≈5E；槽位簿记 3），"
+    "归一 sum k+1 加 + sum≤0 护栏 2 + 除 1 + 缩放乘 k；写 = T·k·8B（FP32 "
+    "weights + int32 ids）",
+    "dsv4_topk.py L90-107（static_range(k) 选择循环：max L93、min(candidate)"
+    " 平手最小 id L94-95、selected_weight 取无偏 score L96-98、移除已选 "
+    "L102；L104-107 selected_weights *= routed_scaling/sum（sum≤0/NaN "
+    "时分母取 1，NaN 权重本身不被清除）；输出 L149-150）；无分组——"
+    "router_factory.py L166-173 分组仅 use_grouped_topk（V4.1 无 "
+    "n_group/topk_group 键；工厂调用默认 False，见剩余限制）；"
+    "共享专家在 routed 归一后以权重 1.0 **独立相加**（moe_output.py "
+    "L151-175 shared_output 契约；FusedMoEFactory 调用未传 "
+    "n_shared_experts/fuse_shared_experts，model.py L426-449）；"
+    "fused_topk_bias_router.py L447-464 的共享槽是通用融合能力，本模型"
+    "未启用",
+    "moe_topk_renorm 行（每 MoE 层；权重=无偏 sqrtsoftplus score，sum→1 后 "
+    "×routed_scaling_factor）")
+
 # ---- Cost（T0 解析估算；Q2：无实测数字） ----
 F_ROOFLINE = _f("v2.roofline", "t = max(F/P_eff, Q/BW_eff) + ρ·min(...)；ρ=0.15 登记",
                 "原理 §5：乐观约束 + 显式经验尾部", "kernel 级 T0")

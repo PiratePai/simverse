@@ -21,7 +21,7 @@ from .. import formula_registry as FR
 from ..model_ir.families import engram_bucket_primes
 from ..model_ir.schema import (FULL, LINEAR, MLA, MLA_CSA2, SLIDING, LayerIR,
                                ModelIR)
-from .moe import moe_rows
+from .moe import moe_rows, require_divisible_ep, v41_moe_route_rows
 
 
 @dataclass
@@ -545,12 +545,20 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
 
 def ffn_or_moe_rows(stage: str, li: int, layer: LayerIR, T: int, h: int,
                     quant: dict, tp: int = 1, ep: int = 1,
-                    local_experts: Optional[int] = None) -> List[OpRow]:
+                    local_experts: Optional[int] = None,
+                    route: Optional[dict] = None) -> List[OpRow]:
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
     rows: List[OpRow] = []
     if layer.moe is not None and layer.moe.experts:
-        for r in moe_rows(layer.moe, T, h, quant, tp=tp, ep=ep,
-                          local_experts=local_experts):
+        moe_dicts = moe_rows(layer.moe, T, h, quant, tp=tp, ep=ep,
+                             local_experts=local_experts)
+        if route is not None:
+            # R21：V4.1 路由三行（gate/score/topk_renorm）替换通用 moe_router
+            # 行（FP32 logits 出口 + sqrtsoftplus/noaux_tc 语义）；routed/
+            # shared(+gate) 行不变。
+            moe_dicts = (v41_moe_route_rows(layer.moe, route, T, h)
+                         + moe_dicts[1:])
+        for r in moe_dicts:
             rows.append(OpRow(stage, li, r["layer_op"], flops=r["flops"],
                               weight_read=r["weight_read"],
                               weight_read_expected=r.get("weight_read_expected"),
@@ -820,7 +828,14 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     kvs = (model.extras or {}).get("kv_spec", {})
     hc_spec = (model.extras or {}).get("hc")
     engram_spec = (model.extras or {}).get("engram")
+    moe_route = (model.extras or {}).get("moe_route")
     first_layer_index = model.layers[0].index if model.layers else None
+    if moe_route:
+        # R21：V4.1 保守 EP 整除域（mega 路径 pinned 断言 L357-362；
+        # fused 通用余数映射未入 pin/未建模，见 count/moe.require_divisible_ep）
+        for layer in model.layers:
+            if layer.moe is not None and layer.moe.experts:
+                require_divisible_ep(layer.moe.experts, ep)
 
     def _local_experts(layer):
         if plan is not None:
@@ -860,7 +875,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                                    index_run_first=run_first)
         T = B * Q
         rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
-                                local_experts=_local_experts(layer))
+                                local_experts=_local_experts(layer),
+                                route=moe_route)
         if layer.kind == MLA_CSA2 and hc_spec:
             # mHC 边界核融合 norm+残差（F_MHC_POST_PRE）：不再另计通用 norm/add 行
             rows += hc_boundary_rows(stage, li, T, h, hc_spec, quant,

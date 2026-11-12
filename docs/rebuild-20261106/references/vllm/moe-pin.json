@@ -1,0 +1,105 @@
+{
+  "commit": "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+  "repo": "vllm-project/vllm",
+  "note": "R21 V4.1 MoE scoring/top-k/分组路由 pin；路径相对 references/vllm/；blob sha1 对 ../vllm-tree.json 逐项校验（14 文件：deepseek_v4 基类 MoE+eplb、fused_moe router 8 文件+moe_output、gate 权重 dtype 的 linear.py/base_loader.py、FusedMoE 工厂层 layer.py）",
+  "files": [
+    {
+      "path": "vllm/models/deepseek_v4/nvidia/model.py",
+      "size": 56555,
+      "blob_sha1": "cc2d2d6c994dbfba781a9ba760e8a7323d65ef06",
+      "sha256": "38ec5686051722ddf3741cfdb720d009165174a8387d0e4902e67602b69bf799",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/models/deepseek_v4/common/eplb_util.py",
+      "size": 1732,
+      "blob_sha1": "53c6d100243d2b3ef720553506bf3f0bfd48bbc1",
+      "sha256": "6f490d1241c1d68747590d20596043a63b58b84d7f9da6966ba1e27a0e87376e",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/dsv4_topk.py",
+      "size": 6316,
+      "blob_sha1": "71cd605af71ae55f02427636b2986cb0da5a05f8",
+      "sha256": "4827aaac56a54edc54e47fa50bfe08cc62188dc83d9949f415d1e774b3edb4e7",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/fused_topk_bias_router.py",
+      "size": 17079,
+      "blob_sha1": "05ad62331c72d852993fc6c005f6a34f1cda6a56",
+      "sha256": "28593465b57c8d374b34bf261bdf24b6f2984b46eb4e41cd01916d2ca2c9701a",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/router_factory.py",
+      "size": 11058,
+      "blob_sha1": "c4c875d153de88924712d41abcdc500a34032bb7",
+      "sha256": "8b0eee85ada1a92e89bc346c076d97c08e3b6edb5a66686267929c364c2b17a5",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/base_router.py",
+      "size": 11294,
+      "blob_sha1": "90f292f6e3ae08ba51e5175d01c57d6376ca7651",
+      "sha256": "0901b0ddab5a681d850ea29918b2417979034421ef24a74e9e7709c139a5dc60",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/fused_moe_router.py",
+      "size": 3724,
+      "blob_sha1": "63d8f48cc2c56d300f9b6d14f05202550598ff2d",
+      "sha256": "050b26e2750a71538caf44d4c45a71fd1b7561d00774e4a701b33d657327d210",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/grouped_topk_router.py",
+      "size": 13957,
+      "blob_sha1": "95b369882b2290c8331940e17bd92064a1514d31",
+      "sha256": "9986d9045b2c317f6123ead0949a710d01daa8f0282a0999c6a9fd382bba453d",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/cpu_router.py",
+      "size": 12523,
+      "blob_sha1": "ff4a5c607aee666708b1803664e2f6a555675f1e",
+      "sha256": "f500ee969fb58701c9c3cf4744baf3bed61dcd82bd6a8dde045f084091347d29",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/router/gate_linear.py",
+      "size": 23017,
+      "blob_sha1": "cadb6481debfa801bbbe8921243e4954d8ff31f3",
+      "sha256": "18583f5a25cb2c64fc6708923ec0bf601815629fc7f72659ab2d50ecfc891575",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/moe_output.py",
+      "size": 7447,
+      "blob_sha1": "8d0360f2d6b28f9b41356aea447c5b9470a90765",
+      "sha256": "37ac94be043da72d02f3868186228fbb48ac369a914fbb6d00b1ec775c86c027",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/linear.py",
+      "size": 73774,
+      "blob_sha1": "911c52cc7f176c45a9a46f04f6ce87bdcfffc106",
+      "sha256": "8d60067354890c880174f225d19f1b405bf86158587067f2fa86d8ee00cdd2f2",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/model_loader/base_loader.py",
+      "size": 6858,
+      "blob_sha1": "b2e5e3344062efe48e2128c7e65e26fbd0bc19f2",
+      "sha256": "b83362342b7d2d610aa7e78c29e2ad46f143177c712d65c5acec4bbe16c820ba",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/layer.py",
+      "size": 20787,
+      "blob_sha1": "cbe6d0ce893875789ad0896e049b9d4f5664aa93",
+      "sha256": "95b94b8696577ee7bf4a05fa6f05d113b1c0eabdb12536119db4fe9e4b1341e0",
+      "tree_match": true
+    }
+  ]
+}

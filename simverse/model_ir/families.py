@@ -156,6 +156,38 @@ _CSA2_KEY_NOTES = {
         " L34-43；compressor.py L295-310 ratio1 无门控）；MTP 尾部另列缺口",
 }
 
+# R21（2026-11-12）：V4.1 MoE 路由键的 mapped 注记（证据 moe-pin.json
+# 14 文件 + ev-vllm-v41-moe；消费者 count/moe.v41_moe_route_rows、
+# lowering/memory 路由偏置对象）。
+# 本 PR 的 source-checked dtype 域只覆盖官方 V4.1 固定资产（config
+# dtype=bfloat16）。gate 输入不是由任意 model dtype 推出：pinned mHC
+# tilelang.py 的 layer_input_cur 硬编码 bfloat16（R05 pin L900/L1096），
+# DeepseekV4Layer.forward 把它直接传给 self.ffn(x)（model.py L731-816）。
+_V41_DTYPE_DOMAIN = "official_v41_bfloat16"
+_V41_BF16_ITEMSIZE = 2
+
+_MOE_ROUTE_KEY_NOTES = {
+    "scoring_func":
+        "mapped：sqrtsoftplus——weights=sqrt(softplus(logits))，>20 取 "
+        "sqrt(logits) 护栏（dsv4_topk.py L85；cpu_router.py L90-95 同语义"
+        " docstring）；仅此一档（mega/model.py L255-258 断言 sqrtsoftplus）",
+    "topk_method":
+        "mapped：noaux_tc——e_score_correction_bias[E] fp32 只导选择不进权重"
+        "（deepseek_v4/nvidia/model.py L303-313 建 Parameter；dsv4_topk.py "
+        "L85-87 选择列=weights+bias、L96-98 权重取无偏 score）",
+    "norm_topk_prob":
+        "mapped：true——选中权重 sum→1 归一（dsv4_topk.py L104-107；"
+        "cpu_router.py L107 assert renormalize；can_use_dsv4_topk 要求 "
+        "renormalize）",
+    "routed_scaling_factor":
+        "mapped：1.5——归一后乘 routed_scaling_factor/sum（sum≤0/NaN 分母"
+        "取 1，dsv4_topk.py L104-107）；只作用于 routed。共享专家（无 gate）在"
+        "routed 归一后以权重 1.0 独立相加（moe_output.py L151-175 的"
+        " shared_output 契约）；fused_topk_bias_router.py L447-464 的"
+        "共享槽是通用融合能力，本模型 FusedMoE 调用未启用（未传"
+        " n_shared_experts/fuse_shared_experts，model.py L426-449）",
+}
+
 
 def _is_prime(n: int) -> bool:
     """确定性 Miller-Rabin（n < 2**32 有效；基 {2,7,61}）。
@@ -609,8 +641,15 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     source-checked 建模 → mapped（count/work.v41_layer_rows + lowering/
     memory 记录/环形状态/缓冲对象；公式 v2.csa2_*；短上下文旁路、
     prefill/decode 分支、candidate 所有权见 source_map sm-v41-csa2-indexer）。
-    MoE scoring、量化映射、swiglu clamp、注意力核本体、尾部
-    compress_ratios 仍为显式缺口 → gaps 非空，structure_complete=False。
+    MoE 路由（scoring/top-k/归一化/缩放/共享专家/EP 归属）：2026-11-12 R21
+    按 14 文件 pin（moe-pin.json，vllm @f358f057，blob sha1 对
+    vllm-tree.json 逐项校验）source-checked 建模 → mapped
+    （count/moe.v41_moe_route_rows 三行 + lowering/memory 路由偏置对象；
+    V4.1 EP 保守整除域（mega 断言；fused 通用余数映射未入 pin）；公式
+    v2.moe_route_*；平坦偏置 top-k 无分组——V4.1 config 无
+    n_group/topk_group 键，分组仅 V3 式 use_grouped_topk 路径）。
+    量化映射、swiglu clamp、注意力核本体、尾部 compress_ratios 仍为显式
+    缺口 → gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
     tc = config
@@ -651,6 +690,19 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                 * tc["moe_intermediate_size"],
                 routed_scaling=float(tc["routed_scaling_factor"]),
                 scoring=str(tc.get("scoring_func", "softmax")))
+    # R21：V4.1 路由 config 域校验（pinned 源码只支持该组合；非法值按
+    # config 域拒绝，不静默回退）——dsv4_topk.py can_use L21-38（renormalize/
+    # fp32 logits/bias）、deepseek_v4/nvidia/model.py L253-263（mega 路径
+    # 断言 sqrtsoftplus+renormalize）、cpu_router.py L107（assert renormalize）。
+    if moe.scoring != "sqrtsoftplus":
+        raise ValueError(f"V4.1 scoring_func={moe.scoring!r} 不支持：pinned "
+                         "实现仅 sqrtsoftplus（mega 断言 L255-258）")
+    if str(tc.get("topk_method", "noaux_tc")) != "noaux_tc":
+        raise ValueError(f"V4.1 topk_method={tc.get('topk_method')!r} 不支持："
+                         "noaux_tc 之外无 e_score_correction_bias 建模依据")
+    if not bool(tc.get("norm_topk_prob", True)):
+        raise ValueError("V4.1 norm_topk_prob=false 不支持：dsv4/cpu 路由均"
+                         "断言 renormalize")
     layers = []
     r_hist: Dict[int, int] = {}
     for i in range(L):
@@ -737,6 +789,84 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         if key.startswith("dspark_"):
             coverage[key] = {"status": "metadata-only", "consumer": "methods",
                              "note": "V4.1 原生 DSpark 方法参数（方法层绑定，非模型结构）"}
+    # R21：V4.1 MoE 路由键的 mapped 注记（14 文件 pin moe-pin.json，
+    # source-checked 2026-11-12）
+    for key, note in _MOE_ROUTE_KEY_NOTES.items():
+        path = f"{text_prefix}.{key}" if text_prefix else key
+        if path in coverage and coverage[path]["status"] == "mapped":
+            coverage[path] = {"status": "mapped",
+                              "consumer": "model_ir+count+memory",
+                              "note": note}
+    # R21：路由 spec（消费方：count/moe.v41_moe_route_rows、
+    # lowering/memory 路由偏置对象、count/work EP 整除域校验）。
+    # 常数全部来自 moe-pin.json @f358f057：
+    #   * gate = GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）：
+    #     权重沿 model loader BF16（linear.py L287-295/L179-199；
+    #     base_loader.py L86）；输入由 mHC tilelang.py L900/L1096 的
+    #     layer_input_cur BF16 证明（model.py L731-816）；均 2B；fp32
+    #     只是 logits 出口；有效域 official V4.1 bf16，非 BF16 拒绝；
+    #   * bias = e_score_correction_bias[E] fp32（noaux_tc，L303-313）；
+    #   * bias_vl：vision_n_layers>0 时每 MoE 层创建（L314-320；V4.1-Flash
+    #     视觉塔 32 层 → 存在，文本 token 也逐行做哨兵判定 dsv4 L63-76）；
+    #   * V4.1 主干 num_hash_layers=0（v41/nvidia/model.py L155）——无
+    #     hash MoE/tid2eid 表；
+    #   * EP：mega 路径断言 n_physical(=E+eplb 冗余 0) % ep == 0（L357-362）；
+    #     fused 路径 L419-421 的 start_idx 只赋值、未被所有权消费；fused
+    #     通用余数映射未入 pin/未建模。本域只声明整除组合
+    #     （count/moe.require_divisible_ep 保守规则），不主张 fused 非法。
+    #   * 共享专家：FusedMoEFactory 调用未传 n_shared_experts/
+    #     fuse_shared_experts（model.py L426-449）→ router 不追加共享槽，
+    #     runner 独立相加（权重 1.0；moe_output.py L151-175）。
+    vision_layers = int((full_config or {}).get("vision_config", {})
+                        .get("num_hidden_layers", 0) or 0)
+    # dtype 域只覆盖官方 V4.1 固定资产（dtype=bfloat16）：
+    #   * gate 权重：GateLinear 未传 quant_config/params_dtype → LinearBase
+    #     取 torch.get_default_dtype()，base_loader 在 model dtype 内构造；
+    #     官方 config dtype=bfloat16 → BF16 2B；
+    #   * gate 输入：pinned mHC tilelang.py 的 layer_input_cur 硬编码
+    #     bfloat16（L900/L1096），model.py L731-816 直接交给 self.ffn(x)；
+    #     不能把"输入"泛化成任意 model dtype。
+    # full_config 显式给出非 BF16 dtype 时拒绝；无 full_config 的内部调用
+    # 只对固定 V4.1 资产采用 BF16 默认（不是通用 dtype 回退）。
+    if full_config is None:
+        model_dtype = "bfloat16"
+        model_dtype_source = "fixed_v41_asset_default"
+    else:
+        raw_dtype = full_config.get("dtype")
+        model_dtype = str(raw_dtype).lower() if raw_dtype is not None else ""
+        if model_dtype != "bfloat16":
+            raise ValueError(
+                f"V4.1 模型 dtype={raw_dtype!r} 不在 source-checked 域："
+                "official config dtype=bfloat16；gate 输入由 pinned mHC "
+                "layer_input_cur BF16 证明（tilelang.py L900/L1096），"
+                "不能按 model dtype 泛化")
+        model_dtype_source = "full_config_dtype"
+    model_dtype_bytes = _V41_BF16_ITEMSIZE
+    moe_route_spec = {
+        "scoring": "sqrtsoftplus",
+        "topk_method": "noaux_tc",
+        "renormalize": True,
+        "routed_scaling": float(tc["routed_scaling_factor"]),
+        "gate_out_dtype": "fp32",
+        "logits_itemsize": 4,
+        # 权重沿 model loader BF16 路径；输入由 mHC layer_input BF16 证明。
+        # 两者在官方资产上都 2B，但证据链不同，不能泛化成任意 model dtype。
+        "model_dtype": model_dtype,
+        "model_dtype_source": model_dtype_source,
+        "dtype_domain": _V41_DTYPE_DOMAIN,
+        "gate_weight_dtype": "bfloat16",
+        "gate_weight_itemsize": model_dtype_bytes,
+        "gate_act_dtype": "bfloat16",
+        "gate_act_itemsize": model_dtype_bytes,
+        "gate_act_source": "mhc_layer_input_cur_bf16",
+        "bias_bytes": moe.experts * 4,
+        "bias_vl_bytes": moe.experts * 4 if vision_layers > 0 else 0,
+        "hash_layers": 0,
+        "grouped": False,
+        # 独立相加（非 router 融合槽）：FusedMoEFactory 调用未传
+        # n_shared_experts/fuse_shared_experts；见 moe_output.shared_output。
+        "shared_expert_weight": 1.0,
+    }
     return ModelIR(
         id=model_id, label=label, family="v41_csa2", hidden=h, vocab=v,
         layers=layers, source=source,
@@ -764,7 +894,8 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             "index_source_layer_ids": ix_ids,
         },
         "hc": hc_spec,
-        "engram": engram_spec})
+        "engram": engram_spec,
+        "moe_route": moe_route_spec})
 
 
 def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id: str,

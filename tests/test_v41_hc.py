@@ -451,6 +451,9 @@ def test_replay_preserves_engram_and_non_hc_rows():
     # 排除 stage 名差异；冻结 R04 行与非 hc/非 R20 审计行（含 final_norm/
     # head）。R20（2026-11-12）重写的 CSA2 索引/压缩行由
     # tests/test_v41_csa2.py 的 replay 归因单独冻结（docs/evidence/csa2）。
+    # R21（2026-11-12）：MoE 路由行（moe_router→moe_gate/moe_score/
+    # moe_topk_renorm）由 tests/test_v41_moe_route.py 的 replay 归因单独
+    # 冻结（docs/evidence/moe-route）。
     AUDITED = {
         "index_weights_proj", "index_q_proj", "index_q_rope", "index_select",
         "index_score", "index_topk", "index_fill", "sparse_index_build",
@@ -458,7 +461,8 @@ def test_replay_preserves_engram_and_non_hc_rows():
         "compress_proj", "compress_norm", "compress_pool", "compressed_rope",
         "compressed_cache_write", "compressed_insert", "index_k_proj",
         "index_k_norm", "index_k_rope", "index_cache_write", "index_k_store",
-        "swa_cache_write", "sparse_attention", "q_norm", "k_norm"}
+        "swa_cache_write", "sparse_attention", "q_norm", "k_norm",
+        "moe_router", "moe_gate", "moe_score", "moe_topk_renorm"}
     def non_hc(rows):
         return [{k: v for k, v in r.items() if k != "stage"}
                 for r in rows

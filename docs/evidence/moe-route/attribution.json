@@ -1,0 +1,238 @@
+{
+  "before_sha256": "3addaa5fd3a33fb31c95c5b666f309117ded85f2c3828cec87c8014d94de9daf",
+  "scenario_sha256": "9b23b67565292038f64748975561e46fafbea8a36e8254715a08cc7f6f80bf14",
+  "before": {
+    "flops": 7175852742,
+    "weight_read": 1570196928,
+    "weight_read_expected": 530843184.0,
+    "act_read": 10246334,
+    "act_write": 6282096,
+    "kv_read": 42467988,
+    "kv_write": 24076,
+    "state_read": 12288,
+    "state_write": 12288,
+    "rows": 927
+  },
+  "after": {
+    "flops": 7176453222,
+    "weight_read": 1648963008,
+    "weight_read_expected": 530843184.0,
+    "act_read": 10512894,
+    "act_write": 6330096,
+    "kv_read": 42467988,
+    "kv_write": 24076,
+    "state_read": 12288,
+    "state_write": 12288,
+    "rows": 1007
+  },
+  "delta": {
+    "flops": 600480,
+    "weight_read": 78766080,
+    "weight_read_expected": 0.0,
+    "act_read": 266560,
+    "act_write": 48000,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0,
+    "rows": 80
+  },
+  "by_op": {
+    "moe_gate": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 157286400,
+        "weight_read": 157286400,
+        "weight_read_expected": 0.0,
+        "act_read": 409600,
+        "act_write": 61440,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 157286400,
+        "weight_read": 157286400,
+        "weight_read_expected": 0.0,
+        "act_read": 409600,
+        "act_write": 61440,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "rows_before": 0,
+      "rows_after": 40,
+      "t_ms_delta": 0.047107668677531994
+    },
+    "moe_router": {
+      "before": {
+        "flops": 157286400,
+        "weight_read": 78643200,
+        "weight_read_expected": 0.0,
+        "act_read": 204800,
+        "act_write": 15360,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "delta": {
+        "flops": -157286400,
+        "weight_read": -78643200,
+        "weight_read_expected": 0.0,
+        "act_read": -204800,
+        "act_write": -15360,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": -40
+      },
+      "rows_before": 40,
+      "rows_after": 0,
+      "t_ms_delta": -0.023557197035740947
+    },
+    "moe_score": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 138320,
+        "weight_read": 122880,
+        "weight_read_expected": 0.0,
+        "act_read": 61760,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 138320,
+        "weight_read": 122880,
+        "weight_read_expected": 0.0,
+        "act_read": 61760,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "rows_before": 0,
+      "rows_after": 40,
+      "t_ms_delta": 5.513039668760795e-05
+    },
+    "moe_topk_renorm": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 462160,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 1920,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 462160,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 1920,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "rows_before": 0,
+      "rows_after": 40,
+      "t_ms_delta": 6.198407457407254e-07
+    }
+  },
+  "t_ms_delta": 0.023606221879219902,
+  "before_memory": {
+    "steady_bytes": 35690092992,
+    "transient_peak_bytes": 13312,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "after_memory": {
+    "steady_bytes": 35768859072,
+    "transient_peak_bytes": 13312,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "before_known_peak": 35690106304,
+  "after_known_peak": 35768872384,
+  "expected_changed_ops": [
+    "moe_gate",
+    "moe_router",
+    "moe_score",
+    "moe_topk_renorm"
+  ],
+  "execution": "analytical replay only; no CPU forward or kernel execution"
+}

@@ -82,7 +82,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 1. ~~Qwen3.6 优先：统一 MoE per-rank TP/EP 配方~~（2026-11-10 A组 R01 完成）。
 2. ~~同卡显存复核（草稿 batch/共享去重/KV 分片/生命周期峰值分列）~~（A组 R02a/b 完成；运行时池尺寸证据仍缺，见下）。
 3. 可分配预算：契约已就绪（R03a），**真实 measured 数据仍缺**（G-D7）；解除前默认场景保持 unknown。
-4. ~~V4.1：获取并固定 Engram 实现、补查表/投影/参数/容量/跨层依赖~~（单副本路径 2026-11-11 R04 完成）；~~CSA2 索引打分/top-k/candidate block~~（2026-11-12 R20 完成）；剩余 DP 分片交换/MXFP8 批路径/amd 变体、稀疏 MLA 注意力核本体、MoE scoring/量化缺口，完整前不解除结构门禁。
+4. ~~V4.1：获取并固定 Engram 实现、补查表/投影/参数/容量/跨层依赖~~（单副本路径 2026-11-11 R04 完成）；~~CSA2 索引打分/top-k/candidate block~~（2026-11-12 R20 完成）；~~MoE scoring/top-k/分组路由~~（2026-11-12 R21 完成，部署变体 MegaMoE/DSpark 草稿 MoE/padding skip 仍缺）；剩余 DP 分片交换/MXFP8 批路径/amd 变体、稀疏 MLA 注意力核本体、量化映射/swiglu 缺口，完整前不解除结构门禁。
 5. 请求级 lookahead、取消与浪费；在线到达/组批/抢占、KV 分页、Chunked Prefill/PD/Prefix Cache。
 6. ~~235B moe.csv TP8/EP1 准入~~：模型已移出活跃 catalog，只保留历史归档研究；
    不再作为产品优先项。两款主模型缺匹配 profile，需新采集。
