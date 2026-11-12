@@ -24,8 +24,8 @@ R06 本轮范围：Qwen3.6（qwen3_5_moe 家族）**GDN 线性注意力层与 Mo
 
 | 项 | 值 |
 |---|---|
-| 官方 forward pin | `assets/identity/hf_transformers/modeling_qwen3_5_moe.py`（huggingface/transformers @b6401d66），SHA256 `1311a17431d7c232…`（fixture `pinned.modeling_sha256` 全量） |
-| 官方 configuration pin | 同目录 `configuration_qwen3_5_moe.py`，SHA256 `554e363a32b1a8c2…` |
+| 官方 forward pin | `assets/identity/hf_transformers/modeling_qwen3_5_moe.py`（huggingface/transformers @b6401d66），LF 字节 SHA256 `abac917f54dfe822…`（fixture `pinned.modeling_sha256` 全量） |
+| 官方 configuration pin | 同目录 `configuration_qwen3_5_moe.py`，LF 字节 SHA256 `b4292600803686a2…` |
 | 执行环境 | torch 2.15.0+cpu / transformers 5.22.1 / Python 3.12.10 / Windows（fixture `environment` 字段全录） |
 | 随机种子 | `torch.manual_seed(20261112)` |
 | fixture 维度 | h=32，2 层（L0 GDN + L1 FullAttn），4E top-2 + shared16 + gate，nv/nk=4/2，dk=dv=8，conv kernel 4，rotary_dim=2（partial 0.25），V=64 |
@@ -161,3 +161,14 @@ py -3.12 -m simverse.cli run-v2                      # 默认场景（attn_outpu
 绑定 fixture JSON）；`simverse/model_ir/catalog.py` `_qwen36()` evidence_refs
 追加该证据，`_QWEN36_EVIDENCE.note` 补记 fixture 级对照已执行（模型级
 cpu_forward/gpu_measurement 不变）。
+
+## 8. PR #7 合入后验收修复（2026-11-12）
+
+首次全量运行 261 passed / 1 failed：live probe 读到的两份 LF pin 文件哈希
+与 fixture 记录的 CRLF 哈希不同。两组哈希只差行尾转换；仓内
+`assets/identity/hf_transformers/manifest.json` 的 LF SHA256 与实际 pin 文件一致。
+现以 manifest 的 LF 字节口径统一 fixture 与本报告，`.gitattributes` 固定 pin
+文件在 Windows 检出时保持 LF；hermetic 测试对 fixture/manifest/文件字节
+三方核对。fixture 测试的 `SourceIdentity.config_sha256` 同时改为小尺寸
+fixture config 的规范 JSON 哈希，避免误用 modeling 源码哈希。修复后
+`py -3.12 -m pytest tests -q` 为 262 passed；生产计数未变。

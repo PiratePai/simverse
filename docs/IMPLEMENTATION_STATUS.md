@@ -1,11 +1,19 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
 更新：2026-11-12（R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到同日先合入的 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（本轮候选分支 `codex/qwen36-forward-r06`，基线含 R05 `codex/v41-mhc-r05`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+代码身份：本仓 git（PR #5/#7 已合入 main；本轮验收修复分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
 运行：`py -3.12 -m pytest tests -q`（2026-11-12 R06（基线含 R05）全量 **262 passed**，exit 0；历史：R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
 **pytest 收集数：262**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R06（基线含 R05）；236→252 为 R05 mHC pin/独立 oracle/守恒与冻结回归新增 16 项，252→262 为 R06 新增 10 项 hermetic+live 对账）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-12 PR #5/#7 合入后验收**：首次全量 261 passed / 1 failed；
+R06 fixture 的 pinned SHA256 记录为 CRLF 字节，仓内官方 pin manifest 为 LF 字节，
+导致实时重放仅在相同换行检出环境可通过。已把 fixture/报告改为 LF 哈希，
+`.gitattributes` 固定两份 pin 源码为 LF，并在 hermetic 测试中核对
+fixture、manifest 与文件字节三者一致；同时修正 fixture `SourceIdentity`
+的 `config_sha256` 为 fixture config 内容哈希。修后全量 262 passed，
+`run-v2` 与 R05 mHC replay 运行成功；该修复不改生产计数或证据等级。
 
 **2026-11-12 R05 mHC/Sinkhorn**：14 文件完整 blob SHA1 对 pinned tree、SHA256
 清单入册，新增 sm-v41-mhc-kernels/ev-vllm-v41-mhc（source-checked，executed=False）。

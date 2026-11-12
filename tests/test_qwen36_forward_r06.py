@@ -44,7 +44,9 @@ def _fixture_ir():
     art = _load_artifact()
     src = SourceIdentity(
         repo_id="probe:qwen3_5_moe", revision="hf-transformers@b6401d66",
-        config_sha256=art["pinned"]["modeling_sha256"],
+        config_sha256=hashlib.sha256(json.dumps(
+            art["fixture_config"], sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")).hexdigest(),
         captured_at=art["environment"]["date"],
         note="R06 CPU fixture 探针（独立于本仓执行；随机权重缩比）")
     return parse_qwen3_5_moe(dict(art["fixture_config"]), src,
@@ -237,6 +239,12 @@ def test_a9_fixture_independent_of_simverse():
     art = _load_artifact()
     assert art["kind"] == "qwen36-r06-cpu-fixture"
     assert set(art["pinned"]) == {"modeling_sha256", "configuration_sha256"}
+    pin_dir = ROOT / "assets" / "identity" / "hf_transformers"
+    manifest = json.loads((pin_dir / "manifest.json").read_text(encoding="utf-8"))
+    for name, key in (("modeling_qwen3_5_moe.py", "modeling_sha256"),
+                      ("configuration_qwen3_5_moe.py", "configuration_sha256")):
+        actual = hashlib.sha256((pin_dir / name).read_bytes()).hexdigest()
+        assert art["pinned"][key] == manifest["files"][name]["sha256"] == actual
     for key in ("python", "torch", "transformers", "platform", "date"):
         assert art["environment"][key]
 
