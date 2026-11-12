@@ -91,9 +91,9 @@ def test_pinned_source_key_lines_present():
     gate = (REF / "vllm/model_executor/layers/fused_moe/router/"
             "gate_linear.py").read_text(encoding="utf-8")
     assert "class GateLinear(ReplicatedLinear)" in gate             # 复制路由 GEMM
-    # GateLinear 未传 quant_config/params_dtype：LinearBase 取默认 dtype，
-    # quant_config=None → UnquantizedLinearMethod；base_loader 在 model dtype
-    # 内实例化。这是 gate 权重/输入 2B（V4.1 bf16）的直接源码链。
+    # gate 权重 2B：GateLinear 未传 quant_config/params_dtype → LinearBase
+    # 默认 dtype、quant_config=None→UnquantizedLinearMethod；base_loader 在
+    # model dtype（official bf16）内实例化。
     linear = (REF / "vllm/model_executor/layers/linear.py"
               ).read_text(encoding="utf-8")
     assert "if quant_config is None:" in linear
@@ -104,6 +104,13 @@ def test_pinned_source_key_lines_present():
     loader = (REF / "vllm/model_executor/model_loader/base_loader.py"
               ).read_text(encoding="utf-8")
     assert "with set_default_torch_dtype(model_config.dtype):" in loader
+    # gate 输入 2B：mHC layer_input_cur 硬编码 bf16（R05 pin），
+    # fused_post_pre 输出直接 self.ffn(x)。不能由 model dtype 泛化。
+    mhc = (REF / "vllm/model_executor/kernels/mhc/tilelang.py"
+           ).read_text(encoding="utf-8")
+    assert "layer_input_cur = torch.empty(" in mhc
+    assert "dtype=torch.bfloat16" in mhc
+    assert "x = self.ffn(x, input_ids, mega_gate_metadata)" in base
     fused_layer = (REF / "vllm/model_executor/layers/fused_moe/layer.py"
                    ).read_text(encoding="utf-8")
     assert "use_grouped_topk: bool = False" in fused_layer
@@ -282,12 +289,14 @@ def test_route_rows_hand_computed_absolute_values():
     assert t["weight_read"] == t["weight_capacity"] == 0
 
 
-def test_gate_bytes_follow_model_dtype_not_scenario_quant():
-    """GateLinear 权重/输入按 model dtype（BF16 2B），不随场景 quant 变。
+def test_gate_bytes_follow_loader_and_mhc_dtype_not_scenario_quant():
+    """gate 权重沿 loader BF16、输入由 mHC layer_input BF16；不随场景 quant。
 
     GateLinear 未传 quant_config/params_dtype：linear.py L287-295 取
-    torch.get_default_dtype()，base_loader.py L86 在 model dtype 内实例化；
-    out_dtype=fp32 只约束 logits 输出。Q8 的 act=8/dense_w=8 不能套到 gate。
+    torch.get_default_dtype()，base_loader.py L86 在 model dtype 内实例化。
+    输入侧由 mHC tilelang.py L900/L1096 的 layer_input_cur 固定 bf16，
+    model.py L731-816 直接 self.ffn(x)；out_dtype=fp32 只约束 logits。
+    Q8 的 act=8/dense_w=8 不能套到 gate。
     """
     from simverse.count import build_model_work
     from simverse.lowering.memory import target_weight_allocations
@@ -429,12 +438,15 @@ def test_route_spec_constants_from_pinned_source():
     assert spec["renormalize"] is True
     assert spec["routed_scaling"] == 1.5
     assert spec["gate_out_dtype"] == "fp32" and spec["logits_itemsize"] == 4
-    # GateLinear 未传 quant_config/params_dtype：权重与输入是模型 dtype。
+    # 权重沿 model loader BF16；输入由 mHC layer_input BF16；域固定 bf16。
     assert spec["model_dtype"] == "bfloat16"
+    assert spec["model_dtype_source"] == "full_config_dtype"
+    assert spec["dtype_domain"] == "official_v41_bfloat16"
     assert spec["gate_weight_dtype"] == "bfloat16"
     assert spec["gate_weight_itemsize"] == 2
     assert spec["gate_act_dtype"] == "bfloat16"
     assert spec["gate_act_itemsize"] == 2
+    assert spec["gate_act_source"] == "mhc_layer_input_cur_bf16"
     assert spec["bias_bytes"] == 384 * 4
     # V4.1-Flash 是视觉 checkpoint（vision 32 层）→ bias_vl 存在
     assert spec["bias_vl_bytes"] == 384 * 4
@@ -476,6 +488,37 @@ def test_config_domain_vision_absent_disables_bias_vl():
                       lambda f: f["vision_config"].update(num_hidden_layers=0))
     assert spec.extras["moe_route"]["bias_vl_bytes"] == 0
     assert spec.extras["moe_route"]["bias_bytes"] == 384 * 4
+
+
+def test_config_domain_rejects_non_bf16_dtype():
+    """有效域只覆盖 official V4.1 固定资产 dtype=bfloat16。
+
+    gate 输入不是由任意 model dtype 推出：pinned mHC tilelang.py 的
+    layer_input_cur 硬编码 bfloat16（L900/L1096），model.py L731-816 直接
+    传给 ffn。因此 full_config 的 float16/float32/缺失 dtype 必须拒绝；
+    无 full_config 的内部调用只对固定资产采用 BF16 默认。
+    """
+    for bad in ("float16", "float32", "float64", None):
+        with pytest.raises(ValueError, match="dtype"):
+            _v41_parse(lambda tc: None,
+                       lambda f, bad=bad: f.update(dtype=bad))
+    with pytest.raises(ValueError, match="dtype"):
+        _v41_parse(lambda tc: None, lambda f: f.pop("dtype"))
+
+    # 无 full_config 的内部调用：只对固定 V4.1 资产用 BF16 默认。
+    from simverse.model_ir.families import parse_v41_csa2
+    from simverse.model_ir.schema import SourceIdentity
+    full = json.loads(CONFIG.read_text(encoding="utf-8"))
+    src = SourceIdentity("deepseek-ai/DeepSeek-V4.1-Flash",
+                         "314113f8a7dadb388215396ba5fbee2c610a04d6",
+                         "sha256:fixture", "测试")
+    spec = parse_v41_csa2(full["text_config"], src, "t", "t")
+    route = spec.extras["moe_route"]
+    assert route["model_dtype"] == "bfloat16"
+    assert route["model_dtype_source"] == "fixed_v41_asset_default"
+    assert route["dtype_domain"] == "official_v41_bfloat16"
+    assert route["gate_weight_itemsize"] == route["gate_act_itemsize"] == 2
+    assert route["gate_act_source"] == "mhc_layer_input_cur_bf16"
 
 
 # ---------------------------------------------------------------------------

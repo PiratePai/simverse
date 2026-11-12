@@ -311,8 +311,9 @@ ENTRIES: List[SourceMapEntry] = [
         entry_id="sm-v41-moe-route",
         model_or_method="deepseek_v41_flash MoE 路由",
         semantic="V4.1 MoE 路由：GateLinear(h→E, out_dtype=fp32) Replicated "
-                 "GEMM（未传 quant_config/params_dtype → 权重/输入 BF16 2B；"
-                 "fp32 只是 logits 出口）→ sqrtsoftplus 打分 "
+                 "GEMM（权重沿 model loader BF16；输入由 pinned mHC "
+                 "layer_input_cur BF16 证明；均 2B；fp32 只是 logits 出口；"
+                 "有效域 official V4.1 bf16）→ sqrtsoftplus 打分 "
                  "sqrt(softplus(logits))（>20 护栏）"
                  "→ noaux_tc 偏置平坦 top-6（选择列=score+bias、权重=无偏 "
                  "score、平手最小 id、NaN→−1e30；无分组）→ sum→1 归一 ×"
@@ -340,6 +341,10 @@ ENTRIES: List[SourceMapEntry] = [
                         "fused_moe/layer.py:77-86/101/129-130"
                         "（determine_expert_counts、use_grouped_topk/"
                         "n_shared_experts/fuse_shared_experts 默认）；"
+                        "kernels/mhc/tilelang.py:900/1096（R05 pin："
+                        "layer_input_cur dtype=torch.bfloat16）；"
+                        "model.py:731-816（fused_post_pre 输出直接 "
+                        "self.ffn(x)）；"
                         "moe_output.py:151-175（shared_output 独立相加）；"
                         "gate_linear.py:26/306-341（ReplicatedLinear，"
                         "bf16/fp32 输入分支）；cpu_router.py:"
@@ -372,8 +377,9 @@ ENTRIES: List[SourceMapEntry] = [
                           "padding skip（VLLM_MOE_SKIP_PADDING）/CUDA-graph "
                           "整宽路由缓冲未入账"],
         note="R21（2026-11-12/13）14 文件 pin（moe-pin.json）；count 三行 "
-             "moe_gate/moe_score/moe_topk_renorm（gate 权重/输入 BF16 2B："
-             "每层 3,932,160 B）+ memory router_b/路由偏置对象 + 保守 EP "
+             "moe_gate/moe_score/moe_topk_renorm（gate 权重沿 model loader "
+             "BF16、输入由 mHC layer_input BF16 证明；每层 3,932,160 B；"
+             "域 official V4.1 bf16）+ memory router_b/路由偏置对象 + 保守 EP "
              "整除域（仅 mega 断言 L357-362；fused 通用余数映射未入 pin/"
              "未建模，不主张 fused 非法）；共享专家独立相加"
              "（moe_output.py）；量化映射/swiglu clamp 仍为独立缺口"),

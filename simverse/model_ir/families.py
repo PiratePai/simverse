@@ -159,7 +159,12 @@ _CSA2_KEY_NOTES = {
 # R21（2026-11-12）：V4.1 MoE 路由键的 mapped 注记（证据 moe-pin.json
 # 14 文件 + ev-vllm-v41-moe；消费者 count/moe.v41_moe_route_rows、
 # lowering/memory 路由偏置对象）。
-_MODEL_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
+# 本 PR 的 source-checked dtype 域只覆盖官方 V4.1 固定资产（config
+# dtype=bfloat16）。gate 输入不是由任意 model dtype 推出：pinned mHC
+# tilelang.py 的 layer_input_cur 硬编码 bfloat16（R05 pin L900/L1096），
+# DeepseekV4Layer.forward 把它直接传给 self.ffn(x)（model.py L731-816）。
+_V41_DTYPE_DOMAIN = "official_v41_bfloat16"
+_V41_BF16_ITEMSIZE = 2
 
 _MOE_ROUTE_KEY_NOTES = {
     "scoring_func":
@@ -812,16 +817,29 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     #     runner 独立相加（权重 1.0；moe_output.py L151-175）。
     vision_layers = int((full_config or {}).get("vision_config", {})
                         .get("num_hidden_layers", 0) or 0)
-    # GateLinear 未传 quant_config/params_dtype：LinearBase 取
-    # torch.get_default_dtype()，base_loader 在 set_default_torch_dtype(
-    # model_config.dtype) 内实例化 → 权重/输入均为模型 dtype（V4.1 config
-    # dtype=bfloat16）。gate_out_dtype=fp32 只约束 logits 出口，不是权重。
-    model_dtype = str((full_config or {}).get("dtype", "bfloat16")).lower()
-    if model_dtype not in _MODEL_DTYPE_BYTES:
-        raise ValueError(f"V4.1 模型 dtype {model_dtype!r} 未核："
-                         "gate 权重/输入字节只登记 "
-                         f"{sorted(_MODEL_DTYPE_BYTES)}")
-    model_dtype_bytes = _MODEL_DTYPE_BYTES[model_dtype]
+    # dtype 域只覆盖官方 V4.1 固定资产（dtype=bfloat16）：
+    #   * gate 权重：GateLinear 未传 quant_config/params_dtype → LinearBase
+    #     取 torch.get_default_dtype()，base_loader 在 model dtype 内构造；
+    #     官方 config dtype=bfloat16 → BF16 2B；
+    #   * gate 输入：pinned mHC tilelang.py 的 layer_input_cur 硬编码
+    #     bfloat16（L900/L1096），model.py L731-816 直接交给 self.ffn(x)；
+    #     不能把"输入"泛化成任意 model dtype。
+    # full_config 显式给出非 BF16 dtype 时拒绝；无 full_config 的内部调用
+    # 只对固定 V4.1 资产采用 BF16 默认（不是通用 dtype 回退）。
+    if full_config is None:
+        model_dtype = "bfloat16"
+        model_dtype_source = "fixed_v41_asset_default"
+    else:
+        raw_dtype = full_config.get("dtype")
+        model_dtype = str(raw_dtype).lower() if raw_dtype is not None else ""
+        if model_dtype != "bfloat16":
+            raise ValueError(
+                f"V4.1 模型 dtype={raw_dtype!r} 不在 source-checked 域："
+                "official config dtype=bfloat16；gate 输入由 pinned mHC "
+                "layer_input_cur BF16 证明（tilelang.py L900/L1096），"
+                "不能按 model dtype 泛化")
+        model_dtype_source = "full_config_dtype"
+    model_dtype_bytes = _V41_BF16_ITEMSIZE
     moe_route_spec = {
         "scoring": "sqrtsoftplus",
         "topk_method": "noaux_tc",
@@ -829,14 +847,16 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         "routed_scaling": float(tc["routed_scaling_factor"]),
         "gate_out_dtype": "fp32",
         "logits_itemsize": 4,
-        # GateLinear(h→E, out_dtype=fp32) 未传 quant_config/params_dtype；
-        # 权重与输入 activation 都是 model dtype（bf16），见 linear.py/
-        # base_loader.py pin。
+        # 权重沿 model loader BF16 路径；输入由 mHC layer_input BF16 证明。
+        # 两者在官方资产上都 2B，但证据链不同，不能泛化成任意 model dtype。
         "model_dtype": model_dtype,
-        "gate_weight_dtype": model_dtype,
+        "model_dtype_source": model_dtype_source,
+        "dtype_domain": _V41_DTYPE_DOMAIN,
+        "gate_weight_dtype": "bfloat16",
         "gate_weight_itemsize": model_dtype_bytes,
-        "gate_act_dtype": model_dtype,
+        "gate_act_dtype": "bfloat16",
         "gate_act_itemsize": model_dtype_bytes,
+        "gate_act_source": "mhc_layer_input_cur_bf16",
         "bias_bytes": moe.experts * 4,
         "bias_vl_bytes": moe.experts * 4 if vision_layers > 0 else 0,
         "hash_layers": 0,

@@ -8,7 +8,8 @@
 DFlash 服务栈核对部分解除；R21：G-C13 V4.1 MoE scoring/top-k/分组路由解除）；
 2026-11-13 三轮复核（G-C13 证据链修正：EP 只按 mega 断言、共享专家独立相加、
 ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
-（GateLinear 权重/输入 BF16 2B；新增 linear.py/base_loader.py/layer.py pin）。
+（GateLinear 权重沿 loader BF16、输入由 mHC layer_input BF16；新增
+linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 
@@ -53,9 +54,12 @@ ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
   vllm-tree.json 逐项校验 + SHA256；deepseek_v4 基类 MoE + eplb_util +
   fused_moe router 8 文件 + moe_output + linear.py/base_loader.py/
   fused_moe/layer.py）。语义：GateLinear(h→E, out_dtype=fp32)
-  Replicated 路由 GEMM，**未传 quant_config/params_dtype → 权重/输入为
-  model dtype BF16 2B**（linear.py L287-295/L179-199；base_loader.py
-  L86；gate_linear.py L306-341）；sqrtsoftplus 打分（>20 护栏）；
+  Replicated 路由 GEMM，**权重沿 model loader BF16**（未传
+  quant_config/params_dtype；linear.py L287-295/L179-199；base_loader.py
+  L86；gate_linear.py L306-341）；**输入由 pinned mHC layer_input_cur
+  BF16 证明**（tilelang.py L900/L1096，R05 pin；model.py L731-816 直接
+  self.ffn(x)），不是由任意 model dtype 泛化；有效域仅 official V4.1
+  config dtype=bfloat16（非 BF16 拒绝）；sqrtsoftplus 打分（>20 护栏）；
   noaux_tc e_score_correction_bias 只导选择不进权重；k=6 轮平坦偏置
   argmax（**无分组**——config 无 n_group/topk_group 键，分组仅 V3 式
   use_grouped_topk 路径；默认 False 已随 fused_moe/layer.py 入 pin）、
@@ -67,8 +71,9 @@ ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
   n_physical % ep == 0；fused L419-421 的 start_idx 只赋值、未被所有权
   消费，fused 通用余数映射未入 pin/未建模，不主张 fused 非法；与
   qwen35 pin 不同，非整除组合在建模域内拒绝）。
-  count 三行（moe_gate/moe_score/moe_topk_renorm；gate 权重/输入按
-  BF16 2B，每层 weight 3,932,160 B，FP32 只 logits 出口）、memory
+  count 三行（moe_gate/moe_score/moe_topk_renorm；gate 权重沿 loader
+  BF16、输入由 mHC layer_input BF16，均 2B；每层 weight 3,932,160 B，
+  FP32 只 logits 出口）、memory
   router_b 同步 2B + 路由偏置对象（40×3,072 B）、model_ir
   extras.moe_route + config 域校验（softmax/greedy/norm=false 拒绝）、
   公式 v2.moe_route_*。
@@ -79,9 +84,11 @@ ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
   所有权消费（EP 规则只按 mega 断言，删除"floor 覆盖性"）；共享专家
   实际为独立相加；ExpertMapManager 未入 pin 的默认值登记为读取点；
   证据包加 SHA256 自校验（报告 §9）。gate 修复（2026-11-13）：
-  GateLinear 权重/输入按 BF16 2B，新增 linear.py/base_loader.py/
-  fused_moe/layer.py pin，重放 before/after/attribution（报告 §10）。
-- **验收**：tests/test_v41_moe_route.py 22 项——pin 双侧校验与文本锚点、
+  GateLinear 权重沿 loader BF16、输入由 mHC layer_input BF16 证明，
+  新增 linear.py/base_loader.py/fused_moe/layer.py pin，重放
+  before/after/attribution；dtype 域收紧为 official V4.1 bf16，
+  float16/float32/缺失拒绝（报告 §10）。
+- **验收**：tests/test_v41_moe_route.py 23 项——pin 双侧校验与文本锚点、
   纯 stdlib 语义 oracle（归一 sum==1.5/bias 不进权重/平手最小 id/NaN/
   normal-range 近似护栏/无组键）、手算绝对值、tp/ep 复制不变、EP 保守域负例+
   E_local=48、count↔memory 对账、config 域负例、structure gate 不解除、

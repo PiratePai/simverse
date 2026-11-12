@@ -20,7 +20,7 @@
 | top-k | 6 轮 argmax、无放回、平手最小 id（L94-95）、NaN→−1e30（L87） |
 | 归一/缩放 | sum→1 ×routed_scaling 1.5（sum≤0/NaN 时分母取 1，L104-107；NaN 权重不被清除）；只作用 routed |
 | 共享专家 | 1×inter2304 **无 gate**（≠Qwen3.6），routed 归一后权重 1.0 **独立相加**（moe_output.py L151-175；FusedMoEFactory 调用未传 n_shared_experts/fuse_shared_experts，L447-464 的融合槽未启用） |
-| 路由 GEMM | GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）；**未传 quant_config/params_dtype → 权重/输入 BF16 2B**（linear.py L287-295/L179-199、base_loader.py L86、gate_linear.py L306-341），fp32 只 logits 出口；每层 weight 3,932,160 B |
+| 路由 GEMM | GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）；**权重沿 model loader BF16**（未传 quant_config/params_dtype；linear.py L287-295/L179-199、base_loader.py L86、gate_linear.py L306-341）；**输入由 pinned mHC layer_input_cur BF16 证明**（tilelang.py L900/L1096，R05 pin；model.py L731-816 直接 self.ffn(x)），不是由任意 model dtype 泛化；有效域仅 official V4.1 bf16，非 BF16 拒绝；fp32 只 logits 出口；每层 weight 3,932,160 B |
 | TP/EP 归属 | 路由三行 per-rank 全量复制；EP **保守整除域**（仅 mega 断言 L357-362；fused L419-421 的 start_idx 只赋值、未被所有权消费，fused 通用余数映射未入 pin/未建模，不主张 fused 非法；≠qwen35 余数规则） |
 | 其他 | 主干 num_hash_layers=0（无 hash MoE）；视觉 checkpoint bias_vl 哨兵逐行判定 |
 
@@ -40,8 +40,8 @@
 ### 测试原始结果
 
 ```
-py -3.12 -m pytest tests -q          → 收集 333；Codex 宿主 R21 前 332 passed，gate 修复后待复测；本机沙箱 327 passed + 6 tmp_path ACL 错误
-py -3.12 -m pytest tests/test_v41_moe_route.py -q → 22 passed
+py -3.12 -m pytest tests -q          → 收集 334；Codex 宿主 gate 修复后 333 passed，dtype 域负例后待复测；本机沙箱 328 passed + 6 tmp_path ACL 错误
+py -3.12 -m pytest tests/test_v41_moe_route.py -q → 23 passed
 node --check simverse/static/workbench.js → exit 0
 py -3.12 -m simverse.cli run-v2      → 正常；structure gate 仍按预期拦截（两模型均未排名）
 py -3.12 tools/replay_v41_moe.py     → 归因通过（审计面外行逐字段冻结）
@@ -68,7 +68,7 @@ M02/M04/M05/M06 降级与 unknown 传播不变；**structure_complete 仍 False*
 1. source-checked ≠ executed：kernel/CPU forward/GPU 均未执行；op 为解析算术口径。
 2. 部署变体未建模：native MegaMoE（bf16_mega_gate，需 EP+fp4+SP）、GateLinear bf16 专核/cuBLAS 档未执行（fp32/bf16x3 只适用 fp32 router 权重）、dsv4_topk Triton 档约束（E∈{256,384}/k=6）外的 E/k 值未独立核。
 3. DSpark 草稿层 MoE（E=128/k=3）方法层字段；padding skip/CUDA-graph 整宽路由缓冲、defer_finalize（需 scaling==1.0，本模型 1.5 不适用）未入账。
-4. quantization_config（fp8/FP4 专家）不在本 PR；**gate 权重/输入已核实为未量化 BF16 2B**，专家/其余 dense 权重布局仍缺；input_ids 按 int64 上界计。
+4. quantization_config（fp8/FP4 专家）不在本 PR；**gate 权重沿 model loader BF16、输入由 mHC layer_input BF16 证明（2B）；有效域固定 official V4.1 bf16，非 BF16 拒绝**；专家/其余 dense 权重布局仍缺；input_ids 按 int64 上界计。
 
 
 ---
@@ -83,7 +83,7 @@ M02/M04/M05/M06 降级与 unknown 传播不变；**structure_complete 仍 False*
 | 中｜（复核补充）EP 依据不实 | fused 路径实为 floor 除法（L419-421）无断言；EP 校验改写为 mega 断言（L357-362）+ fused 覆盖性的保守域规则，全部文档同步 |
 | 附带 | baseline-provenance 补 before_sha256（3addaa5f…）；PR 描述副本入仓 docs/evidence/moe-route/pr-body.md |
 
-修复后：332 passed（gate 修复前；修复后收集 333，见下）；node check OK；`tools/replay_v41_moe.py --check` 通过。详见报告 §8。
+修复后：332 passed（gate 修复前；gate 修复后 333、dtype 负例后 334 收集，见下）；node check OK；`tools/replay_v41_moe.py --check` 通过。详见报告 §8。
 
 ---
 
@@ -97,14 +97,19 @@ M02/M04/M05/M06 降级与 unknown 传播不变；**structure_complete 仍 False*
 | 低｜oracle −87 措辞 | −87.3 是最小 normal 的对数，不是 underflow 门槛；改为 normal-range 近似，subnormal/FTZ 未实测 |
 | 低｜EP 测试域 | 只列实际合法 TP/EP {1,2,4,8}（3/6 被 o_groups=8 拒绝）；移除 dead `experts_start_idx` 锚点；加 before/scenario SHA256 自校验 |
 
-验证（本机沙箱）：`tests/test_v41_moe_route.py` 22 passed；`tools/replay_v41_moe.py --check` 通过；全量 `pytest tests` 为 327 passed + 6 个 `tmp_path` setup PermissionError（沙箱 ACL，测试本体未失败；Codex 宿主历史 332 passed，gate 修复后 333 收集待复测）。未改 main、未合入 PR。
+验证（本机沙箱）：`tests/test_v41_moe_route.py` 23 passed；`tools/replay_v41_moe.py --check` 通过；全量 `pytest tests` 为 328 passed + 6 个 `tmp_path` setup PermissionError（沙箱 ACL，测试本体未失败；Codex 宿主 gate 修复后 333 passed，dtype 域负例后 334 收集待复测）。未改 main、未合入 PR。
 
 ---
 
 ### GateLinear 权重字节修复（2026-11-13，Codex 数值验收）
 
-**问题**：`moe_gate` 的 weight_read/capacity 用场景 `dense_w/8`（Q8=1B），memory `router_b` 同；实际 GateLinear 未传 quant_config/params_dtype → 权重/输入为 model dtype BF16 2B。每层 per-rank 1,966,080→3,932,160 B，40 层少计 78,643,200 B（含 bias 的 weight_read Δ78,766,080 B）。
+**问题**：`moe_gate` 的 weight_read/capacity 用场景 `dense_w/8`（Q8=1B），memory `router_b` 同；实际 **gate 权重沿 model loader BF16、gate 输入由 mHC layer_input BF16 证明**，均 2B。每层 per-rank 1,966,080→3,932,160 B，40 层少计 78,643,200 B（含 bias 的 weight_read Δ78,766,080 B）。
 
-**源码链（已入 pin 14 文件）**：model.py L270-277（未传 quant_config/params_dtype）→ linear.py L287-295（`params_dtype=torch.get_default_dtype()`、`quant_config None→UnquantizedLinearMethod`）L179-199（weight dtype=params_dtype）→ base_loader.py L86（`set_default_torch_dtype(model_config.dtype)`）→ V4.1 config dtype=bfloat16；gate_linear.py L306-341 的 bf16/fp32 输入分支。`out_dtype=fp32` 只约束 logits 出口。
+**源码链（已入 pin 14 文件；mHC 用已有 R05 pin）**：
+- 权重：model.py L270-277（未传 quant_config/params_dtype）→ linear.py L287-295（`params_dtype=torch.get_default_dtype()`、`quant_config None→UnquantizedLinearMethod`）L179-199（weight dtype=params_dtype）→ base_loader.py L86（`set_default_torch_dtype(model_config.dtype)`）→ official config dtype=bfloat16；
+- 输入：mHC tilelang.py L900/L1096 的 `layer_input_cur` 硬编码 `dtype=torch.bfloat16`（R05 pin），model.py L731-816 的 fused_post_pre 输出直接 `self.ffn(x)`；
+- `out_dtype=fp32` 只约束 logits 出口；不能把输入泛化成任意 model dtype。
 
-**修复**：moe_route spec 增加 model_dtype/gate_weight_itemsize/gate_act_itemsize=2；count gate 权重/输入改 2B；memory router_b 改 2B；新增 `test_gate_bytes_follow_model_dtype_not_scenario_quant`（Q8/Q4 gate 字节不变 + memory 手算）；pin 14 文件；before/after/attribution 重放。数值：weight_read +78,766,080B、act_read +266,560B、act_write +48,000B、rows +80、M01 +0.023606ms、steady/known_peak +78,766,080B。structure_complete 仍 False，量化专家/其余 dense 映射、swiglu、MLA 核、MTP/compress 尾部缺口不变。
+**dtype 域收紧**：`extra.moe_route` 的 `dtype_domain=official_v41_bfloat16`、`gate_act_source=mhc_layer_input_cur_bf16`；full_config dtype=float16/float32/float64/缺失一律拒绝；无 full_config 的内部调用只对固定 V4.1 资产采用 BF16 默认（注释登记）。
+
+**修复**：count gate 权重/输入改 2B；memory router_b 改 2B；新增 `test_gate_bytes_follow_loader_and_mhc_dtype_not_scenario_quant`（Q8/Q4 gate 字节不变 + memory 手算）与 `test_config_domain_rejects_non_bf16_dtype`（非 BF16 负例 + 无 full_config 固定资产默认）；pin 14 文件；before/after/attribution 重放。数值：weight_read +78,766,080B、act_read +266,560B、act_write +48,000B、rows +80、M01 +0.023606ms、steady/known_peak +78,766,080B。structure_complete 仍 False，量化专家/其余 dense 映射、swiglu、MLA 核、MTP/compress 尾部缺口不变。

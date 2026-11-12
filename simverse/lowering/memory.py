@@ -484,8 +484,8 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                 # mega 路径 pinned 断言 L357-362；fused 通用余数映射未入
                 # pin/未建模，故非整除组合不在本 PR 声明域内。
                 require_divisible_ep(moe.experts, ep)
-            # GateLinear 权重是 model dtype（BF16），不是场景 quant 的
-            # dense_w；其余 shared/gate 保持原配方。
+            # GateLinear 权重沿 model loader BF16（V4.1 固定 2B），不是
+            # 场景 quant 的 dense_w；其余 shared/gate 保持原配方。
             gate_w_b = (int(moe_route["gate_weight_itemsize"])
                         if moe_route is not None else b_dense)
             router_b = int(model.hidden * moe.experts * gate_w_b)  # replicated

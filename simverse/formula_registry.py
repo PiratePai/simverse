@@ -263,16 +263,20 @@ F_CSA2_SPARSE_INDEX_BUILD = _f(
 F_MOE_ROUTE_GATE = _f(
     "v2.moe_route_gate",
     "FLOPs = 2·T·h·E；weight_read = h·E·B_gate；act_read = T·h·B_act；"
-    "B_gate=B_act=2（BF16 model dtype）；写 = T·E·4B（FP32 logits）",
+    "B_gate=2（model loader BF16）；B_act=2（mHC layer_input BF16）；"
+    "写 = T·E·4B（FP32 logits）。有效域：official V4.1 bf16",
     "deepseek_v4/nvidia/model.py L270-277（GateLinear(input=h, output=E, "
     "bias=False, out_dtype=torch.float32，未传 quant_config/params_dtype）；"
     "linear.py L287-295（params_dtype=torch.get_default_dtype()，"
     "quant_config None→UnquantizedLinearMethod）L179-199（weight dtype="
     "params_dtype）；base_loader.py L86（set_default_torch_dtype("
-    "model_config.dtype)）；router/gate_linear.py L26/L306-341（Replicated "
-    "子类；bf16/fp32 输入分支）",
-    "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；权重/输入 "
-    "按 BF16 2B，FP32 仅 logits 出口）")
+    "model_config.dtype)）；**gate 输入**：mHC tilelang.py L900/L1096"
+    "（layer_input_cur dtype=torch.bfloat16，R05 pin）+ model.py L731-816"
+    "（fused_post_pre 输出直接 self.ffn(x)）；router/gate_linear.py "
+    "L26/L306-341（Replicated 子类；bf16/fp32 输入分支）",
+    "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；权重沿 "
+    "model loader BF16、输入由 mHC layer_input BF16 证明，均 2B；"
+    "FP32 仅 logits 出口；非 official bf16 的 dtype 拒绝）")
 F_MOE_ROUTE_SCORE = _f(
     "v2.moe_route_score",
     "ops = T·(8E + vl)；vl = E+2（视觉 checkpoint HAS_VL，文本 token 亦逐行"

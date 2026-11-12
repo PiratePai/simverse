@@ -87,14 +87,18 @@ def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int) -> list:
       * gate：GateLinear(h→E, bias=False, out_dtype=fp32) 为 ReplicatedLinear
         子类（deepseek_v4/nvidia/model.py L270-277，out_dtype 在 L274；
         router/gate_linear.py L26）→ 每 rank 全量 GEMM，router logits
-        **FP32**；**权重与输入 activation 是 model dtype**：GateLinear 未传
-        quant_config/params_dtype → LinearBase `params_dtype =
+        **FP32**；**gate 权重 2B**：GateLinear 未传 quant_config/
+        params_dtype → LinearBase `params_dtype =
         torch.get_default_dtype()`、`quant_config is None →
         UnquantizedLinearMethod`（linear.py L287-295、L179-199）；
         base_loader 在 `set_default_torch_dtype(model_config.dtype)` 内
-        实例化（base_loader.py L86）→ V4.1 config dtype=bfloat16 时 gate
-        权重/输入均 2B（不是场景 quant 的 dense_w/act）。gate_linear.py
-        forward 的 bf16/fp32 分支（L306-341）要求 x.dtype=bf16；
+        实例化（base_loader.py L86），官方 V4.1 config dtype=bfloat16 →
+        BF16 权重 2B。**gate 输入也 2B，但不是由 model dtype 推出**：
+        pinned mHC tilelang.py 的 `layer_input_cur` 硬编码
+        `dtype=torch.bfloat16`（R05 pin L900/L1096），
+        DeepseekV4Layer.forward 把它直接传给 `self.ffn(x)`
+        （model.py L731-816）。有效域固定为 official V4.1 bf16，
+        full_config 非 BF16 由 parse_v41_csa2 拒绝；
       * scoring sqrtsoftplus：weights = sqrt(softplus(logits))，logits>20 取
         sqrt(logits) 数值护栏（dsv4_topk.py L85）；选择列 = weights +
         e_score_correction_bias（L86），NaN→−1e30（L87）；CPU 侧
@@ -115,8 +119,8 @@ def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int) -> list:
     """
     E, k = moe.experts, moe.top_k
     T = tokens
-    # GateLinear 权重/输入 = model dtype（spec 来自 config dtype），
-    # 不是场景 quant 的 dense_w/act；logits 出口才是 FP32 4B。
+    # GateLinear 权重沿 model loader BF16；输入由 mHC layer_input BF16
+    # 证明；不是场景 quant 的 dense_w/act；logits 出口才是 FP32 4B。
     gate_w_bytes = int(route["gate_weight_itemsize"])
     gate_a_bytes = int(route["gate_act_itemsize"])
     has_vl = bool(route.get("bias_vl_bytes"))
