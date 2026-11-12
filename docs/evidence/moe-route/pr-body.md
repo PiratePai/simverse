@@ -14,14 +14,14 @@
 
 | 项 | 结论 |
 |---|---|
-| scoring | `sqrt(softplus(logits))`，>20 取 sqrt(logits) 护栏（dsv4_topk.py L88-92） |
-| noaux_tc | e_score_correction_bias[E] fp32 **只导选择不进权重**（L93-109） |
+| scoring | `sqrt(softplus(logits))`，>20 取 sqrt(logits) 护栏（dsv4_topk.py L85） |
+| noaux_tc | e_score_correction_bias[E] fp32 **只导选择不进权重**（选择列 L86-87、无偏权重 L96-98） |
 | 分组 | **无分组**：config 无 n_group/topk_group 键，router_factory 仅 use_grouped_topk 走 GroupedTopKRouter——V4.1 平坦偏置 top-6 |
-| top-k | 6 轮 argmax、无放回、平手最小 id、NaN→−1e30 |
-| 归一/缩放 | sum→1 ×routed_scaling 1.5（sum≤0 除 1 护栏）；只作用 routed |
-| 共享专家 | 1×inter2304 **无 gate**（≠Qwen3.6），归一后权重 1.0 追加 |
-| 路由 GEMM | GateLinear(h→E, out_dtype=fp32) Replicated → logits FP32 |
-| TP/EP 归属 | 路由三行 per-rank 全量复制；EP **整除断言** n_physical%ep==0（≠qwen35 余数规则） |
+| top-k | 6 轮 argmax、无放回、平手最小 id（L94-95）、NaN→−1e30（L87） |
+| 归一/缩放 | sum→1 ×routed_scaling 1.5（sum≤0 除 1 护栏，L104-107）；只作用 routed |
+| 共享专家 | 1×inter2304 **无 gate**（≠Qwen3.6），归一后权重 1.0 追加（L447-464，默认 L383-385） |
+| 路由 GEMM | GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）→ logits FP32 |
+| TP/EP 归属 | 路由三行 per-rank 全量复制；EP **整除域**（mega 断言 L357-362 + fused floor 覆盖性 L419-421 的保守域规则，≠qwen35 余数规则） |
 | 其他 | 主干 num_hash_layers=0（无 hash MoE）；视觉 checkpoint bias_vl 哨兵逐行判定 |
 
 ### 变更摘要
