@@ -2,8 +2,8 @@
 
 更新：2026-11-12（R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到同日先合入的 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #5/#7 已合入 main；本轮验收修复分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R06（基线含 R05）全量 **262 passed**，exit 0；历史：R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：262**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R06（基线含 R05）；236→252 为 R05 mHC pin/独立 oracle/守恒与冻结回归新增 16 项，252→262 为 R06 新增 10 项 hermetic+live 对账）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R06 独立数值续验全量 **264 passed**，exit 0；历史：R06 初版 262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：264**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R06 独立数值续验；236→252 为 R05 新增 16 项，252→262 为 R06 几何/算量对账新增 10 项，262→264 为独立张量 oracle 的 hermetic/live 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -14,8 +14,17 @@ R06 fixture 的 pinned SHA256 记录为 CRLF 字节，仓内官方 pin manifest 
 fixture、manifest 与文件字节三者一致；同时修正 fixture `SourceIdentity`
 的 `config_sha256` 为 fixture config 内容哈希。修后全量 262 passed，
 `run-v2` 与 R05 mHC replay 运行成功；该修复不改生产计数。进一步计算审计
-发现 R06 未提供独立输出数值 oracle，证据等级由 numeric-checked 降为
-shape-checked，待数值逐元素对照后再升级。
+发现 R06 初版未提供独立输出数值 oracle，几何证据等级由 numeric-checked
+降为 shape-checked；随后新增独立数值产物与对应证据（见下）。
+
+**2026-11-12 R06 独立数值续验**：新增纯张量参考路径，复用 pinned HF
+随机权重但不调用被验证模块的 forward；prefill 与带缓存 decode 各对比
+12 个张量（GDN/attention/门控/MoE/层输出/logits/三类缓存），逐元素容限
+`atol=1e-5, rtol=1e-4`，本机最大绝对差 2.98e-7。
+证据 `ev-qwen36-cpu-numeric-r06` 独立绑定数值产物并标 numeric-checked；
+原几何/算量产物保持 shape-checked。RoPE cos/sin 为输入边界，mrope
+生成与真实 checkpoint/MTP/GPU 未验证；模型级 cpu_forward 仍 not-run。
+详见 [R06 报告 §9](validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
 
 **2026-11-12 R05 mHC/Sinkhorn**：14 文件完整 blob SHA1 对 pinned tree、SHA256
 清单入册，新增 sm-v41-mhc-kernels/ev-vllm-v41-mhc（source-checked，executed=False）。

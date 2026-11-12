@@ -182,3 +182,24 @@ fixture config 的规范 JSON 哈希，避免误用 modeling 源码哈希。修�
 形状、路由 assignment 和据此推得的算量；没有独立实现逐元素复算输出张量。
 按 `simverse/contracts/enums.py` 的定义，证据等级应为 `shape-checked`，
 现已降级。逐算子算量对账的结论保留，模型输出的数值正确性仍待独立 oracle。
+
+## 9. 独立张量数值 oracle（2026-11-12 续验）
+
+`tools/probe_qwen36_numeric_oracle.py` 对同一 pinned HF 源码和随机权重
+（seed 20261112、h32/2 层/4 expert top-2）运行独立参考路径。参考路径只读取
+官方模型的参数张量，不调用其层、GDN、attention、router、expert 或 norm 的
+`forward` 方法：按 token 显式卷积和 GDN 状态递推、按 token/slot 计算 MoE
+专家及路由、手写 GQA 因果掩码/部分 RoPE/输出门控、残差与归一化。
+prefill T5 和带缓存 decode T1 各比较 GDN/attention/门控/MoE 输出、两层
+输出、logits、卷积/GDN/KV 状态，共每相位 12 个张量。判据为逐元素
+`abs(actual−reference) ≤ 1e−5 + 1e−4·abs(actual)`；本机 torch
+2.15.0+cpu / transformers 5.22.1 最大绝对差 `2.98e−7`（KV key），
+logits 最大差 `5.96e−8`。完整每张量形状、最大差、RMS 差和参考样本
+保存于 `tests/fixtures/qwen36_r06_numeric_oracle.json`。
+
+这条独立证据登记为 `ev-qwen36-cpu-numeric-r06`（`numeric-checked`）；
+原 `ev-qwen36-cpu-fixture-r06` 仍为 `shape-checked`，各自绑定其落盘产物。
+RoPE cos/sin 取官方 forward 的输入作为参考边界，**不验证 mrope 位置生成**。
+本轮也不覆盖真实 checkpoint、MTP、视觉塔或融合 GPU kernel；模型级
+`cpu_forward=not-run` 与部署排名阻断不变。`tests/test_qwen36_forward_r06.py`
+新增 hermetic 证据核对和可选 torch live 重执行各 1 项。

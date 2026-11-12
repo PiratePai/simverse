@@ -236,6 +236,21 @@ _PINNED_ASSETS = [
       "CPU 执行为 fixture 级证据；模型级 cpu_forward 保持 not-run，"
       "不构成完整 forward 或部署验证"],
      True, "2026-11-12"),
+    ("ev-qwen36-cpu-numeric-r06", "numeric-checked",
+     "Qwen3.6 两层随机权重 CPU fixture：独立张量参考逐元素对照 pinned HF "
+     "prefill 与带缓存 decode 的 GDN、MoE、full-attn 门控、层输出、"
+     "conv/GDN/KV 状态和 logits",
+     "tests/fixtures/qwen36_r06_numeric_oracle.json",
+     "HF pin modeling/configuration @b6401d66；"
+     "tools/probe_qwen36_numeric_oracle.py 独立 PyTorch 张量参考；"
+     "torch 2.15.0+cpu / transformers 5.22.1 / Python 3.12 本机执行",
+     "h=32、两层 GDN+FullAttn、4 expert top-2、T=5 prefill 与 T=1 "
+     "带缓存 decode；atol=1e-5、rtol=1e-4",
+     ["只验证随机权重小尺寸文本 fixture，不覆盖真实 35B checkpoint/MTP/"
+      "视觉塔/融合 GPU kernel 或部署性能",
+      "RoPE cos/sin 取 pinned forward 的输入作为对照边界，mrope 位置生成未验证",
+      "模型级 cpu_forward 仍 not-run；部署排名资格不变"],
+     True, "2026-11-12"),
     ("ev-h200-235b-distill", "measured",
      "H200 Qwen3-235B-A22B TP2/8 算子级 profile 蒸馏集（历史归档）",
      "profiles/h200_qwen3_235b_a22b/manifest.json",
