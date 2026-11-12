@@ -323,11 +323,13 @@ def test_g10_evidence_levels_separated_and_not_overclaimed():
     # Engram 归因更新（2026-11-11 R04）：单机 Engram 算子已 pin + source-checked
     # → checked_paths/证据引用在册；未核范围收窄为 DP 交换/cpu_offload 运行时
     # 行为（本断言曾要求 engram_forward ∈ unverified_paths——底层事实变化，
-    # 合法门禁更新而非放宽：csa2_moe_routing 仍须 unverified）。
+    # 合入门禁更新而非放宽）。R21（2026-11-12）：MoE 路由主干同理由
+    # csa2_moe_routing 改列 moe_deploy_variants（MegaMoE/DSpark/padding skip
+    # 部署变体仍须 unverified）。
     assert "sm-v41-engram-hc" in v.evidence.checked_paths
     assert "ev-vllm-v41-engram" in v.evidence_refs
     assert any("engram_dp_exchange" in p for p in v.evidence.unverified_paths)
-    assert any("csa2_moe_routing" in p for p in v.evidence.unverified_paths)
+    assert any("moe_deploy_variants" in p for p in v.evidence.unverified_paths)
     assert d.config_coverage_complete
     assert d.evidence.cpu_forward == "not-run"
     assert d.evidence.gpu_measurement == "none"
@@ -509,7 +511,12 @@ def test_g16_source_map_line_and_status_corrections():
     assert mtp["both_sides_covered"] is False and mtp["uncovered_domain"]
     assert "Unverified" in mtp["entry_id"] or "unverified" in mtp["entry_id"]
     v41 = sm["sm-v41-csa2-moe-unverified"]
-    assert "MoE scoring" in " ".join(v41["uncovered_domain"])
+    # R21：MoE 路由已另立条目解除，本条目只剩注意力核本体/量化缺口
+    assert "MoE scoring" not in " ".join(v41["uncovered_domain"])
+    assert "稀疏 MLA" in " ".join(v41["uncovered_domain"])
+    moe = sm["sm-v41-moe-route"]
+    assert moe["both_sides_covered"] is True and moe["uncovered_domain"]
+    assert "noaux_tc" in moe["branch_predicate"]
     # R20：索引管线已独立入册且两侧覆盖（含短上下文旁路两分支）
     idx = sm["sm-v41-csa2-indexer"]
     assert idx["both_sides_covered"] is True and idx["uncovered_domain"]

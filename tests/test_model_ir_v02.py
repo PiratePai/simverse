@@ -105,7 +105,12 @@ def test_v41_structure_and_gaps(cat):
     assert not gap_keys & {"candidate_block_size", "candidate_source_layer_id",
                            "candidate_topk_blocks", "index_topk"}
     assert any("compress_ratios[40:43]" in g for g in m.gaps)
-    assert any("csa2_moe_routing" in p for p in m.evidence.unverified_paths)
+    # R21（2026-11-12）：MoE 路由主干已 source-checked（ev-vllm-v41-moe），
+    # csa2_moe_routing 缺口改列 moe_deploy_variants（MegaMoE/DSpark/padding
+    # skip 等部署变体仍 unverified）。
+    assert any("moe_deploy_variants" in p for p in m.evidence.unverified_paths)
+    assert any("MegaMoE" in p for p in m.evidence.unverified_paths)
+    assert "sm-v41-moe-route" in m.evidence.checked_paths
     # hc 参数入册 extras（消费方 count/memory）
     hc = m.extras["hc"]
     assert hc["mult"] == 4 and hc["sinkhorn_iters"] == 20

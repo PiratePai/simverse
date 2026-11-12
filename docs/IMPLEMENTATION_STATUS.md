@@ -1,11 +1,38 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #5/#7 已合入 main；PR #9 已合入远端 main merge `7151e5d`；本 PR #10 分支 `codex/v41-csa2-index-r20` 正在集成；历史验收分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 集成：R07a 宿主验收 **280 passed**、R20 单分支宿主验收 **295 passed**；与 R07a 合并后 Codex 宿主全量 **311 passed，exit 0**。本 DSH 沙箱 6 项 `tmp_path` setup PermissionError 仅为环境回执，见 §3.9，不是代码失败。历史：R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：311**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R07a+R20 集成；264→280 为 R07a 新增 test_dflash_serving_r07a.py 16 项（原 13 + 复核 3）；280→311 为 R20 CSA2 索引 oracle 新增 31 项（R20 分支 264→295）；236→252 为 R05 新增 16 项，252→262 为 R06 新增 10 项，262→264 为 R06 oracle 两项）。
+更新：2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 11 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 整除断言；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（PR #5/#7/#9/#10 已合入 main（HEAD `73738ad`）；本 PR #11 分支 `codex/v41-moe-route-r21` 待验收；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 R21 分支：**332 passed，exit 0**。历史：R07a+R20 集成 Codex 宿主全量 311 passed；R07a 280、R20 单分支 295、R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197。本 DSH 沙箱 `tmp_path` setup PermissionError 仅为环境回执，见 §3.9，不是代码失败）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：332**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R21 分支；311→332 为 R21 MoE 路由 oracle 新增 test_v41_moe_route.py 21 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-12 R21：V4.1 MoE scoring/top-k/分组路由**（PR #11 分支
+`codex/v41-moe-route-r21`）：moe-pin.json 11 文件（vllm @f358f057，blob
+sha1 对 vllm-tree.json 逐项校验）source-checked 入册（ev-vllm-v41-moe，
+executed=False）。语义核对结论：sqrtsoftplus 打分（>20 护栏）+ noaux_tc
+偏置**只导选择不进权重** + k=6 轮**平坦**偏置 argmax（V4.1 无
+n_group/topk_group 键，无分组路由；平手最小 id、NaN→−1e30）+ sum→1 归一
+×routed_scaling 1.5（sum≤0 除 1 护栏）；GateLinear(h→E, out_dtype=fp32)
+Replicated；共享专家（1, inter 2304）**无 gate**、归一后权重 1.0 追加；
+主干 num_hash_layers=0；视觉 checkpoint bias_vl 哨兵判定；EP **整除断言**
+（n_physical % ep == 0，无余数 rank 分布——与 qwen35 pin 不同，非整除
+组合 count/memory 双侧拒绝）。落地：count 三行 moe_gate/moe_score/
+moe_topk_renorm（FP32 logits 出口修正旧通用行）、memory 路由偏置对象
+40×3,072B、model_ir extras.moe_route + config 域校验（softmax/greedy/
+norm=false 拒绝）、公式 v2.moe_route_*、source_map sm-v41-moe-route。
+默认 TP8/B1/ctx32768 replay：decode FLOPs 7,175,856,742→7,176,457,222
+（+600,480 = 40×(3,458 score + 11,554 topk)）、weight_read +122,880B、
+act_read +61,760B、act_write +48,000B、rows 927→1,007、M01
+116.160230→116.160299ms、steady/known_peak +122,880B（evidence/moe-route
+attribution.json 逐 op 归因，面外行逐字段冻结）。新增 21 项独立 oracle
+（tests/test_v41_moe_route.py：pin 双侧/纯 stdlib 语义 oracle/手算绝对值/
+tp-ep 复制不变/EP 负例/count↔memory 对账/config 域负例/replay 冻结）。
+G10/G16/test_model_ir_v02 的 csa2_moe_routing 断言改指 moe_deploy_variants
+（主干解除，MegaMoE/DSpark/padding skip 变体仍 unverified）；
+test_v41_hc replay 冻结面追加 MoE 行名。structure_complete 仍 False
+（量化映射/swiglu clamp/注意力核本体/MTP 尾部/compress_ratios 尾部缺口
+不变）。[报告](validation/v41-moe-route-20261112.md)；G-C13 解除。
 
 **2026-11-12 PR #5/#7 合入后验收**：首次全量 261 passed / 1 failed；
 R06 fixture 的 pinned SHA256 记录为 CRLF 字节，仓内官方 pin manifest 为 LF 字节，
@@ -191,8 +218,11 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
     DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2 索引打分/
     top-k/candidate block 已由 R20（2026-11-12，ev-vllm-v41-csa2）source-checked
-    解除；MoE scoring、swiglu、quantization_config、稀疏 MLA 注意力核本体、
-    compress_ratios 尾部仍为缺口；mHC 仅 source-checked；CPU/GPU 均未执行。
+    解除；MoE 路由（scoring/top-k/归一化/缩放/共享专家/EP 整除）已由 R21
+    （2026-11-12，ev-vllm-v41-moe）source-checked 解除（部署变体
+    MegaMoE/DSpark 草稿 MoE/padding skip 仍 unverified）；swiglu、
+    quantization_config、稀疏 MLA 注意力核本体、compress_ratios 尾部仍为
+    缺口；mHC 仅 source-checked；CPU/GPU 均未执行。
   - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成已双栈逐行核对
     （R07a 2026-11-12：colocated=source-checked/dt=unsupported）；served
     已部署实测未做；拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位
@@ -225,9 +255,11 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 复核：
   main branch protection 要求经 PR 合入及 `pytest (Windows, Python 3.12)`
   必需检查（strict），审批数为 0，且 `enforce_admins=true`。
-- **未完成**：V4.1 MoE scoring/量化映射源码与执行、稀疏 MLA 注意力核本体、
+- **未完成**：V4.1 量化映射源码与执行、稀疏 MLA 注意力核本体、
   Engram DP 分片交换路径、Qwen3.6 MTP 原生 forward、
   两款主模型 CPU/GPU 实测、DFlash served 实测与运行时池尺寸、真实可分配预算。
+  （MoE 路由主干 R21 已 source-checked；MegaMoE/DSpark 草稿 MoE/padding
+  skip 等部署变体仍缺。）
 
 ## 0.1 必读上下文
 
@@ -485,10 +517,11 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 1. **V4.1**：Engram 单副本路径已建模（R04，2026-11-11，pin+source-checked；
    剩余：DP 分片交换/EngramBatch MXFP8/cpu_offload 运行时行为/amd 变体，
    G-C1）；CSA2 索引打分/top-k/candidate block 已由 R20（2026-11-12）
-   source-checked 解除（G-C12）；剩余 MoE scoring/top-k/分组路由、
-   swiglu clamp、quantization_config、稀疏 MLA 注意力核本体、
-   compress_ratios 尾部仍为显式缺口；mHC 仅 source-checked、tilelang
-   kernel 未执行。G-C1。
+   source-checked 解除（G-C12）；MoE scoring/top-k/分组路由已由 R21
+   （2026-11-12）source-checked 解除（G-C13；MegaMoE/DSpark 草稿 MoE/
+   padding skip 部署变体仍缺）；剩余 swiglu clamp、quantization_config、
+   稀疏 MLA 注意力核本体、compress_ratios 尾部仍为显式缺口；mHC 仅
+   source-checked、tilelang kernel 未执行。G-C1。
 2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
    丢弃 `mtp.` → method status=unverified，不进入部署排名。
 3. **DFlash**：服务端集成已双栈逐行核对（R07a 2026-11-12：vLLM @dc74b8cb +
@@ -539,10 +572,12 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   trace_v2.csv、report_v2.html（历史轮）；A 组轮：
   run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
   trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
-- 下一工作项：V4.1 MoE scoring 与量化映射源 pin、Engram DP 分片交换
-  路径（或显式永久登记单副本口径）；Qwen3.6 MTP 原生 forward；
-  两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/运行时池尺寸；
-  可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；G-C4 单请求超前 → M17；
+- 下一工作项：V4.1 量化映射（quantization_config→计算精度）源 pin、
+  稀疏 MLA 注意力核本体、MoE 部署变体（MegaMoE/DSpark 草稿 MoE）、
+  Engram DP 分片交换路径（或显式永久登记单副本口径）；Qwen3.6 MTP
+  原生 forward；两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/
+  运行时池尺寸；可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；
+  G-C4 单请求超前 → M17；
   V09b 三方对账。历史 235B MoE 蒸馏仅作归档研究，不再是产品优先项。
 
 

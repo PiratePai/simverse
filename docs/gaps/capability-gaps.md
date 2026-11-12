@@ -4,7 +4,8 @@
 或先有实现才能消费数据）。每项含：影响面/缺什么/旧仓为何不足/需要什么实现/
 验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
 新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）；
-2026-11-12 更新（R20：G-C12 CSA2 索引打分/top-k/candidate block 解除；R07a：G-C3 DFlash 服务栈核对部分解除）。
+2026-11-12 更新（R20：G-C12 CSA2 索引打分/top-k/candidate block 解除；R07a：G-C3
+DFlash 服务栈核对部分解除；R21：G-C13 V4.1 MoE scoring/top-k/分组路由解除）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 
@@ -33,15 +34,48 @@
   （本仓默认单副本路径不启用，登记未覆盖）；cpu_offload 运行时行为（预取流/
   TLB/GB200 排序阈值 36864/4096）未建模；amd/engram.py 变体未 pin；mhc
   kernel/CPU/GPU 执行、实际 split-k 与部署变体未验证（源码已由 R05 pin 入册）。
-  CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE scoring、
-  量化映射、swiglu clamp、稀疏 MLA 注意力核本体、compress_ratios 尾部仍为
-  独立缺口。
+  CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE
+  scoring/top-k/分组路由已由 R21 解除（见 G-C13）；量化映射、swiglu clamp、
+  稀疏 MLA 注意力核本体、compress_ratios 尾部仍为独立缺口。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
   mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需
-  MoE/量化/稀疏 MLA 核本体/compress_ratios 尾部缺口闭环（CSA2 索引打分/
-  top-k/candidate 已由 R20 解除）。
+  量化/稀疏 MLA 核本体/compress_ratios 尾部缺口闭环（CSA2 索引与 MoE 路由
+  已分别由 R20/R21 解除）。
 - **当前降级**：structure gate 拦截（capability 可见；Engram 单机/hc 部分已不再缺）。
 - **优先级**：P0（必需模型场景）。
+
+## G-C13 ~~V4.1 MoE scoring/top-k/分组路由~~ → 已解除（2026-11-12 R21）⭐P0
+
+- **解除交付**：moe-pin.json 11 文件 pin（vllm @f358f057，blob sha1 对
+  vllm-tree.json 逐项校验 + SHA256；deepseek_v4 基类 MoE + eplb_util +
+  fused_moe router 8 文件 + moe_output）。语义：GateLinear(h→E,
+  out_dtype=fp32) Replicated 路由 GEMM；sqrtsoftplus 打分（>20 护栏）；
+  noaux_tc e_score_correction_bias 只导选择不进权重；k=6 轮平坦偏置
+  argmax（**无分组**——config 无 n_group/topk_group 键，分组仅 V3 式
+  use_grouped_topk 路径）、平手最小 id、NaN→−1e30；sum→1 归一
+  ×routed_scaling_factor=1.5（sum≤0 除 1 护栏）；共享专家（1, inter
+  2304, 无 gate）归一后权重 1.0 追加；V4.1 主干 num_hash_layers=0；
+  视觉 checkpoint bias_vl 哨兵判定；EP 整除断言（n_physical % ep == 0，
+  无余数 rank 分布——与 qwen35 pin 不同，非整除组合拒绝）。
+  count 三行（moe_gate/moe_score/moe_topk_renorm，FP32 logits 出口修正）、
+  memory 路由偏置对象（40×3,072 B）、model_ir extras.moe_route + config
+  域校验（softmax/greedy/norm=false 拒绝）、公式 v2.moe_route_*。
+- **验收**：tests/test_v41_moe_route.py 21 项——pin 双侧校验与文本锚点、
+  纯 stdlib 语义 oracle（归一 sum==1.5/bias 不进权重/平手最小 id/NaN/
+  fp32 下溢护栏/无组键）、手算绝对值、tp/ep 复制不变、EP 整除负例+
+  E_local=48、count↔memory 对账、config 域负例、structure gate 不解除、
+  replay 冻结。默认 TP8/B1/ctx32768 replay：decode +600,480 FLOPs、
+  weight_read +122,880B、act_read +61,760B、act_write +48,000B、rows
+  +80、M01 +0.0000695ms、steady/known_peak +122,880B（attribution.json
+  逐 op 归因，面外行冻结）。证据 ev-vllm-v41-moe（source-checked，
+  executed=False）；[报告](../validation/v41-moe-route-20261112.md)。
+- **仍缺（登记不冒充）**：kernel/CPU forward/GPU 未执行（op 为解析算术
+  口径）；native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP，deep_gemm
+  未入 pin）、FP32/bf16x3 router GEMM 分层、dsv4_topk Triton 档约束
+  （E∈{256,384}/k=6）外的 E/k 值未独立核；DSpark 草稿层 MoE（E=128/k=3）
+  方法层不建模；padding skip/CUDA-graph 整宽路由缓冲未入账；
+  defer_finalize 需 scaling==1.0（V4.1-Flash=1.5 不适用）；量化专家
+  权重布局（quantization_config 独立缺口）。
 
 ## G-C12 ~~V4.1 CSA2 索引打分/top-k/candidate block~~ → 已解除（2026-11-12 R20）⭐P0
 

@@ -156,6 +156,28 @@ _CSA2_KEY_NOTES = {
         " L34-43；compressor.py L295-310 ratio1 无门控）；MTP 尾部另列缺口",
 }
 
+# R21（2026-11-12）：V4.1 MoE 路由键的 mapped 注记（证据 moe-pin.json
+# 11 文件 + ev-vllm-v41-moe；消费者 count/moe.v41_moe_route_rows、
+# lowering/memory 路由偏置对象）。
+_MOE_ROUTE_KEY_NOTES = {
+    "scoring_func":
+        "mapped：sqrtsoftplus——weights=sqrt(softplus(logits))，>20 取 "
+        "sqrt(logits) 护栏（dsv4_topk.py L88-92；cpu_router.py L90-107 同语义"
+        " docstring）；仅此一档（mega/model.py L255-258 断言 sqrtsoftplus）",
+    "topk_method":
+        "mapped：noaux_tc——e_score_correction_bias[E] fp32 只导选择不进权重"
+        "（deepseek_v4/nvidia/model.py L303-313 建 Parameter；dsv4_topk.py "
+        "L93-109 选择列=weights+bias、权重取无偏 score）",
+    "norm_topk_prob":
+        "mapped：true——选中权重 sum→1 归一（dsv4_topk.py L111-115；"
+        "cpu_router.py L107 assert renormalize；can_use_dsv4_topk 要求 "
+        "renormalize）",
+    "routed_scaling_factor":
+        "mapped：1.5——归一后乘 routed_scaling_factor/sum（sum≤0 除 1 护栏，"
+        "dsv4_topk.py L111-115）；只作用于 routed，共享专家权重 1.0 在归一后"
+        "追加（fused_topk_bias_router.py L301-320）",
+}
+
 
 def _is_prime(n: int) -> bool:
     """确定性 Miller-Rabin（n < 2**32 有效；基 {2,7,61}）。
@@ -609,8 +631,14 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     source-checked 建模 → mapped（count/work.v41_layer_rows + lowering/
     memory 记录/环形状态/缓冲对象；公式 v2.csa2_*；短上下文旁路、
     prefill/decode 分支、candidate 所有权见 source_map sm-v41-csa2-indexer）。
-    MoE scoring、量化映射、swiglu clamp、注意力核本体、尾部
-    compress_ratios 仍为显式缺口 → gaps 非空，structure_complete=False。
+    MoE 路由（scoring/top-k/归一化/缩放/共享专家/EP 归属）：2026-11-12 R21
+    按 11 文件 pin（moe-pin.json，vllm @f358f057，blob sha1 对
+    vllm-tree.json 逐项校验）source-checked 建模 → mapped
+    （count/moe.v41_moe_route_rows 三行 + lowering/memory 路由偏置对象；
+    V4.1 EP 整除断言；公式 v2.moe_route_*；平坦偏置 top-k 无分组——V4.1
+    config 无 n_group/topk_group 键，分组仅 V3 式 use_grouped_topk 路径）。
+    量化映射、swiglu clamp、注意力核本体、尾部 compress_ratios 仍为显式
+    缺口 → gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
     tc = config
@@ -651,6 +679,19 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                 * tc["moe_intermediate_size"],
                 routed_scaling=float(tc["routed_scaling_factor"]),
                 scoring=str(tc.get("scoring_func", "softmax")))
+    # R21：V4.1 路由 config 域校验（pinned 源码只支持该组合；非法值按
+    # config 域拒绝，不静默回退）——dsv4_topk.py can_use L21-38（renormalize/
+    # fp32 logits/bias）、deepseek_v4/nvidia/model.py L253-263（mega 路径
+    # 断言 sqrtsoftplus+renormalize）、cpu_router.py L107（assert renormalize）。
+    if moe.scoring != "sqrtsoftplus":
+        raise ValueError(f"V4.1 scoring_func={moe.scoring!r} 不支持：pinned "
+                         "实现仅 sqrtsoftplus（mega 断言 L255-258）")
+    if str(tc.get("topk_method", "noaux_tc")) != "noaux_tc":
+        raise ValueError(f"V4.1 topk_method={tc.get('topk_method')!r} 不支持："
+                         "noaux_tc 之外无 e_score_correction_bias 建模依据")
+    if not bool(tc.get("norm_topk_prob", True)):
+        raise ValueError("V4.1 norm_topk_prob=false 不支持：dsv4/cpu 路由均"
+                         "断言 renormalize")
     layers = []
     r_hist: Dict[int, int] = {}
     for i in range(L):
@@ -737,6 +778,39 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         if key.startswith("dspark_"):
             coverage[key] = {"status": "metadata-only", "consumer": "methods",
                              "note": "V4.1 原生 DSpark 方法参数（方法层绑定，非模型结构）"}
+    # R21：V4.1 MoE 路由键的 mapped 注记（11 文件 pin moe-pin.json，
+    # source-checked 2026-11-12）
+    for key, note in _MOE_ROUTE_KEY_NOTES.items():
+        path = f"{text_prefix}.{key}" if text_prefix else key
+        if path in coverage and coverage[path]["status"] == "mapped":
+            coverage[path] = {"status": "mapped",
+                              "consumer": "model_ir+count+memory",
+                              "note": note}
+    # R21：路由 spec（消费方：count/moe.v41_moe_route_rows、
+    # lowering/memory 路由偏置对象、count/work EP 整除校验）。
+    # 常数全部来自 moe-pin.json @f358f057：
+    #   * gate = GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）；
+    #   * bias = e_score_correction_bias[E] fp32（noaux_tc，L303-313）；
+    #   * bias_vl：vision_n_layers>0 时每 MoE 层创建（L314-320；V4.1-Flash
+    #     视觉塔 32 层 → 存在，文本 token 也逐行做哨兵判定 dsv4 L60-70）；
+    #   * V4.1 主干 num_hash_layers=0（v41/nvidia/model.py L155）——无
+    #     hash MoE/tid2eid 表；
+    #   * EP：n_physical(=E+eplb 冗余 0) % ep == 0 断言（L416-421）。
+    vision_layers = int((full_config or {}).get("vision_config", {})
+                        .get("num_hidden_layers", 0) or 0)
+    moe_route_spec = {
+        "scoring": "sqrtsoftplus",
+        "topk_method": "noaux_tc",
+        "renormalize": True,
+        "routed_scaling": float(tc["routed_scaling_factor"]),
+        "gate_out_dtype": "fp32",
+        "logits_itemsize": 4,
+        "bias_bytes": moe.experts * 4,
+        "bias_vl_bytes": moe.experts * 4 if vision_layers > 0 else 0,
+        "hash_layers": 0,
+        "grouped": False,
+        "shared_expert_weight": 1.0,   # 归一后追加，无 gate
+    }
     return ModelIR(
         id=model_id, label=label, family="v41_csa2", hidden=h, vocab=v,
         layers=layers, source=source,
@@ -764,7 +838,8 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             "index_source_layer_ids": ix_ids,
         },
         "hc": hc_spec,
-        "engram": engram_spec})
+        "engram": engram_spec,
+        "moe_route": moe_route_spec})
 
 
 def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id: str,

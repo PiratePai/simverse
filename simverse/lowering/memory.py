@@ -30,6 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ..model_ir.schema import ModelIR
 from ..model_ir.families import engram_bucket_primes
+from ..count.moe import require_divisible_ep
 from ..draft_quant import (FUSED_RAW, MXFP8_CONTEXT_PROJ, PER_LAYER_FALLBACK,
                            dtype_bytes, path_unknown_components,
                            require_ctx_kv_path)
@@ -476,6 +477,12 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                 live_note="常驻（attn/GDN/dense FFN 按层聚合，TP 分片口径）"))
         if layer.moe is not None and layer.moe.experts:
             moe = layer.moe
+            moe_route = (model.extras or {}).get("moe_route") \
+                if fam == "v41_csa2" else None
+            if moe_route is not None:
+                # R21：V4.1 pinned EP 整除断言（与 count/work 同规则镜像；
+                # qwen35 pin 的余数规则不适用本族）
+                require_divisible_ep(moe.experts, ep)
             router_b = int(model.hidden * moe.experts * b_dense)  # replicated
             shared_b = int(3 * model.hidden * (moe.shared_intermediate // tp)
                            * b_dense) if moe.shared_intermediate else 0
@@ -494,6 +501,19 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                 f"{role}-w-moe-L{li}", "weights", role,
                 router_b + shared_b + gate_b + experts_b,
                 live_note=f"常驻（router/shared_gate 复制；{note}）"))
+            if moe_route is not None:
+                # R21：路由偏置向量（FP32 每卡复制，不随 tp/ep 缩放）——
+                # e_score_correction_bias[E]（noaux_tc）+ bias_vl[E]（视觉
+                # checkpoint 才创建；V4.1-Flash vision_n_layers=32>0）。
+                # 深度 DeepseekV4MoE L303-320；moe-pin.json source-checked。
+                bias_b = int(moe_route["bias_bytes"]
+                             + moe_route.get("bias_vl_bytes", 0))
+                vl_note = ("+bias_vl（视觉 checkpoint，HAS_VL 哨兵判定）"
+                           if moe_route.get("bias_vl_bytes") else "")
+                allocs.append(Allocation(
+                    f"{role}-w-moe-route-L{li}", "weights", role, bias_b,
+                    live_note=f"常驻 fp32 复制（e_score_correction_bias"
+                              f"{vl_note}；sqrtsoftplus/noaux_tc 路由）"))
     vocab_r = model.vocab // tp if model.vocab % tp == 0 else model.vocab
     if not model.tie_embeddings:
         allocs.append(Allocation(

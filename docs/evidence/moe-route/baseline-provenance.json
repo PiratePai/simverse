@@ -1,0 +1,7 @@
+{
+  "head": "73738ad5ebb126064ede79b8b7cf637a61dd2eec",
+  "captured_before_edits": true,
+  "worktree": "D:\\Github\\new-viewer",
+  "git_status_porcelain": " M .gitattributes\n?? docs/evidence/moe-route/\n?? docs/rebuild-20261106/references/vllm/moe-pin.json\n?? docs/rebuild-20261106/references/vllm/vllm/model_executor/layers/fused_moe/\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v4/common/\n?? docs/rebuild-20261106/references/vllm/vllm/models/deepseek_v4/nvidia/\n?? tools/replay_v41_moe.py\n",
+  "note": "R21 基线：HEAD 73738ad（main，R20 CSA2 合入后）+ 预置 MoE routing pin 源码（moe-pin.json 11 文件，blob 对 vllm-tree.json 校验）；simverse 生产代码未改动"
+}

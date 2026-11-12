@@ -166,6 +166,47 @@ _PINNED_ASSETS = [
       "工作区字节为上界；环形 state 读为每请求 1 行上界",
       "稀疏 MLA 注意力核本体（4d+5）仍 v0.1 移植，不在本证据范围"],
      False, "2026-11-12"),
+    ("ev-vllm-v41-moe", "source-checked",
+     "R21 V4.1 MoE scoring/top-k/分组路由：11 文件 pin（deepseek_v4 基类 "
+     "nvidia/model.py + eplb_util、fused_moe router 8 文件（dsv4_topk/"
+     "fused_topk_bias/router_factory/base/fused_moe/grouped_topk/cpu/"
+     "gate_linear）+ moe_output）。覆盖：GateLinear(h→E, out_dtype=fp32) "
+     "Replicated 路由 GEMM；sqrtsoftplus 打分 sqrt(softplus(logits))（>20 "
+     "取 sqrt(logits) 护栏）；noaux_tc e_score_correction_bias[E] fp32 只导"
+     "选择不进权重（选择列=score+bias、权重列=无偏 score）；k=6 轮平坦 "
+     "argmax（无分组——V4.1 config 无 n_group/topk_group 键，工厂仅 "
+     "use_grouped_topk 走 GroupedTopKRouter）、平手取最小专家 id、NaN→"
+     "−1e30；sum→1 归一后 ×routed_scaling_factor=1.5（sum≤0 除 1 护栏）；"
+     "输出 FP32 weights + int32 ids；共享专家（n=1, inter 2304, 无 gate）"
+     "归一后以权重 1.0 追加/独立相加；V4.1 主干 num_hash_layers=0（无 "
+     "hash MoE）；视觉 checkpoint（vision_n_layers=32>0）bias_vl[E] fp32 "
+     "每 MoE 层创建、HAS_VL 哨兵逐行判定；EP 归属：n_physical(=E+eplb 冗"
+     "余 0) % ep 断言整除、experts_start_idx = ep_rank·n_local（fused 与 "
+     "mega 两路径同式）",
+     str(REFS / "vllm" / "moe-pin.json"),
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；11 文件 blob SHA1 对 "
+     "vllm-tree.json 逐项校验 + SHA256 清单",
+     "V4.1 MoE 路由管线（count/moe.v41_moe_route_rows 三行、model_ir "
+     "extras.moe_route、lowering/memory 路由偏置对象、count/work+memory "
+     "EP 整除断言、公式 v2.moe_route_*、config 域校验）",
+     ["源码阅读 source-checked；kernel/CPU forward/GPU 均未执行",
+      "部署变体未建模：native MegaMoE（bf16_mega_gate 大批路径，需 EP+fp4 "
+      "专家+SP token 分片）、FP32/bf16x3 router GEMM 分层、topk_hash_"
+      "softplus_sqrt CUDA 专核与 dsv4_topk Triton 的实现差异（语义一致，"
+      "指令构成不同）",
+      "dsv4_topk Triton 档约束 E∈{256,384}、k=6、fp32、renormalize（不满足"
+      "时落 ops.topk_hash_softplus_sqrt/CPU biased_topk_cpu——语义相同）；"
+      "E/k 其他值未独立核",
+      "DSpark 草稿层 MoE（dspark_n_routed_experts=128/k=3，128 专家 gate_"
+      "threshold=1）为方法层字段，本 PR 不建模",
+      "quantization_config（fp8/fp4 专家）仍缺：路由行字节按场景 dense_w "
+      "计价，gate 权重未按 checkpoint 量化布局核实",
+      "padding skip（VLLM_MOE_SKIP_PADDING）与 CUDA-graph 整宽路由缓冲、"
+      "defer_moe_finalize（需 routed_scaling==1.0，V4.1-Flash=1.5 不适用）"
+      "未入账；VL 图像 token 的 bias_vl 选择分支只登记未选路",
+      "op 计数为解析算术口径（exp/log/sqrt/比较各 1，非 kernel 指令数）；"
+      "input_ids 读按 int64 上界；bias_vl/哈希表布局字节为权重驻留口径"],
+     False, "2026-11-12"),
     ("ev-vllm-v41-dspark", "source-checked",
      "vLLM V4.1 DSpark speculator：num_reqs 批处理、复用 V4 decoder 的事实",
      str(REFS / "vllm" / "vllm" / "v1" / "worker" / "gpu" / "spec_decode" / "dspark" / "speculator.py"),
