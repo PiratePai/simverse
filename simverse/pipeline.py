@@ -289,7 +289,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
 
     base_rows = build_model_work(model, "target_decode", B, ctx, 1, quant,
                                  dep.target_tp, role="target", ep=dep.target_ep,
-                                 plan=pplan)
+                                 plan=pplan,
+                                 v41_kv_record=dep.v41_kv_record)
     base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt,
                              engram_lookup_host)
     t_base = stage_total(base_prices)
@@ -373,7 +374,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             verify_rows = build_model_work(model, "verify_block", B, ctx,
                                            plan.block_size, quant, dep.target_tp,
                                            role="target", ep=dep.target_ep,
-                                           plan=pplan)
+                                           plan=pplan,
+                                           v41_kv_record=dep.v41_kv_record)
             v_prices = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
                                   engram_lookup_host)
             t_verify = stage_total(v_prices)
@@ -430,7 +432,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             verify_rows = build_model_work(model, "verify", B, ctx,
                                            plan.k_effective + 1, quant,
                                            dep.target_tp, role="target",
-                                           ep=dep.target_ep, plan=pplan)
+                                           ep=dep.target_ep, plan=pplan,
+                                           v41_kv_record=dep.v41_kv_record)
             v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
                                     engram_lookup_host)
             t_verify = stage_total(v_prices_m)
@@ -468,7 +471,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             verify_rows = build_model_work(model, "verify", B, ctx,
                                            plan.k_effective + 1, quant,
                                            dep.target_tp, role="target",
-                                           ep=dep.target_ep, plan=pplan)
+                                           ep=dep.target_ep, plan=pplan,
+                                           v41_kv_record=dep.v41_kv_record)
             v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
                                     engram_lookup_host)
             t_verify = stage_total(v_prices_c)
@@ -748,6 +752,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
     # R04：Engram 表位置显式输入 + staged_rows 下界按稳态 decode T=B×1 计
     e_place = getattr(dep, "engram_table_placement", "cpu_offload")
     e_tokens = B if (model.extras or {}).get("engram") else 0
+    # R20：V4.1 KV 记录配方（显式场景输入，默认 fp8_ds_mla_sm90）
+    v41_rec = getattr(dep, "v41_kv_record", "fp8_ds_mla_sm90")
     if dep.mode == "colocated":
         tp = dep.target_tp if pplan is None else pplan.tp
         ep = dep.target_ep if pplan is None else pplan.ep
@@ -758,7 +764,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                 _device_budget(dep.target_device, dep.budget),
                 ep=ep, rank=r, block_size=block_size, e_produced=e_produced,
                 draft_ctx_kv_path=draft_ctx_kv_path,
-                engram_table_placement=e_place, engram_tokens=e_tokens)
+                engram_table_placement=e_place, engram_tokens=e_tokens,
+                v41_kv_record=v41_rec)
             rep = rank_mem.peak_vs_budget()
             rep["inventory"] = rank_mem.inventory()
             ranks.append(rep)
@@ -787,7 +794,14 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                     (model.extras or {})["engram"], dep.target_tp, e_tokens):
                 a.consumers = ["target"]
                 rm.add(a)
-        for a in kv_allocations(model, quant, B, ctx, tp=dep.target_tp):
+        kv_spec = (model.extras or {}).get("kv_spec")
+        if kv_spec and kv_spec.get("family") == "v41_csa2" and e_tokens:
+            from .lowering.memory import v41_index_buffer_allocations
+            for a in v41_index_buffer_allocations(kv_spec, e_tokens):
+                a.consumers = ["target"]
+                rm.add(a)
+        for a in kv_allocations(model, quant, B, ctx, tp=dep.target_tp,
+                                v41_kv_record=v41_rec):
             a.consumers = ["target"]
             rm.add(a)
         rm.unknown_components = list(UNKNOWN_RUNTIME_COMPONENTS)

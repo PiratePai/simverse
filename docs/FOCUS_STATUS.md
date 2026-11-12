@@ -36,7 +36,7 @@ tests/test_v41_engram.py 24 项（素数桶和 == engram_num_embeddings 精确
 相等、TP1 表 202,758,032,400 B、tp=7/9/16 拒绝）。默认 V4.1 replay：
 GPU 侧解析耗时下界 113.34→116.15ms（host 查表时延未知）、GPU steady +39.5MB
 （表在 host 25.3GB 另列）；
-structure_complete 仍 False（CSA2/MoE/量化缺口不变）。详见
+structure_complete 仍 False（CSA2 索引管线已 R20 source-checked，但 MoE/量化/注意力核本体缺口不变）。详见
 [validation/v41-engram-20261111.md](validation/v41-engram-20261111.md)。
 
 2026-11-10 两模型门禁轮：活跃目录只保留 Qwen3.6-35B-A3B + DFlash、
@@ -66,7 +66,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 
 | 能力 | 范围与限制 |
 |---|---|
-| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 Engram 单副本路径 + hc 已 source-checked 建模（R04；DP 交换/cpu_offload 运行时未覆盖），CSA2/MoE/量化仍缺口；四栏证据见 JSON |
+| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 Engram 单副本路径 + hc（R04）与 CSA2 索引打分/top-k/candidate（R20）已 source-checked 建模（Engram DP 交换/cpu_offload 运行时、注意力核本体/MoE/量化仍缺口）；四栏证据见 JSON |
 | Qwen3.6+DFlash | pinned 草稿、接受律、draft/verify 解析成本、同卡与 DT 串行；非实测收益；CPU 仅 R06 fixture 级对照（模型级未执行），GPU 未执行 |
 | **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
 | **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
@@ -82,7 +82,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 1. ~~Qwen3.6 优先：统一 MoE per-rank TP/EP 配方~~（2026-11-10 A组 R01 完成）。
 2. ~~同卡显存复核（草稿 batch/共享去重/KV 分片/生命周期峰值分列）~~（A组 R02a/b 完成；运行时池尺寸证据仍缺，见下）。
 3. 可分配预算：契约已就绪（R03a），**真实 measured 数据仍缺**（G-D7）；解除前默认场景保持 unknown。
-4. ~~V4.1：获取并固定 Engram 实现、补查表/投影/参数/容量/跨层依赖~~（单副本路径 2026-11-11 R04 完成；剩余 DP 分片交换/MXFP8 批路径/amd 变体与 CSA2/MoE scoring/量化缺口，完整前不解除结构门禁）。
+4. ~~V4.1：获取并固定 Engram 实现、补查表/投影/参数/容量/跨层依赖~~（单副本路径 2026-11-11 R04 完成）；~~CSA2 索引打分/top-k/candidate block~~（2026-11-12 R20 完成）；剩余 DP 分片交换/MXFP8 批路径/amd 变体、稀疏 MLA 注意力核本体、MoE scoring/量化缺口，完整前不解除结构门禁。
 5. 请求级 lookahead、取消与浪费；在线到达/组批/抢占、KV 分页、Chunked Prefill/PD/Prefix Cache。
 6. ~~235B moe.csv TP8/EP1 准入~~：模型已移出活跃 catalog，只保留历史归档研究；
    不再作为产品优先项。两款主模型缺匹配 profile，需新采集。

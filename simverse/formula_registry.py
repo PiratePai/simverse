@@ -149,6 +149,113 @@ F_ENGRAM_POST_WKV = _f(
     "eps=rms_norm_eps=1e-20、clamp=1e-6（L1695-1696）——op 计数为解析近似口径",
     "Engram 门控注入核（每 engram 层，post_wkv 逐 (token,hc)）")
 
+# ---- CSA2 索引打分/top-k/candidate（DeepSeek-V4.1-Flash；证据 csa2-pin.json
+#       20 文件 pin @f358f057 blob 对 vllm-tree.json，source-checked
+#       2026-11-12 R20；op 口径同 R04/R05：解析算术 op，非指令数/实测）----
+F_CSA2_RECORD = _f(
+    "v2.csa2_record",
+    "fp8_ds_mla 打包记录：SM90(V4) 584 B/token = 448 fp8 + 64 bf16 rope + "
+    "7×ue8m0(64dim) + pad；SM100(V4.1 MXFP8) 528 = 512 + 16×ue8m0(32dim)；"
+    "nvfp4 压缩缓存 288 = 256 e2m1 + 32 e4m3(16dim)；索引 K 行 132 = "
+    "128 fp8 + 4 scale。记录字节不随场景 kv 位宽缩放（显式 v41_kv_record）",
+    "attention.py L181-189（_indexer_k_cache_head_dim）、L583-589"
+    "（swa/compressed_bytes_per_token）；fused_compress_quant_cache.py "
+    "L295-374（rope_quant_insert 记录分派）；scenario.V41_KV_RECORDS",
+    "V4.1 SWA/压缩/索引缓存读写与容量（swa_cache_write/compressed_insert/"
+    "index_k_store/sparse_attention/kv_allocations）")
+F_CSA2_COMPRESS_POOL = _f(
+    "v2.csa2_compress_pool",
+    "ratio1：ops = tokens·(4d+2)（纯 RMSNorm，无门控无池化）；读 = T·d·4B"
+    "（fp32 kv），写 = tokens·d·2B（bf16 latent）。ratio2：ops = groups·"
+    "(7d+9)（softmax(2)=8 + 加权和 2d 乘 + (d−1) 加 + norm 4d+2）；读 = "
+    "T·2d·4B；写 = groups·d·2B；环形 state 写 = B·min(Q,8)·4096B、读 ≤ "
+    "B·4096B（上界）",
+    "compressor.py L250-252（ring capacity=max(8,next_pow2(spec+2))）、"
+    "L321-343（fused_wkv_wgate quant_config=None）；"
+    "fused_compress_quant_cache.py L136-243（_fused_save_compress_norm："
+    "请求程序 ring 尾存 + 组程序 softmax 池化 + _store_latent RMSNorm）",
+    "compress_pool 行（kv source 层）；ratio2 state 流量为上界口径")
+F_CSA2_COMPRESSED_INSERT = _f(
+    "v2.csa2_compressed_insert",
+    "ops/row = 3·rd + 记录量化项（v4: (d/64)·65+7；mxfp8: (d/32)·34+16；"
+    "nvfp4: (d/16)·18+32）；读 = row·d·2B（bf16 latent）；写 = row·记录宽",
+    "fused_compress_quant_cache.py L376-530（_rope_quant_insert_kernel 三变体："
+    "GPT-J RoPE 后 64/32/16 维块 amax→ceil(log2)→e4m3/e2m1 打包 + "
+    "ue8m0/e4m3 scale 存储尾；仅 group-boundary 行落盘）",
+    "compressed_insert 行（合并旧 compressed_rope + compressed_cache_write）")
+F_CSA2_INDEX_K_STORE = _f(
+    "v2.csa2_index_k_store",
+    "ops/row = 5·di + 3·rd + 4（k_norm 4di+2 + RoPE 3·rd + FP8 量化 ≈di+2）；"
+    "读 = row·di·2B（bf16 wk 输出）；写 = row·132B（FP8+scale 记录）",
+    "common/ops/indexer_k_store.py L126-266（k_norm fp32 数学 + GPT-J RoPE "
+    "于组位置 + per-token FP8 单 scale；仅 (pos+1)%r==0 行产出 key）",
+    "index_k_store 行（合并旧 index_k_norm/index_k_rope/index_cache_write）")
+F_CSA2_INDEX_Q_ROPE = _f(
+    "v2.csa2_index_q_rope",
+    "ops = T·(3·ih·rd + 2·ih)（逐头 RoPE 后 rd 对 + 权重乘 softmax_scale 与 "
+    "n_head^-0.5）；读 = T·ih·di·2 + T·ih·2；写 = T·ih·di·1（fp8 q）+ "
+    "T·ih·4（fp32 权重）",
+    "sparse_attn_indexer.py L192-318（_fused_indexer_q_rope_quant_kernel："
+    "RoPE + FP8 量化 + per-head 权重缩放；FP8 路把 Q scale 折入 weights）",
+    "index_q_rope 行（index source 层，短上下文旁路时跳过）")
+F_CSA2_INDEX_SCORE = _f(
+    "v2.csa2_index_score",
+    "FLOPs = 2·pairs·(ih·di + ih)（每 (行,压缩位) ih 头 di 维 MQA MAC + ih "
+    "权重折算）；kv_read = B·n_eff·132B（decode 直读分页 K）；prefill 另计 "
+    "gather 工作区读/写 B·n_eff·132B（一次 gather 口径）；logits 写 = "
+    "pairs·logits_itemsize（decode Q=1 时 pairs=B·n_eff）",
+    "sparse_attn_indexer.py L825-900（prefill chunk：cp_gather + "
+    "fp8_fp4_mqa_logits）、L1076-1112（decode：fp8_fp4_paged_mqa_logits + "
+    "mqa_logits_mx_inputs 权重折入）；n_eff = end//r（有效前缀）",
+    "index_score 行（index source 层，短上下文旁路时跳过；E19 索引读随 "
+    "ctx 增长）")
+F_CSA2_INDEX_TOPK = _f(
+    "v2.csa2_index_topk",
+    "ops = 2·pairs + T·topk（选择惯例：每候选 2 扫描 op + 每 token topk 写；"
+    "文档化分析口径，非 kernel 指令数）；读 = pairs·logits_itemsize；"
+    "写 = T·topk·4B（共享 topk_indices_buffer）",
+    "indexer_topk.py L264-312（auto 链 cooperative(≤64 行)→persistent→"
+    "per_row）；sparse_attn_indexer.py L1135-1140（topk_indices_buffer 散写）；"
+    "decode_topk_cute.py L14-20（精确 top-k 语义，任意顺序）",
+    "index_topk 行（拆自旧 index_select 的选择项）")
+F_CSA2_INDEX_FILL = _f(
+    "v2.csa2_index_fill",
+    "ops = 0（纯 store：indices 0..n−1 + (−1) 填充）；写 = T·topk·4B",
+    "deepseek_v4/attention.py L77-92（fill_short_context_topk_indices："
+    "num_compressed=(pos+1)//r，offsets<num_compressed 取序号否则 −1）",
+    "index_fill 行（短上下文旁路，attention.py L1656-1680）")
+F_CSA2_CANDIDATE_SELECT = _f(
+    "v2.csa2_candidate_select",
+    "ops/行 = 7·nblocks + 2·nblocks + ctb（8 元块 NaN 传播 max 7 比较 + "
+    "选择 2·nblocks + 写 ctb）；读 = pairs·logits_itemsize；写 = "
+    "T·(nblocks·4 + 4 + ctb·4)（scores+lengths+候选 ids，-1 填充）",
+    "candidate_blocks.py L31-73（_block_scores_kernel：块最大值、最新块钉 "
+    "+inf、-inf 块不选）+ L168-215（select_candidate_blocks：topk/min(k,"
+    "nblocks)、_store_candidates -inf→-1）；消费端 cooperative 变体 "
+    "candidate_topk.py（值相等边界近似，语义相同）",
+    "candidate_select 行（candidate source 层 20；decode 与 prefill chunk 同语义）")
+F_CSA2_CANDIDATE_MASK = _f(
+    "v2.csa2_candidate_mask",
+    "ops/行 = 4·n_eff + ctb + nblocks（flags 建/查 + 逐列 block 索引≈2 + "
+    "掩码判定≈2）；读 = T·ctb·4B（候选 ids）；写 = pairs·logits_itemsize"
+    "（有效前缀口径；CUDA-graph 静态整宽 -inf 尾写未建模）",
+    "candidate_blocks.py L75-136（_candidate_flags_kernel + "
+    "_mask_candidates_kernel：候选外/因果外列写 -inf，width−1 边缘列保留）；"
+    "sparse_attn_indexer.py L895-911（prefill chunk）/L1141-1153（decode）",
+    "candidate_mask 行（>candidate_source 的 index source 层：24/28/32/36；"
+    "mask 后接自有 index_topk）")
+F_CSA2_SPARSE_INDEX_BUILD = _f(
+    "v2.csa2_sparse_index_build",
+    "ops = T·(topk+win)·3（整数核惯例）；读 = T·topk·4 + T·8；写 = "
+    "T·⌈(topk+win)/128⌉·128·4 + T·4（128 对齐合并索引 + lens；SWA-only "
+    "topk=0）",
+    "common/ops/cache_utils.py L819/L837-841（combine_topk_swa_indices："
+    "_SPARSE_PREFILL_TOPK_ALIGNMENT=128 对齐；L898-910 SWA-only TOP_K=0）、"
+    "specialized sparse_mla.py L159-250（SparseIndexTables：等键 "
+    "(kv源:索引源:r) 运行首层一次、后继复用；index source 覆写前 join）",
+    "sparse_index_build 行（decode 每 (kv源,索引源,r) 运行首层一次；"
+    "SWA-only 运行首 L0 topk=0）")
+
 # ---- Cost（T0 解析估算；Q2：无实测数字） ----
 F_ROOFLINE = _f("v2.roofline", "t = max(F/P_eff, Q/BW_eff) + ρ·min(...)；ρ=0.15 登记",
                 "原理 §5：乐观约束 + 显式经验尾部", "kernel 级 T0")

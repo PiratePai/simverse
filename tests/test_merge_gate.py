@@ -292,8 +292,13 @@ def test_g9_complete_config_leaves_registered_no_default_ignore():
                   for k, v in m.coverage.items() if "engram_" in k}
     assert set(engram_cov.values()) == {"mapped"}
     # 剩余显式缺口原样保留（不因 Engram 解除而整体放行）
-    assert {"quantization_config", "candidate_block_size",
-            "swiglu_limit"} <= gap_keys
+    # R20：candidate_block_size 已 mapped（CSA2 索引/candidate pin）；剩余
+    # 缺口不含 candidate 族键
+    assert {"quantization_config", "swiglu_limit"} <= gap_keys
+    assert not gap_keys & {"candidate_block_size", "candidate_source_layer_id",
+                           "candidate_topk_blocks", "index_topk",
+                           "index_n_heads", "index_head_dim",
+                           "kv_source_layer_ids", "index_source_layer_ids"}
     assert any("compress_ratios[40:43]" in g for g in m.gaps)
 
 
@@ -504,7 +509,11 @@ def test_g16_source_map_line_and_status_corrections():
     assert mtp["both_sides_covered"] is False and mtp["uncovered_domain"]
     assert "Unverified" in mtp["entry_id"] or "unverified" in mtp["entry_id"]
     v41 = sm["sm-v41-csa2-moe-unverified"]
-    assert "candidate_publish" in " ".join(v41["uncovered_domain"])
+    assert "MoE scoring" in " ".join(v41["uncovered_domain"])
+    # R20：索引管线已独立入册且两侧覆盖（含短上下文旁路两分支）
+    idx = sm["sm-v41-csa2-indexer"]
+    assert idx["both_sides_covered"] is True and idx["uncovered_domain"]
+    assert "ROW_SHARD_MIN_ROWS=12" in idx["thresholds"]
 
 
 # ---------------------------------------------------------------------------

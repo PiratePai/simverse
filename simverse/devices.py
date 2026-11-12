@@ -86,6 +86,17 @@ DEVICES = {
     ),
 }
 
+# V4.1 packed KV record family by registered device. Source: pinned
+# deepseek_v41/attention.py L198-199 `_use_v41_mxfp8_kv_record` uses
+# `is_device_capability_family(100)`; H100/H200 are Hopper SM90, L40 is Ada
+# SM89. No SM100 device is registered, so sm100/nvfp4 records cannot be a
+# deployable combination (ScenarioV2 validates target_device vs record).
+V41_DEVICE_FAMILY = {
+    "h100_sxm": "sm90",
+    "h200_sxm": "sm90",
+    "l40": "sm89",
+}
+
 LINKS = {
     # bw=单向；PCIe5 x16 理论单向 64 GB/s（128 GB/s 双向聚合，128b/130b 编码后有效略低）
     "pcie5": LinkSpec(id="pcie5", label="PCIe 5.0 x16", bw=64e9, fixed_ms=0.10,

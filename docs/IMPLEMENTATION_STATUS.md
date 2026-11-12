@@ -1,9 +1,9 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #5/#7 已合入 main；当前分支 `r07a-dflash-serving-audit`（PR #9），历史验收分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：`py -3.12 -m pytest tests -q`（2026-11-12 R07a **280 passed**，exit 0（Codex 宿主验收）；本 DSH 沙箱此前的 6 项 tmp_path PermissionError 仅为环境回执，见 §3.9，不是代码失败。历史：R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
-**pytest 收集数：280**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R07a；264→280 为 R07a 新增 test_dflash_serving_r07a.py 16 项（原 13 + 本轮复核 3）；236→252 为 R05 新增 16 项，252→262 为 R06 新增 10 项，262→264 为 R06 oracle 两项）。
+更新：2026-11-12（R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+代码身份：本仓 git（PR #5/#7 已合入 main；PR #9 已合入远端 main merge `7151e5d`；本 PR #10 分支 `codex/v41-csa2-index-r20` 正在集成；历史验收分支 `codex/pr7-acceptance-pin-hash`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：`py -3.12 -m pytest tests -q`（2026-11-12 集成：R07a 宿主验收 **280 passed**、R20 单分支宿主验收 **295 passed**；与 R07a 合并后 Codex 宿主全量 **311 passed，exit 0**。本 DSH 沙箱 6 项 `tmp_path` setup PermissionError 仅为环境回执，见 §3.9，不是代码失败。历史：R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197）。`node --check simverse/static/workbench.js` exit 0。
+**pytest 收集数：311**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R07a+R20 集成；264→280 为 R07a 新增 test_dflash_serving_r07a.py 16 项（原 13 + 复核 3）；280→311 为 R20 CSA2 索引 oracle 新增 31 项（R20 分支 264→295）；236→252 为 R05 新增 16 项，252→262 为 R06 新增 10 项，262→264 为 R06 oracle 两项）。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
@@ -16,6 +16,34 @@ fixture、manifest 与文件字节三者一致；同时修正 fixture `SourceIde
 `run-v2` 与 R05 mHC replay 运行成功；该修复不改生产计数。进一步计算审计
 发现 R06 初版未提供独立输出数值 oracle，几何证据等级由 numeric-checked
 降为 shape-checked；随后新增独立数值产物与对应证据（见下）。
+
+**2026-11-12 R20 CSA2 索引打分/top-k/candidate block**：csa2-pin.json 21 文件
+（blob SHA1 对 vllm-tree.json 逐项校验 + SHA256；补入 sparse_attn_indexer
+直接 import 的 v1 backend，移除未入 tree 的重复 candidate_blocks 副本）
+source-checked 入册
+（ev-vllm-v41-csa2，executed=False；sm-v41-csa2-indexer + 短上下文旁路条目
+重写）。修正/新建 count 行：index_select 拆为 index_score（全候选 paged MQA
+logits 2·pairs·(ih·di+ih) + fp32 logits 写）+ index_topk（2·pairs+T·topk 选择
+惯例）；candidate_publish → candidate_select（源层 L20：块最大值 NaN 传播/最新
+块 +inf/−1 填充）+ 新增 candidate_mask（消费层 24/28/32/36）；短上下文旁路
+（end//r≤512）index_fill 0 浮点纯 store（旧式误计 T·topk flops）；
+compress_norm → compress_pool（r2 门控池化 7d+9/group 精确式 + 环形 state
+cap8，r1 纯 norm exact）；compressed_rope+compressed_cache_write 合并为
+compressed_insert；index_k_* 合并为 index_k_store（132B/行）；SWA/压缩缓存
+改按打包记录 584|528 B/token（显式 v41_kv_record 配方，进场景身份；并与
+目标设备 family 强校验：H100/H200 只允许 sm90，L40 拒绝 sm90，当前无
+SM100 设备故 sm100/nvfp4 拒绝）；
+compressor/wk/weights_proj 为 quant_config=None bf16 固定权重，输入/输出
+激活字节亦按 pinned bf16/FP32 与消费行对齐；主 attention q_norm/kv_norm
+bf16 常驻权重入 count/memory（40 层 143,360 B）；sparse_index_build 行
+（decode 每 (kv源:索引源:r) 运行首层 combine 一次，128 对齐宽，等键后继
+复用）；topk/candidate 共享缓冲模型级单例下界入 transient。
+默认 TP8/B1/ctx32768 replay：op 7,161,190,222→7,175,856,742（Δ 归因
+attribution.json 逐 op 验证，审计面外行逐字段冻结）；steady +26,752,000B、
+transient +10,240B、known_peak +26,762,240B、M01 +0.0075ms。
+structure_complete 仍 False
+（MoE scoring/量化映射/注意力核本体/MTP 尾部缺口不变）。新增 31 项独立
+oracle（tests/test_v41_csa2.py）。[报告](validation/v41-csa2-indexer-20261112.md)。
 
 **2026-11-12 R06 独立数值续验**：新增纯张量参考路径，复用 pinned HF
 随机权重但不调用被验证模块的 forward；prefill 与带缓存 decode 各对比
@@ -98,8 +126,9 @@ tp=7/9/16 拒绝、逐行手算绝对值、开/关账本差=精确新增、count
 断言归因见报告 §8，剩余缺口不变仍在阻断）。默认 V4.1 replay 前后
 逐项归因：decode FLOPs 7,067,478,214→7,146,532,702、GPU 侧解析耗时下界
 113.34→116.15ms（host 查表/预取时延未知）、GPU steady +39,485,440B（仅 wkv+qk）、host 表
-25,344,443,520B、行 909→916；structure_complete 仍 False（CSA2/MoE/
-量化缺口不变）。报告：[docs/validation/v41-engram-20261111.md]
+25,344,443,520B、行 909→916；structure_complete 当时仍 False（CSA2/MoE/
+量化缺口；其中 CSA2 索引打分/top-k/candidate 后由 R20 2026-11-12 解除，
+MoE/量化等仍在阻断）。报告：[docs/validation/v41-engram-20261111.md]
 (validation/v41-engram-20261111.md)；证据 ev-vllm-v41-engram；G-C1
 单机算子解除（DP 交换/cpu_offload 运行时/amd 变体仍登记未覆盖）。
 
@@ -160,9 +189,10 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
     算子精确对账）；MTP 只有 config+目标首层模板 → **unverified**；
     forward 仍不完整、模型级 cpu_forward 仍 not-run，不能参与部署排名。
   - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
-    DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2/MoE、
-    candidate、swiglu、quantization_config 仍为缺口；mHC 仅
-    source-checked；CPU/GPU 均未执行。
+    DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2 索引打分/
+    top-k/candidate block 已由 R20（2026-11-12，ev-vllm-v41-csa2）source-checked
+    解除；MoE scoring、swiglu、quantization_config、稀疏 MLA 注意力核本体、
+    compress_ratios 尾部仍为缺口；mHC 仅 source-checked；CPU/GPU 均未执行。
   - DFlash：结构/轮协议/同卡共享 source-checked；服务端集成已双栈逐行核对
     （R07a 2026-11-12：colocated=source-checked/dt=unsupported）；served
     已部署实测未做；拒绝采样/KV 回退/hidden 提取 kernel 耗时仍 0 占位
@@ -195,8 +225,8 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   PR/push/merge_group，Windows + Node 20 + Python 3.12。2026-11-11 复核：
   main branch protection 要求经 PR 合入及 `pytest (Windows, Python 3.12)`
   必需检查（strict），审批数为 0，且 `enforce_admins=true`。
-- **未完成**：V4.1 CSA2/MoE scoring/量化映射源码与执行、Engram DP 分片
-  交换路径、Qwen3.6 MTP 原生 forward、
+- **未完成**：V4.1 MoE scoring/量化映射源码与执行、稀疏 MLA 注意力核本体、
+  Engram DP 分片交换路径、Qwen3.6 MTP 原生 forward、
   两款主模型 CPU/GPU 实测、DFlash served 实测与运行时池尺寸、真实可分配预算。
 
 ## 0.1 必读上下文
@@ -454,9 +484,11 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 
 1. **V4.1**：Engram 单副本路径已建模（R04，2026-11-11，pin+source-checked；
    剩余：DP 分片交换/EngramBatch MXFP8/cpu_offload 运行时行为/amd 变体，
-   G-C1）；CSA2/MoE
-   scoring/top-k/分组路由、candidate block、swiglu clamp、quantization_config
-   仍为显式缺口；mHC 仅 source-checked、tilelang kernel 未执行。G-C1。
+   G-C1）；CSA2 索引打分/top-k/candidate block 已由 R20（2026-11-12）
+   source-checked 解除（G-C12）；剩余 MoE scoring/top-k/分组路由、
+   swiglu clamp、quantization_config、稀疏 MLA 注意力核本体、
+   compress_ratios 尾部仍为显式缺口；mHC 仅 source-checked、tilelang
+   kernel 未执行。G-C1。
 2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
    丢弃 `mtp.` → method status=unverified，不进入部署排名。
 3. **DFlash**：服务端集成已双栈逐行核对（R07a 2026-11-12：vLLM @dc74b8cb +
@@ -507,7 +539,7 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   trace_v2.csv、report_v2.html（历史轮）；A 组轮：
   run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
   trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
-- 下一工作项：V4.1 CSA2/MoE scoring 与量化映射源 pin、Engram DP 分片交换
+- 下一工作项：V4.1 MoE scoring 与量化映射源 pin、Engram DP 分片交换
   路径（或显式永久登记单副本口径）；Qwen3.6 MTP 原生 forward；
   两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/运行时池尺寸；
   可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；G-C4 单请求超前 → M17；

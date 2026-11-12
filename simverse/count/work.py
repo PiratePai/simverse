@@ -248,113 +248,271 @@ def mla_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
 
 
 # ---------------------------------------------------------------------------
-# V4.1 CSA2 层（v0.1 对账闭式移植；Engram/hc 缺口由 ModelIR.gaps 携带）
+# V4.1 CSA2 层（R20，2026-11-12：索引打分/top-k/candidate block 与压缩器/
+# 索引 K 按 csa2-pin.json 21 文件 pin（vllm @f358f057）source-checked 重写；
+# 注意力核本体（flops 4d+5）仍为 v0.1 移植惯例，见 sm-v41-csa2-indexer）
 # ---------------------------------------------------------------------------
 
 
 def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
-                   h: int, kvs: dict, quant: dict, prefill: bool, tp: int = 1
+                   h: int, kvs: dict, quant: dict, prefill: bool, tp: int = 1,
+                   v41_kv_record: str = "fp8_ds_mla_sm90",
+                   index_run_first: bool = False,
                    ) -> List[OpRow]:
+    """V4.1 CSA2 层账本（per-rank）。
+
+    证据（csa2-pin.json 21 文件，vllm @f358f057，blob sha1 对
+    vllm-tree.json 逐项校验；source-checked 2026-11-12 R20）：
+      * 层型：compress_ratios 0/1/2（sparse_mla.py L34-53）；kv source
+        [2,8,14,20] 持有 compressor+压缩缓存+indexer K，index source
+        [2,8,14,20,24,28,32,36] 持有打分器，非持有层复用下方最近源
+        （attention.py L393-422/L502-553）；
+      * 固定 bf16 权重（quant_config=None）：compressor fused_wkv_wgate、
+        indexer weights_proj、indexer wk（attention.py L1484-1490/L1510-1516、
+        compressor.py L321-332）——不随场景 dense_w 位宽缩放；
+      * 打包记录：SWA/压缩 584|528 B/token、索引 K 132 B/行（显式
+        v41_kv_record 配方；attention.py L583-589/L181-189）；
+      * 短上下文旁路：batch max_seq_len//r ≤ topk 且非 graph 捕获 →
+        跳过 wq_b/rope/打分/top-k/候选，只写全选索引（attention.py
+        L1656-1680；fill_short_context_topk_indices 纯 store，0 浮点）；
+      * candidate 两级：源层（20）发布 top-2048 个 8 压缩位块（块最大值
+        NaN 传播、最新块钉 +inf）；消费层（24/28/32/36）打分后先 mask 到
+        候选块再自有 top-512（sparse_attn_indexer.py L895-911/L1141-1153；
+        candidate_blocks.py L168-215/L151-166）。
+    """
     m = layer.mla
     a = layer.csa2
-    b_w, b_a, b_kv = quant["dense_w"] / 8, quant["act"] / 8, quant["kv"] / 8
+    b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
+    from ..scenario import V41_INDEX_K_BYTES, V41_KV_RECORDS
+    rec = V41_KV_RECORDS[v41_kv_record]
+    swa_rec, comp_rec = rec["swa_bytes"], rec["compressed_bytes"]
     heads_full = kvs["heads"]
     heads = heads_full // tp
     qrank, orank, groups = kvs["q_lora_rank"], kvs["o_lora_rank"], kvs["o_groups"]
     d, rd = kvs["head_dim"], kvs["qk_rope_dim"]
     di, ih, topk = kvs["index_head_dim"], kvs["index_heads"], kvs["index_topk"]
     swa, ctb = kvs["sliding_window"], kvs["candidate_topk_blocks"]
+    cb = int(kvs.get("candidate_block_size", 0) or 0)
+    cand_src = int(kvs.get("candidate_source_layer_id", -1))
     ng = groups // tp
     r = a.ratio
     T = B * Q
     start, length = (0, S + Q) if prefill else (S, Q)
     end = start + length
     rows: List[OpRow] = []
-    def gemm(op, ic, oc, reps: int = 1):
-        """reps>1：分组投影（V4.1 o_a 每 rank ng 组，每组独立权重/激活）。"""
+
+    def gemm(op, ic, oc, reps: int = 1, b: float = None):
+        """reps>1：分组投影（V4.1 o_a 每 rank ng 组，每组独立权重/激活）。
+        b：显式权重位宽（pinned bf16 模块覆盖场景 dense_w）。"""
+        bw = b_w if b is None else b
         return OpRow(
             stage, li, op, flops=2 * T * ic * oc * reps,
-            weight_read=int(ic * oc * reps * b_w),
+            weight_read=int(ic * oc * reps * bw),
             act_read=int(T * ic * reps * b_a), act_write=int(T * oc * reps * b_a),
-            weight_capacity=int(ic * oc * reps * b_w), formula=FR.F_GEMM,
+            weight_capacity=int(ic * oc * reps * bw), formula=FR.F_GEMM,
             shape=f"{reps}×[{T},{ic}]@[{ic},{oc}]" if reps > 1
             else f"[{T},{ic}]@[{ic},{oc}]")
+
     rows.append(gemm("q_a_proj", h, qrank))
     rows.append(gemm("kv_proj", h, d))
+    # q_norm(q_lora_rank)/kv_norm(head_dim) 是普通 RMSNorm 参数，随模型
+    # dtype 为 bf16（attention.py L440-450）；不随场景 act 位宽缩放。
+    # weight_capacity 与 target_weight_allocations 的常驻项同口径。
     for name, width in (("q_norm", qrank), ("k_norm", d)):
-        ops, w, ar, aw = _norm_row(T, width, b_a)
+        ops, _w, ar, aw = _norm_row(T, width, b_a)
+        w = int(width * 2)
         rows.append(OpRow(stage, li, name, flops=ops, weight_read=w,
-                          act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
-                          shape=f"width={width}"))
+                          weight_capacity=w, act_read=ar, act_write=aw,
+                          formula=FR.F_RMSNORM, shape=f"width={width}（bf16 权重）"))
     rows.append(gemm("q_b_proj", qrank, heads * d))
     for name, hd in (("q_rope", heads), ("k_rope", 1)):
         ops, _w, ar, aw = _rope_row(T, hd, d, rd, b_a)
         rows.append(OpRow(stage, li, name, flops=ops, act_read=ar, act_write=aw,
                           formula=FR.F_ROPE, shape=f"rotary={rd} heads={hd}"))
-    rows.append(OpRow(stage, li, "swa_cache_write", act_read=int(T * d * b_a),
-                      kv_write=int(T * d * b_kv), formula=FR.F_KV_RW,
-                      shape=f"每层本地 SWA 写 {T}×{d}"))
+    # SWA 写：fused 插入核读 bf16 kv 行、写打包记录（584/528 B/token；
+    # R20 修正：旧式 d×b_kv 漏 scale/pad 尾部字节）
+    rows.append(OpRow(stage, li, "swa_cache_write", act_read=int(T * d * 2),
+                      kv_write=int(T * swa_rec), formula=FR.F_CSA2_RECORD,
+                      shape=f"每层本地 SWA 写 {T}×{swa_rec}B"
+                            f"（fp8_ds_mla 记录，{v41_kv_record}）"))
     new_rows = B * (end // r - start // r) if r else 0
     if a.produces_kv:
         mlt = 2 if r == 2 else 1
-        rows.append(gemm("compress_proj", h, d * mlt))
-        # compress_norm：pooling/state 估计（v0.1 同口径，标注近似）
-        ops, w, ar, aw = _norm_row(new_rows, d, b_a)
-        kv_state = B * d * 2 * 4 * length
-        if r == 2:
-            ops += new_rows * d * 12
-            ar += int(T * 2 * d * b_a)
-        rows.append(OpRow(stage, li, "compress_norm", flops=ops, weight_read=w,
-                          act_read=int(ar), act_write=aw,
-                          kv_read=kv_state if r == 2 else 0,
-                          kv_write=kv_state if r == 2 else 0,
-                          formula=FR.F_KV_RW, statistic="approximated",
-                          shape="压缩 pooling 估计（非实测）；ratio2 含 fp32 state"))
-        ops, _w, ar, aw = _rope_row(new_rows, 1, d, rd, b_a)
-        rows.append(OpRow(stage, li, "compressed_rope", flops=ops, act_read=ar,
-                          act_write=aw, formula=FR.F_ROPE, shape=f"new_rows={new_rows}"))
-        rows.append(OpRow(stage, li, "compressed_cache_write",
-                          act_read=int(new_rows * d * b_a),
-                          kv_write=int(new_rows * d * b_kv), formula=FR.F_KV_RW,
-                          shape=f"压缩 KV 写 {new_rows}×{d}"))
-        rows.append(gemm("index_k_proj", d, di))
-        ops, w, ar, aw = _norm_row(new_rows, di, b_a)
-        rows.append(OpRow(stage, li, "index_k_norm", flops=ops, weight_read=w,
-                          act_read=ar, act_write=aw, formula=FR.F_RMSNORM,
-                          shape=f"width={di}"))
-        ops, _w, ar, aw = _rope_row(new_rows, 1, di, rd, b_a)
-        rows.append(OpRow(stage, li, "index_k_rope", flops=ops, act_read=ar,
-                          act_write=aw, formula=FR.F_ROPE, shape=f"width={di}"))
-        rows.append(OpRow(stage, li, "index_cache_write",
-                          act_read=int(new_rows * di * b_a),
-                          kv_write=int(new_rows * di * b_kv), formula=FR.F_KV_RW,
-                          shape=f"索引 K 写 {new_rows}×{di}"))
-    if a.produces_index:
-        short = end // r <= topk
-        rows.append(gemm("index_weights_proj", h, ih))
-        if not short:
-            rows.append(gemm("index_q_proj", qrank, ih * di))
-            ops, _w, ar, aw = _rope_row(T, ih, di, rd, b_a)
-            rows.append(OpRow(stage, li, "index_q_rope", flops=ops, act_read=ar,
-                              act_write=aw, formula=FR.F_ROPE,
-                              shape=f"{ih}×{di}"))
+        # compressor fused_wkv_wgate：replicated bf16 权重、FP32 kv_score 输出
+        #（compressor.py L321-332 quant_config=None + disable_tp；
+        # aux_projections.py 文档"FP32 kv_score"；低批 ll_bf16 变体同口径）
+        cg = gemm("compress_proj", h, d * mlt, b=2.0)
+        # quant_config=None：输入 hidden 为 bf16、输出 kv_score 为 FP32
+        #（aux_projections.py L40-74；均不随场景 act 位宽缩放）
+        cg.act_read = int(T * h * 2)
+        cg.act_write = int(T * d * mlt * 4)
+        cg.shape = (f"[{T},{h}]@[{h},{d * mlt}]（replicated bf16 权重/输入，"
+                    "FP32 kv_score 输出 4B/elem）")
+        rows.append(cg)
+        if r == 1:
+            pool_ops = new_rows * (4 * d + 2)
+            pool_ar = int(T * d * 4)
+            pool_aw = int(new_rows * d * 2)
+            st_rd = st_wr = 0
+            pool_stat = "exact"
+            pool_shape = ("ratio1 无门控无池化：逐 token RMSNorm"
+                          "（fused_save_compress_norm ratio1 程序 L238-243）")
         else:
-            rows.append(OpRow(stage, li, "index_q_proj",
-                              shape="eager 短上下文旁路"))
+            # 每 closed group：softmax(2)=8 + 加权和 2d 乘 + (d−1) 加 +
+            # RMSNorm 4d+2 → 7d+9（fused_compress_quant_cache.py L186-243）；
+            # 环形 state：写 min(Q,cap) 行 ×4096B fp32/请求、读 ≤1 行/请求
+            #（L168-215 请求程序；上界口径）
+            pool_ops = new_rows * (7 * d + 9)
+            pool_ar = int(T * 2 * d * 4)
+            pool_aw = int(new_rows * d * 2)
+            st_wr = int(B * min(Q, 8) * 2 * d * 4)
+            st_rd = int(B * 2 * d * 4)
+            pool_stat = "approximated"
+            pool_shape = ("ratio2 softmax 门控池化 7d+9/group + RMSNorm；环形"
+                          " state 写 min(Q,8)×4096B、读 ≤1 行/请求（上界）")
+        rows.append(OpRow(stage, li, "compress_pool", flops=pool_ops,
+                          weight_read=int(d * 2), weight_capacity=int(d * 2),
+                          act_read=pool_ar, act_write=pool_aw,
+                          state_read=st_rd, state_write=st_wr,
+                          formula=FR.F_CSA2_COMPRESS_POOL,
+                          statistic=pool_stat, shape=pool_shape))
+        # rope_quant_insert：一条核做 RoPE+量化+分页写（R20 合并旧
+        # compressed_rope + compressed_cache_write 两行；L295-374）
+        q_ops = {"fp8_ds_mla_sm90": 3 * rd + (d // 64) * 65 + 7,
+                 "fp8_ds_mla_sm100": 3 * rd + (d // 32) * 34 + 16,
+                 "nvfp4_ds_mla_sm100": 3 * rd + (d // 16) * 18 + 32,
+                 }[v41_kv_record]
+        rows.append(OpRow(stage, li, "compressed_insert",
+                          flops=new_rows * q_ops,
+                          act_read=int(new_rows * d * 2),
+                          kv_write=int(new_rows * comp_rec),
+                          formula=FR.F_CSA2_COMPRESSED_INSERT,
+                          statistic="exact",
+                          shape=f"RoPE(3·{rd}) + 记录量化 + 分页写 "
+                                f"{new_rows}×{comp_rec}B（{v41_kv_record}）"))
+        # wk：latent(d)→di replicated bf16（attention.py L1508-1517
+        # quant_config=None；latent 输入与 k_pre 输出均 bf16）
+        kp = gemm("index_k_proj", d, di, b=2.0)
+        kp.act_read = int(T * d * 2)
+        kp.act_write = int(T * di * 2)
+        rows.append(kp)
+        # k_norm→RoPE→FP8 量化→分页写：一条核（indexer_k_store.py L126-266）
+        rows.append(OpRow(stage, li, "index_k_store",
+                          flops=new_rows * (5 * di + 3 * rd + 4),
+                          weight_read=int(di * 2), weight_capacity=int(di * 2),
+                          act_read=int(new_rows * di * 2),
+                          kv_write=int(new_rows * V41_INDEX_K_BYTES),
+                          formula=FR.F_CSA2_INDEX_K_STORE, statistic="exact",
+                          shape=f"k_norm(4·{di}+2) + RoPE(3·{rd}) + FP8 量化"
+                                f"(≈{di}+2) → {V41_INDEX_K_BYTES}B/行"))
+    if a.produces_index:
+        # 短上下文旁路：batch max_seq_len//r ≤ topk（attention.py L1656-1680；
+        # 均匀批 = end//r）；weights_proj 仍执行，wq_b/rope/打分/top-k/候选
+        # 全部跳过（graph 捕获中也不走，见 source_map uncovered）
+        short = end // r <= topk
+        # weights_proj：quant_config=None；hidden 输入与 weights 输出均 bf16，
+        # 不随场景 act/dense_w 缩放（attention.py L1484-1490）
+        wp = gemm("index_weights_proj", h, ih, b=2.0)
+        wp.act_read = int(T * h * 2)
+        wp.act_write = int(T * ih * 2)
+        rows.append(wp)
+        n_eff = end // r                                  # 每行有效压缩位数
         pairs = 0 if short else B * (_sum_floor(end, r) - _sum_floor(start, r))
-        read_rows = 0 if short else (end // r if not prefill else pairs // max(B, 1))
+        nblocks = (0 if short else -(-n_eff // cb)) if cb else 0
+        logit_b = rec["logits_itemsize"]
+        if short:
+            rows.append(OpRow(stage, li, "index_q_proj",
+                              shape="eager 短上下文旁路（attention.py L1656-1680："
+                                    "wq_b/rope/打分/top-k/候选跳过）"))
+            rows.append(OpRow(stage, li, "index_fill",
+                              act_write=int(T * topk * 4),
+                              formula=FR.F_CSA2_INDEX_FILL, statistic="exact",
+                              shape="全选旁路纯 store 0..n−1 + (−1) 填充，"
+                                    "0 浮点（fill_short_context_topk_indices "
+                                    "L77-92；K 缓存仍由 produces_kv 行构建）"))
+        else:
+            # wq_b 走 quant_config（输入按场景 act 计），输出 q 为 bf16，
+            # 与 index_q_rope 的 2B q 读取对齐（attention.py L1477-1482/
+            # L1608-1637）
+            qp = gemm("index_q_proj", qrank, ih * di)
+            qp.act_write = int(T * ih * di * 2)
+            rows.append(qp)
+            ops = 3 * T * ih * rd + 2 * T * ih
+            rows.append(OpRow(stage, li, "index_q_rope", flops=ops,
+                              act_read=int(T * ih * di * 2 + T * ih * 2),
+                              act_write=int(T * ih * di * 1 + T * ih * 4),
+                              formula=FR.F_CSA2_INDEX_Q_ROPE, statistic="exact",
+                              shape=f"{ih}×{di} RoPE(3·{rd}/头) + FP8 量化 + "
+                                    "逐头权重缩放 2 op（fused_indexer_q_rope_"
+                                    "quant；weights fp32 输出）"))
+            # 打分：paged MQA logits（DeepGEMM），每 (行,压缩位) ih·di MAC +
+            # ih 权重折算；decode 直读分页 K；prefill 先 gather 到稠密工作区
+            #（gather 工作区按一次读/写计；logits 按 pairs 条有效对计，decode
+            # Q=1 时 pairs=B·n_eff）
+            rows.append(OpRow(
+                stage, li, "index_score",
+                flops=2 * pairs * ih * di + 2 * pairs * ih,
+                kv_read=int(B * n_eff * V41_INDEX_K_BYTES),
+                act_read=(int(B * n_eff * V41_INDEX_K_BYTES)
+                          if prefill else 0),
+                act_write=(int(B * n_eff * V41_INDEX_K_BYTES
+                               + pairs * logit_b) if prefill
+                           else int(pairs * logit_b)),
+                formula=FR.F_CSA2_INDEX_SCORE, statistic="exact",
+                shape=f"全候选打分 pairs={pairs}（E19：索引读随 ctx 增长）；"
+                      f"logits 写 {pairs}×{logit_b}B（{v41_kv_record}）；"
+                      "prefill gather 工作区为上界口径"))
+            if a.produces_candidates:
+                # 候选源：块得分（NaN 传播 max，最新块钉 +inf）→ top-ctb →
+                # 候选缓冲（candidate_blocks.py L168-215 + L31-73）
+                rows.append(OpRow(
+                    stage, li, "candidate_select",
+                    flops=T * (7 * nblocks + 2 * nblocks + ctb),
+                    act_read=int(pairs * logit_b),
+                    act_write=int(T * (nblocks * 4 + 4 + ctb * 4)),
+                    formula=FR.F_CSA2_CANDIDATE_SELECT, statistic="exact",
+                    shape=f"块最大值 7·nblocks + 选择 2·nblocks + 写 {ctb}；"
+                          f"nblocks=⌈{n_eff}/{cb}⌉（-1 填充；最新块 +inf 钉扎）"))
+            if 0 <= cand_src < li:
+                # 候选消费层：打分后 mask 到候选块再自有 top-k
+                #（sparse_attn_indexer.py L895-911/L1141-1153）
+                rows.append(OpRow(
+                    stage, li, "candidate_mask",
+                    flops=T * (4 * n_eff + ctb + nblocks),
+                    act_read=int(T * ctb * 4),
+                    act_write=int(pairs * logit_b),
+                    formula=FR.F_CSA2_CANDIDATE_MASK, statistic="exact",
+                    shape=f"flags(⌈{n_eff}/{cb}⌉+1) + 逐列 block 索引/查掩码"
+                          f"≈4·n + 候选读 {ctb}（有效前缀口径；CUDA-graph 整宽"
+                          " -inf 尾写未建模见缺口）"))
+            # top-k：cooperative(≤64 行)/persistent/per_row（indexer_topk.py
+            # L264-282 auto 链）；选择 op 惯例 2·n 扫描 + k 写/行
+            rows.append(OpRow(
+                stage, li, "index_topk",
+                flops=2 * pairs + T * topk,
+                act_read=int(pairs * logit_b),
+                act_write=int(T * topk * 4),
+                formula=FR.F_CSA2_INDEX_TOPK, statistic="exact",
+                shape=f"top-{topk} 选择惯例 2·n+k/行（n={n_eff}）；写共享 "
+                      "topk_indices_buffer（R20 起与旧 index_select 的 "
+                      "T·topk 口径区分扫描项）"))
+    # decode：本层若是其 (kv源:索引源:r) 运行的首层，构建稀疏索引表
+    #（combine_topk_swa_indices；SparseIndexTables 等键复用，L159-250；
+    # 运行首 = 该 (kv源,索引源,r) 组合的最小层号）
+    if index_run_first and not prefill:
+        win = min(end, swa)
+        # combine_topk_swa_indices 的固定宽度按 128 对齐（cache_utils.py
+        # L819/L837-841：_SPARSE_PREFILL_TOPK_ALIGNMENT=128；SWA-only 的
+        # TOP_K=0 由 warmup 注释 L898-910 确认）。旧稿按 256 对齐会多计。
+        w_c = -(-((topk if r else 0) + win) // 128) * 128
         rows.append(OpRow(
-            stage, li, "index_select",
-            flops=2 * pairs * ih * di + T * topk,
-            kv_read=int(B * read_rows * di * b_kv),
-            act_write=int(T * topk * 4),
-            formula=FR.F_GEMM, statistic="exact",
-            shape=f"全候选打分 pairs={pairs}；top-{topk}（E19：索引读随 ctx 增长）"))
-        if a.produces_candidates:
-            rows.append(OpRow(stage, li, "candidate_publish",
-                              act_write=0 if short else int(T * ctb * 4),
-                              formula=FR.F_KV_RW,
-                              shape=f"候选 block IDs ≤{ctb}"))
+            stage, li, "sparse_index_build",
+            flops=T * ((topk + win) if r else win) * 3,
+            act_read=int(T * (topk if r else 0) * 4 + T * 8),
+            act_write=int(T * w_c * 4 + T * 4),
+            formula=FR.F_CSA2_SPARSE_INDEX_BUILD, statistic="approximated",
+            shape=f"combine_topk_swa_indices 整数核（topk+窗 → 128 对齐宽 "
+                  f"{w_c}）；每 (kv源:索引源:r) 运行首层一次，等键后继复用"))
     local_pairs = causal_pairs(end, 1, swa) - causal_pairs(start, 1, swa)
     compressed_pairs = (causal_pairs(end, r, topk) - causal_pairs(start, r, topk)) if r else 0
     read_swa = min(end, swa) if not prefill else local_pairs
@@ -363,9 +521,11 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
         stage, li, "sparse_attention",
         flops=B * (local_pairs + compressed_pairs) * heads * (4 * d + 5),
         act_read=int(T * heads * d * b_a), act_write=int(T * heads * d * b_a),
-        kv_read=int(B * (read_swa + read_comp) * d * b_kv),
-        formula=FR.F_ATTN_CORE,
-        shape=f"SWA {read_swa} + 压缩 {read_comp} 行（每消费者各读一次）"))
+        kv_read=int(B * (read_swa * swa_rec + read_comp * comp_rec)),
+        formula=FR.F_CSA2_RECORD,
+        shape=f"SWA {read_swa}×{swa_rec}B + 压缩 {read_comp}×{comp_rec}B"
+              f"（每消费者各读一次；flops 4d+5 仍为 v0.1 移植惯例）"))
+
     ops, _w, ar, aw = _rope_row(T, heads, d, rd, b_a)
     rows.append(OpRow(stage, li, "o_rope", flops=ops, act_read=ar, act_write=aw,
                       formula=FR.F_ROPE, shape=f"rotary={rd}"))
@@ -642,7 +802,8 @@ def head_rows(stage: str, model: ModelIR, T: int, quant: dict, tp: int) -> List[
 def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                      quant: dict, tp: int = 1, prefill: bool = False,
                      role: str = "target", ep: int = 1, rank: int = 0,
-                     plan=None) -> List[OpRow]:
+                     plan=None, v41_kv_record: str = "fp8_ds_mla_sm90"
+                     ) -> List[OpRow]:
     """整模型一个阶段的逻辑账本（**per-rank 口径**，默认 rank=0）。
 
     decode/verify：ctx=查询前缓存长度 S；queries=新查询数 Q。
@@ -650,6 +811,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     ep/rank：EP 开时 MoE 行按该 rank 的本地专家数（余数 rank +1）；
     plan：可传入 lowering/parallel.ParallelPlan 校验一致性（缺省按
     (tp, ep) 直接求值，合法性与 plan 相同规则）。
+    v41_kv_record：R20 显式 KV 记录配方（scenario.V41_KV_RECORDS；
+    仅 v41_csa2 消费，pipeline 从场景 deployment 透传）。
     """
     h = model.hidden
     S, Q = (0, ctx) if prefill else (ctx, queries)
@@ -669,8 +832,22 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         base, rem = divmod(layer.moe.experts, ep)
         return base + (1 if rank < rem else 0)
 
+    # R20：SparseIndexTables 的等键运行首层（decode 稀疏索引表构建一次、
+    # 等键后继复用；specialized sparse_mla.py L159-250：key = r==0 →
+    # "swa_only"，否则 (kv_source, index_source, r)；运行 = 连续同键层段）
+    def _index_key(layer):
+        a = layer.csa2
+        if a is None or not a.ratio:
+            return "swa_only"
+        return (a.kv_source, a.index_source, a.ratio)
+
+    prev_key = object()   # 哨兵：首层必为运行首
     for layer in model.layers:
         li = layer.index
+        key, run_first = _index_key(layer), False
+        if key != prev_key:
+            run_first = True
+        prev_key = key
         if layer.kind in (FULL, SLIDING) and layer.attn:
             rows += gqa_layer_rows(stage, li, layer, B, S, Q, h, quant, tp)
         elif layer.kind == LINEAR and layer.linear:
@@ -679,7 +856,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
             rows += mla_layer_rows(stage, li, layer, B, S, Q, h, quant, prefill, tp)
         elif layer.kind == MLA_CSA2 and layer.mla and layer.csa2:
             rows += v41_layer_rows(stage, li, layer, B, S, Q, h, kvs, quant,
-                                   prefill, tp)
+                                   prefill, tp, v41_kv_record=v41_kv_record,
+                                   index_run_first=run_first)
         T = B * Q
         rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
                                 local_experts=_local_experts(layer))

@@ -214,10 +214,16 @@ def test_v41_oa_proj_memory_absolute_oracle_tp1_2_4_8():
             mlt = 2 if a.ratio == 2 else 1
             terms = (h * qrank + h * d + qrank * heads_tp * d
                      + (heads * d // groups) * orank * ng
-                     + ng * orank * h)
+                     + ng * orank * h
+                     # 主 attention q_norm(qrank)/kv_norm(d) 均为 bf16 常驻
+                     + qrank + d)
             if a.produces_kv:
-                terms += h * d * mlt + d * di
+                # R20：compressor/wk/norm 为 quant_config=None 的 bf16 常驻
+                #（Q16 下与量化档同 2B，数值不变但来源固定）；norm 参数
+                #（compressor norm 512 + indexer k_norm 128）入册
+                terms += h * d * mlt + d * di + (d + di)
             if a.produces_index:
+                # R20：weights_proj 亦 bf16（quant_config=None）
                 terms += h * ih + qrank * ih * di
             expect += terms * 2          # Q16 dense
         got = sum(a.bytes for a in target_weight_allocations(m, Q16, tp)
@@ -247,7 +253,11 @@ def test_v41_attention_weight_conservation_count_vs_memory():
                       if r.layer == li and r.op in (
                           "q_a_proj", "kv_proj", "q_b_proj", "o_a_proj",
                           "o_b_proj", "compress_proj", "index_k_proj",
-                          "index_weights_proj", "index_q_proj"))
+                          "index_weights_proj", "index_q_proj",
+                          # R20：主 attention q_norm/kv_norm 与 compressor/
+                          # indexer norm 参数均由这些行持有（bf16）
+                          "q_norm", "k_norm",
+                          "compress_pool", "index_k_store"))
             assert cap == allocs[str(li)], (tp, li)
 
 
@@ -438,10 +448,21 @@ def test_replay_preserves_engram_and_non_hc_rows():
     scenario = ScenarioV2.from_json(json.loads((folder / "scenario.json").read_text(encoding="utf-8")))
     current = [r.to_json() for r in build_model_work(
         _model(), "target_decode", 1, 32768, 1, scenario.quant, tp=8)]
-    # 排除 stage 名差异；逐字段冻结 R04 行与所有非 hc 行（含 final_norm/head）。
+    # 排除 stage 名差异；冻结 R04 行与非 hc/非 R20 审计行（含 final_norm/
+    # head）。R20（2026-11-12）重写的 CSA2 索引/压缩行由
+    # tests/test_v41_csa2.py 的 replay 归因单独冻结（docs/evidence/csa2）。
+    AUDITED = {
+        "index_weights_proj", "index_q_proj", "index_q_rope", "index_select",
+        "index_score", "index_topk", "index_fill", "sparse_index_build",
+        "candidate_publish", "candidate_select", "candidate_mask",
+        "compress_proj", "compress_norm", "compress_pool", "compressed_rope",
+        "compressed_cache_write", "compressed_insert", "index_k_proj",
+        "index_k_norm", "index_k_rope", "index_cache_write", "index_k_store",
+        "swa_cache_write", "sparse_attention", "q_norm", "k_norm"}
     def non_hc(rows):
         return [{k: v for k, v in r.items() if k != "stage"}
-                for r in rows if not r["op"].startswith("hc_")]
+                for r in rows
+                if not r["op"].startswith("hc_") and r["op"] not in AUDITED]
     assert non_hc(current) == non_hc(before["work"]["target_decode"]["rows"])
     record = build_registry()["ev-vllm-v41-mhc"]
     assert record.kind == "source-checked" and record.executed is False
