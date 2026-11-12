@@ -218,7 +218,7 @@ _PINNED_ASSETS = [
       "不是 Qwen3.6-35BA3B+DFlash 场景的真实性证据；无端到端实测对照；"
       "本会话未做新的硬件测量"],
      True),
-    ("ev-qwen36-cpu-fixture-r06", "numeric-checked",
+    ("ev-qwen36-cpu-fixture-r06", "shape-checked",
      "Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照（R06）：pin 官方 forward 随机权重"
      "执行（GDN prefill/decode + FullAttn + 256→4E MoE 缩比），逐 GEMM/conv/router "
      "计数与本仓 build_model_work(tp=1) 精确对账；关键张量形状/递推状态几何/"

@@ -13,7 +13,9 @@ R06 fixture 的 pinned SHA256 记录为 CRLF 字节，仓内官方 pin manifest 
 `.gitattributes` 固定两份 pin 源码为 LF，并在 hermetic 测试中核对
 fixture、manifest 与文件字节三者一致；同时修正 fixture `SourceIdentity`
 的 `config_sha256` 为 fixture config 内容哈希。修后全量 262 passed，
-`run-v2` 与 R05 mHC replay 运行成功；该修复不改生产计数或证据等级。
+`run-v2` 与 R05 mHC replay 运行成功；该修复不改生产计数。进一步计算审计
+发现 R06 未提供独立输出数值 oracle，证据等级由 numeric-checked 降为
+shape-checked，待数值逐元素对照后再升级。
 
 **2026-11-12 R05 mHC/Sinkhorn**：14 文件完整 blob SHA1 对 pinned tree、SHA256
 清单入册，新增 sm-v41-mhc-kernels/ev-vllm-v41-mhc（source-checked，executed=False）。
@@ -106,7 +108,7 @@ prefill T=5 + decode T=1，落盘 `tests/fixtures/qwen36_r06_cpu_fixture.json`
 FLOPs（10 层×1024）、verify +163,840、draft 不变、M01 +0.00002ms（报告
 §5）。披露不修：gdn_recurrence 4 ops/elem（官方参考≈7）；HF DynamicCache
 conv state 宽 = kernel 列（本仓按 vLLM kernel−1 计容量，差 1 列）。
-证据 `ev-qwen36-cpu-fixture-r06`（numeric-checked）入 registry 并挂
+证据 `ev-qwen36-cpu-fixture-r06`（shape-checked）入 registry 并挂
 qwen36 evidence_refs；**模型级 cpu_forward 仍 not-run**，部署排名门禁
 不变。报告：[docs/validation/qwen36-gdn-moe-cpu-fixture-r06.md]
 (validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
@@ -145,7 +147,7 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   分开。完整 config（含嵌套叶键）逐项登记，未知键不得默认 ignored。
   - Qwen3.6：config 覆盖完整；GDN/full-attn gate/MoE router+shared gate/TP-EP
     分片 source-checked；R06（2026-11-12）fixture 级小尺寸 CPU forward
-    数值对照已执行（ev-qwen36-cpu-fixture-r06，GDN+MoE+full-attn 载体逐
+    形状与算量对照已执行（ev-qwen36-cpu-fixture-r06，GDN+MoE+full-attn 载体逐
     算子精确对账）；MTP 只有 config+目标首层模板 → **unverified**；
     forward 仍不完整、模型级 cpu_forward 仍 not-run，不能参与部署排名。
   - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
@@ -418,7 +420,7 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 | 验证 | 状态 | 证据 |
 |---|---|---|
 | V01 身份与协议 | 通过 | test_negative_v02（digest 全长/大整数/NaN/null+reason）|
-| V02 结构与 forward | 部分 | 层序/覆盖/源码 pin+分支映射（source_map）；Qwen 固定源码两层随机权重 CPU shape probe 已做，R06 又做 GDN+MoE fixture 级数值对照（ev-qwen36-cpu-fixture-r06，逐算子精确对账），真实 checkpoint/完整 forward 仍缺 |
+| V02 结构与 forward | 部分 | 层序/覆盖/源码 pin+分支映射（source_map）；Qwen 固定源码两层随机权重 CPU shape probe 已做，R06 又做 GDN+MoE fixture 级形状与算量对照（ev-qwen36-cpu-fixture-r06，逐算子精确对账），独立输出数值 oracle/真实 checkpoint/完整 forward 仍缺 |
 | V03 独立数学 oracle | 通过 | golden/oracles_v02 + test_model_ir/test_negative |
 | V04 lowering 与守恒 | 大部分 | per-rank 统一配方（A组 R01）+ 跨 rank 守恒/复制对象不求和断言（test_parallel_sharding）；EP all2all/按层通信配方 |
 | V05 方法、协议与状态 | 部分 | 接受律/端点/未知传播/DFlash 计划绑定；事件级 transition trace 未做（M3）|
@@ -444,7 +446,7 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 4. **设备可分配预算/价格**：无来源 → feasible=unknown、成本 null+reason。
    H200 两闭环绑定已归档的 30B-tiny/235B，不能跨模型使用。G-D7/G-D9。
 5. **CPU/GPU 执行**：Qwen 固定 HF 源码两层随机权重 CPU shape probe 已执行；
-   R06（2026-11-12）追加 GDN+MoE fixture 级数值对照（h=32/2 层/4E 随机权重，
+   R06（2026-11-12）追加 GDN+MoE fixture 级形状与算量对照（h=32/2 层/4E 随机权重，
    逐 GEMM/conv/router 与本仓 tp=1 账本精确相等，ev-qwen36-cpu-fixture-r06）；
    两款真实主模型仍无完整 forward 或 GPU/部署实测，模型级 cpu_forward 保持
    not-run，不冒充模型级 shape/numeric-checked。

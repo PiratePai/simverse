@@ -1,7 +1,7 @@
 # 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06 增补）
 
 2026-11-12 R06（Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照）：fixture 级
-数值对照已执行（探针独立跑 pin 官方 forward，h=32/2 层/4E 随机权重，
+形状与算量对照已执行（探针独立跑 pin 官方 forward，h=32/2 层/4E 随机权重，
 prefill+decode 逐 GEMM/conv/router/因果对/无放回 assignment 与本仓
 build_model_work(tp=1) **精确相等**；tests/test_qwen36_forward_r06.py
 10 项；证据 ev-qwen36-cpu-fixture-r06）。顺带修正 full-attn 输出门控
@@ -83,7 +83,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 ## 待验证或需额外数据
 
 - 重点模型小尺寸 CPU forward 与计数的独立执行对照——Qwen3.6 的 GDN+MoE
-  fixture 级数值对照已执行（R06，2026-11-12）；V4.1 侧与其余模块、
+  fixture 级形状与算量对照已执行（R06，2026-11-12）；V4.1 侧与其余模块、
   真实 checkpoint 级对照仍未执行。
 - Qwen3.6+DFlash 实际接受分布、draft/verify 延迟及服务栈配对验证。
 - 重点模型各精度/TP 的 GDN、MoE、attention 测量；历史 H200 profile 不能按名称相似迁移。

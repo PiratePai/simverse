@@ -85,7 +85,7 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 
 | ID | 独立交付物与验收标准 | 硬依赖／联合验收点 |
 |---|---|---|
-| R06 | 按模型/模块拆分的小尺寸 forward 对照；独立 oracle；区分源码阅读与 CPU 执行。**部分完成（2026-11-12，Qwen3.6）**：GDN+MoE+full-attn 载体的 fixture 级 CPU 数值对照已做（探针独立执行 pin 官方 forward，逐 GEMM/conv/router/因果对/assignment 与本仓 tp=1 账本精确对账；发现并修正 attn_output_gate 漏计；tests/test_qwen36_forward_r06.py 10 项；ev-qwen36-cpu-fixture-r06，[报告](docs/validation/qwen36-gdn-moe-cpu-fixture-r06.md)）。**未做**：V4.1 侧（MLA/CSA2/Engram 执行对照）、其他模块、真实 checkpoint、模型级完整 forward | 对应模块源码；现有完整模块可立即验证，不等待 R04/R05 全部完成 |
+| R06 | 按模型/模块拆分的小尺寸 forward 对照；独立 oracle；区分源码阅读与 CPU 执行。**部分完成（2026-11-12，Qwen3.6）**：GDN+MoE+full-attn 载体的 fixture 级 CPU 形状与算量对照已做（探针独立执行 pin 官方 forward，逐 GEMM/conv/router/因果对/assignment 与本仓 tp=1 账本精确对账；发现并修正 attn_output_gate 漏计；tests/test_qwen36_forward_r06.py 10 项；ev-qwen36-cpu-fixture-r06 为 shape-checked，[报告](docs/validation/qwen36-gdn-moe-cpu-fixture-r06.md)）。**未做**：独立输出数值 oracle、V4.1 侧（MLA/CSA2/Engram 执行对照）、其他模块、真实 checkpoint、模型级完整 forward | 对应模块源码；现有完整模块可立即验证，不等待 R04/R05 全部完成 |
 | R07a | DFlash 服务栈配对、协议与计时边界审计 | 固定服务栈源码；独立于新设备接入 |
 | R07b | 接受分布、draft/verify trace 的采集 schema、导入器与真实样本验收 | schema/导入器可先做；真实数据准入需 R07a 与匹配环境 |
 | R08 | 重点模型 GDN/MoE/attention 按算子/设备/精度/TP 扩展覆盖，独立留出与域外回退 | 对应算子语义及设备身份；MoE 分片域依赖 R01，无需等待其他算子 |

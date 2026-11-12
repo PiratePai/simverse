@@ -14,7 +14,7 @@ R06 本轮范围：Qwen3.6（qwen3_5_moe 家族）**GDN 线性注意力层与 Mo
   `attn_output = attn_output * torch.sigmoid(gate)`）此前只计了 q_proj 输出
   2× 的 GEMM 消费，sigmoid+乘未计；新增 `attn_output_gate` 行（§5 归因）。
 - **模型级证据不冒充**：本轮为 fixture 级 CPU 执行证据
-  （`ev-qwen36-cpu-fixture-r06`，numeric-checked）；`qwen36_35b_a3b` 的
+  （`ev-qwen36-cpu-fixture-r06`，shape-checked）；`qwen36_35b_a3b` 的
   `cpu_forward` 保持 `not-run`，不构成完整 forward 或部署验证。
 - 两项**披露不修**的口径差异（§6）：gdn_recurrence 4 ops/elem（官方 torch
   参考约 7 ops/elem）；HF DynamicCache conv state 静态宽度 = kernel 列
@@ -92,6 +92,11 @@ MoE assignment 每层恰 T·k（5·2=10 / 1·2=2，两层合计 20/4）；
 shared_expert_gate Linear(32,1)；norm 宽度清单
 {attn_norm:32, mlp_norm:32, final_norm:32, q_norm:8, k_norm:8, rmsnorm_gated:8}。
 
+表中 fixture 算量由观测到的模块形状、token/assignment 数代入本仓约定的
+FMA=2 等公式推得；探针没有指令级 FLOP 计数。`attention_core` 的每 pair
+`4d+5`、`gdn_recurrence` 的 4 op/elem 等仍是注册近似口径，不能把表中数值
+相等解释为实际执行 FLOPs 或独立输出数值验证。
+
 对账测试：`tests/test_qwen36_forward_r06.py` Part A（hermetic，9 项，无
 torch，CI 必跑）+ Part B（live 重执行探针，1 项；torch/transformers 缺失时
 skip；不含随机路由分布比较，防跨版本脆断）。
@@ -144,7 +149,7 @@ skip；不含随机路由分布比较，防跨版本脆断）。
    不覆盖真实 checkpoint、MTP、视觉塔、mrope 位置 id；fla/causal-conv1d
    未安装，走 PyTorch 参考实现（transformers 显式 fallback 提示，行为正确
    但慢）。
-5. **模型级 cpu_forward 保持 not-run**：本轮是 fixture 级 numeric-checked
+5. **模型级 cpu_forward 保持 not-run**：本轮是 fixture 级 shape-checked
    证据；两款主模型完整 CPU forward/GPU 实测仍未执行，部署排名门禁不变。
 
 ## 7. 复算命令
@@ -157,7 +162,7 @@ py -3.12 -m simverse.cli run-v2                      # 默认场景（attn_outpu
 ```
 
 证据登记：`simverse/validation/registry.py`
-`ev-qwen36-cpu-fixture-r06`（numeric-checked、executed=True，内容 SHA256
+`ev-qwen36-cpu-fixture-r06`（shape-checked、executed=True，内容 SHA256
 绑定 fixture JSON）；`simverse/model_ir/catalog.py` `_qwen36()` evidence_refs
 追加该证据，`_QWEN36_EVIDENCE.note` 补记 fixture 级对照已执行（模型级
 cpu_forward/gpu_measurement 不变）。
@@ -172,3 +177,8 @@ cpu_forward/gpu_measurement 不变）。
 三方核对。fixture 测试的 `SourceIdentity.config_sha256` 同时改为小尺寸
 fixture config 的规范 JSON 哈希，避免误用 modeling 源码哈希。修复后
 `py -3.12 -m pytest tests -q` 为 262 passed；生产计数未变。
+
+计算审计进一步确认：探针运行了随机权重 CPU forward，但落盘的是模块调用、
+形状、路由 assignment 和据此推得的算量；没有独立实现逐元素复算输出张量。
+按 `simverse/contracts/enums.py` 的定义，证据等级应为 `shape-checked`，
+现已降级。逐算子算量对账的结论保留，模型输出的数值正确性仍待独立 oracle。

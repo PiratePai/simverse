@@ -224,7 +224,7 @@ def test_a8_evidence_registered_and_model_level_not_overclaimed():
     reg = build_registry()
     rec = reg.get("ev-qwen36-cpu-fixture-r06")
     assert rec is not None
-    assert rec.kind == "numeric-checked" and rec.executed is True
+    assert rec.kind == "shape-checked" and rec.executed is True
     # 内容哈希绑定：registry 实算 == fixture 落盘 SHA256
     assert rec.content_sha256 == hashlib.sha256(
         FIXTURE.read_bytes()).hexdigest()
