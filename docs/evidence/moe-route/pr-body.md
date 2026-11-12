@@ -40,11 +40,12 @@
 ### 测试原始结果
 
 ```
-py -3.12 -m pytest tests -q          → 收集 334；Codex 宿主 gate 修复后 333 passed，dtype 域负例后待复测；本机沙箱 328 passed + 6 tmp_path ACL 错误
-py -3.12 -m pytest tests/test_v41_moe_route.py -q → 23 passed
+py -3.12 -m pytest tests -q          → Codex 宿主 b9a5a0f：334 passed in 19.86s，exit 0
+                                       DSH 沙箱：328 passed + 6 tmp_path ACL 错误（非断言失败）
+py -3.12 tools/replay_v41_moe.py --check → Codex 宿主 check OK，exit 0；DSH 沙箱 check OK
+py -3.12 -m simverse.cli run-v2      → Codex 宿主 status=completed，exit 0；structure gate 保留
+py -3.12 -m pytest tests/test_v41_moe_route.py -q → DSH 23 passed
 node --check simverse/static/workbench.js → exit 0
-py -3.12 -m simverse.cli run-v2      → 正常；structure gate 仍按预期拦截（两模型均未排名）
-py -3.12 tools/replay_v41_moe.py     → 归因通过（审计面外行逐字段冻结）
 ```
 
 断言随事实更新（非放宽，逐项归因）：G10/G16/test_model_ir_v02 的 `csa2_moe_routing ∈ unverified_paths` 改指 `moe_deploy_variants`（主干解除后剩余 MegaMoE/DSpark/padding skip 变体）；test_v41_hc replay 冻结面追加 MoE 四行名（由本 PR replay 归因单独冻结）。
@@ -83,7 +84,7 @@ M02/M04/M05/M06 降级与 unknown 传播不变；**structure_complete 仍 False*
 | 中｜（复核补充）EP 依据不实 | fused 路径实为 floor 除法（L419-421）无断言；EP 校验改写为 mega 断言（L357-362）+ fused 覆盖性的保守域规则，全部文档同步 |
 | 附带 | baseline-provenance 补 before_sha256（3addaa5f…）；PR 描述副本入仓 docs/evidence/moe-route/pr-body.md |
 
-修复后：332 passed（gate 修复前；gate 修复后 333、dtype 负例后 334 收集，见下）；node check OK；`tools/replay_v41_moe.py --check` 通过。详见报告 §8。
+修复后：332 passed（gate 修复前；gate 修复后宿主 333；dtype 修订后宿主 334，见下）；node check OK；`tools/replay_v41_moe.py --check` 通过。详见报告 §8/§10。
 
 ---
 
@@ -97,7 +98,7 @@ M02/M04/M05/M06 降级与 unknown 传播不变；**structure_complete 仍 False*
 | 低｜oracle −87 措辞 | −87.3 是最小 normal 的对数，不是 underflow 门槛；改为 normal-range 近似，subnormal/FTZ 未实测 |
 | 低｜EP 测试域 | 只列实际合法 TP/EP {1,2,4,8}（3/6 被 o_groups=8 拒绝）；移除 dead `experts_start_idx` 锚点；加 before/scenario SHA256 自校验 |
 
-验证（本机沙箱）：`tests/test_v41_moe_route.py` 23 passed；`tools/replay_v41_moe.py --check` 通过；全量 `pytest tests` 为 328 passed + 6 个 `tmp_path` setup PermissionError（沙箱 ACL，测试本体未失败；Codex 宿主 gate 修复后 333 passed，dtype 域负例后 334 收集待复测）。未改 main、未合入 PR。
+验证（两类环境分开记录）：**Codex 宿主最终验收（b9a5a0f；非本会话执行）**：`pytest tests -q` **334 passed in 19.86s，exit 0**；`replay --check` check OK，exit 0；`run-v2` status=completed，exit 0，structure gate 保留。`4ea4fc1` 仅改 `families.py` 注释、不改行为。**本 DSH 沙箱**：`test_v41_moe_route.py` 23 passed；`replay --check` 通过；全量 `pytest tests` 328 passed + 6 个 `tmp_path` setup PermissionError（ACL，非断言失败）。未改 main、未合入 PR。
 
 ---
 
