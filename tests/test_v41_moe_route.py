@@ -6,7 +6,8 @@ extras.moe_route、lowering/memory 路由偏置对象、EP 整除断言）。
 
 独立性声明：§1-§2 的语义 oracle 用**纯 stdlib（math）**重写 pinned Triton
 kernel 语义（不 import 生产公式/计数实现）；fp32 下溢按 exp(−87)≈0 门槛
-模拟。§3 手算绝对值逐字段核对生产行。§7 replay 冻结核对审计面外行逐字段
+模拟（IEEE-754 单精度解析假设，非 pinned 源码断言——kernel 未执行）。
+§3 手算绝对值逐字段核对生产行。§7 replay 冻结核对审计面外行逐字段
 不变。source-checked ≠ executed：kernel/CPU forward/GPU 均未执行。
 """
 from __future__ import annotations
@@ -95,12 +96,17 @@ def test_pinned_source_key_lines_present():
 # ---------------------------------------------------------------------------
 
 def _weight(x: float) -> float:
-    """sqrtsoftplus 打分，fp32 语义：>20 取 sqrt(x)；exp(−87) 下溢为 0。"""
+    """sqrtsoftplus 打分，fp32 语义：>20 取 sqrt(x)；exp(−87) 下溢为 0。
+
+    −87.3 门槛是 **oracle 解析假设**（IEEE-754 单精度最小 normal 2^−126
+    ≈1.18e-38 → ln≈−87.3，exp 更小则下溢 0），非 pinned 源码断言——
+    Triton/CPU kernel 未执行，实际下溢行为未实测。
+    """
     if x != x:                                 # NaN 先于下溢分支（exp(NaN)=NaN）
         return float("nan")
     if x > 20.0:
         return math.sqrt(x)
-    e = math.exp(x) if x > -87.0 else 0.0     # fp32 exp 下溢门槛
+    e = math.exp(x) if x > -87.0 else 0.0     # fp32 exp 下溢门槛（oracle 假设）
     return math.sqrt(math.log1p(e))
 
 
@@ -133,7 +139,8 @@ def test_oracle_sqrtsoftplus_values_and_guard():
     # 护栏：>20 直接 sqrt(logits)（softplus(x)≈x 截断）
     assert _weight(21.0) == math.sqrt(21.0)
     assert _weight(20.0) == pytest.approx(math.sqrt(math.log1p(math.exp(20.0))))
-    # fp32 下溢：极小 logits 打分为精确 0（sum≤0 护栏入口）
+    # fp32 下溢：极小 logits 打分为精确 0（sum≤0 护栏入口；−87 门槛为
+    # oracle 解析假设，非源码断言）
     assert _weight(-1000.0) == 0.0
 
 
@@ -170,6 +177,8 @@ def test_oracle_tie_breaks_to_smallest_expert_id():
 
 
 def test_oracle_nan_logit_never_selected_over_finite():
+    """NaN 选择列被 −1e30 护栏压掉——在有限候选的 score+bias > −1e30 域内
+    成立（护栏是常数：极端负 bias 的有限候选可低于 −1e30，该域外不主张）。"""
     logits = [0.0] * E
     logits[7] = float("nan")                          # NaN 分数被 −1e30 护栏压掉
     bias = [0.1] * E

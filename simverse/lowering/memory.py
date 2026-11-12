@@ -480,8 +480,9 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             moe_route = (model.extras or {}).get("moe_route") \
                 if fam == "v41_csa2" else None
             if moe_route is not None:
-                # R21：V4.1 pinned EP 整除断言（与 count/work 同规则镜像；
-                # qwen35 pin 的余数规则不适用本族）
+                # R21：V4.1 EP 整除域（与 count/work 同规则镜像；mega 路径
+                # pinned 断言 + fused floor 覆盖性的保守域规则，qwen35 pin
+                # 的余数规则不适用本族）
                 require_divisible_ep(moe.experts, ep)
             router_b = int(model.hidden * moe.experts * b_dense)  # replicated
             shared_b = int(3 * model.hidden * (moe.shared_intermediate // tp)
@@ -505,7 +506,7 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                 # R21：路由偏置向量（FP32 每卡复制，不随 tp/ep 缩放）——
                 # e_score_correction_bias[E]（noaux_tc）+ bias_vl[E]（视觉
                 # checkpoint 才创建；V4.1-Flash vision_n_layers=32>0）。
-                # 深度 DeepseekV4MoE L303-320；moe-pin.json source-checked。
+                # 依据 DeepseekV4MoE L303-320；moe-pin.json source-checked。
                 bias_b = int(moe_route["bias_bytes"]
                              + moe_route.get("bias_vl_bytes", 0))
                 vl_note = ("+bias_vl（视觉 checkpoint，HAS_VL 哨兵判定）"

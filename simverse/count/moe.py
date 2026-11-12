@@ -14,7 +14,8 @@ per-rank 配方（R01，vLLM @dc74b8cb pin；lowering/parallel.py 证据）：
 V4.1 路由细化（R21，vllm @f358f057 moe-pin.json 11 文件 source-checked）：
   * v41_moe_route_rows：sqrtsoftplus 打分 + noaux_tc 偏置平坦 top-k（无分组）
     + sum→1 归一 ×routed_scaling 三行替换通用 moe_router 行，per-rank 复制；
-  * V4.1 EP 为整除断言（require_divisible_ep），与 qwen35 pin 的余数规则不同。
+  * V4.1 EP 为整除域（require_divisible_ep：mega 断言 + fused floor 覆盖性
+    的保守域规则），与 qwen35 pin 的余数规则不同。
 """
 from __future__ import annotations
 
@@ -56,17 +57,23 @@ def routed_capacity_bytes(E: int, hidden: int, inter: int, expert_bytes: int) ->
 
 
 def require_divisible_ep(E: int, ep: int) -> None:
-    """V4.1 EP 整除约束（DeepseekV4MoE pinned 断言，非余数分布）。
+    """V4.1 EP 整除域（保守 config 域规则，非 qwen35 pin 的余数分布）。
 
-    vllm @f358f057 deepseek_v4/nvidia/model.py L416-421（fused 路径）与
-    L343-368（mega 路径）：n_physical_experts % ep_size == 0 断言（eplb
-    冗余专家默认 0）；experts_start_idx = ep_rank * n_local。与 qwen35 pin
-    的 generic FusedMoE 余数规则不同——V4.1 族非整除组合直接拒绝。
+    依据（vllm @f358f057 deepseek_v4/nvidia/model.py）：
+      * mega 路径 L357-362：显式断言 n_physical_experts % ep_size == 0
+        （eplb 冗余专家默认 0）；
+      * fused 路径 L419-421：experts_start_idx = ep_rank·(n_physical//ep)
+        的 floor 除法——非整除时各 rank 局部段覆盖不满 E（尾部专家无
+        owner），且与 generic FusedMoE 内部映射（qwen35 pin @dc74b8cb
+        的余数规则）在余数 rank 上口径失配，vLLM 未在该路径显式拒绝。
+    本仓据此把 V4.1 族的合法 EP 域收窄为整除组合（拒绝如 384%%7），
+    登记为保守域规则：mega 断言是直接源码证据，fused 非整除无一致覆盖
+    保证，不冒充两路径均有断言。
     """
     if ep != 1 and E % ep:
         raise ValueError(
-            f"V4.1 MoE EP{ep} 不整除专家数 {E}（pinned DeepseekV4MoE 断言 "
-            f"n_physical % ep == 0；eplb 冗余默认 0，无余数 rank 分布）")
+            f"V4.1 MoE EP{ep} 不整除专家数 {E}（mega 路径 pinned 断言 + "
+            f"fused 路径 floor 覆盖性；eplb 冗余默认 0，本域无余数 rank 分布）")
 
 
 def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int,
@@ -76,21 +83,23 @@ def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int,
     证据（moe-pin.json 11 文件，vllm @f358f057，blob sha1 对 vllm-tree.json
     逐项校验；source-checked 2026-11-12 R21，未执行 kernel/CPU/GPU）：
       * gate：GateLinear(h→E, bias=False, out_dtype=fp32) 为 ReplicatedLinear
-        子类（deepseek_v4/nvidia/model.py L270-277；router/gate_linear.py
-        L26）→ 每 rank 全量 GEMM，router logits **FP32**；
+        子类（deepseek_v4/nvidia/model.py L270-277，out_dtype 在 L274；
+        router/gate_linear.py L26）→ 每 rank 全量 GEMM，router logits
+        **FP32**；
       * scoring sqrtsoftplus：weights = sqrt(softplus(logits))，logits>20 取
-        sqrt(logits) 数值护栏（dsv4_topk.py L88-92）；选择列 = weights +
-        e_score_correction_bias，NaN→−1e30（L93-95）；CPU 侧 biased_topk_cpu
-        同语义（cpu_router.py L81-134 docstring："bias steers selection only"）；
+        sqrt(logits) 数值护栏（dsv4_topk.py L85）；选择列 = weights +
+        e_score_correction_bias（L86），NaN→−1e30（L87）；CPU 侧
+        biased_topk_cpu 同语义（cpu_router.py L90-95 docstring："bias
+        steers selection only"）；
       * 选择：k 轮平坦 argmax（**无分组**：V4.1 config 无 n_group/topk_group
-        键，router_factory.py L168-205 仅 use_grouped_topk 时走
-        GroupedTopKRouter），平手取最小专家 id（L98-109 min(candidate)），
-        权重取**无偏** score（L105-108）；
+        键，router_factory.py L166-173 仅 use_grouped_topk 时走
+        GroupedTopKRouter），平手取最小专家 id（L94-95 min(candidate)），
+        权重取**无偏** score（L96-98）；
       * 归一化：selected_weights *= routed_scaling/sum（sum≤0 除 1 护栏，
-        L111-115）；输出 FP32 weights + int32 ids（L69-70/L123-128）；
+        L104-107）；输出 FP32 weights + int32 ids（L149-150）；
       * VL 分支：V4.1-Flash 为视觉 checkpoint（vision_n_layers=32>0）→
         bias_vl 存在且 HAS_VL=True，文本 token 也逐行加载 input_ids +
-        bias_vl 做 is_image 判定（L60-70，5 个哨兵 id 才走 bias_vl）。
+        bias_vl 做 is_image 判定（L63-76，5 个哨兵 id 才走 bias_vl）。
     op 口径：解析算术 op（exp/log/sqrt/比较各 1），非 kernel 指令数；
     字节为 unfused 逻辑访问参考，非实测 HBM。
     返回 list[dict]，字段与 count.work.OpRow 对齐。

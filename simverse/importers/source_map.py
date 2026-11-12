@@ -318,12 +318,16 @@ ENTRIES: List[SourceMapEntry] = [
                  "ids；共享专家（1, inter 2304, 无 gate）归一后权重 1.0 追加",
         source_pin=VLLM_PIN,
         source_location="vllm/model_executor/layers/fused_moe/router/"
-                        "dsv4_topk.py:21-128（can_use_dsv4_topk 约束 + "
-                        "_dsv4_topk_kernel）；fused_topk_bias_router.py:98-320"
-                        "（fused_topk_bias 分派 + FusedTopKBiasRouter 共享槽"
-                        "追加）；router_factory.py:128-238（FusedTopKBiasRouter"
-                        " 选择）；deepseek_v4/nvidia/model.py:207-460（基类 "
-                        "MoE：gate/bias/共享/EP start_idx 断言）；gate_linear"
+                        "dsv4_topk.py:21-38/63-76/85-107/149-150（can_use "
+                        "约束、HAS_VL 哨兵、sqrtsoftplus+bias+NaN、选择循环+"
+                        "归一、FP32/int32 输出）；fused_topk_bias_router.py:"
+                        "98-464（fused_topk_bias 分派 + FusedTopKBiasRouter "
+                        "共享槽追加 L447-464，默认权重 1.0 L383-385）；"
+                        "router_factory.py:166-173/215-238（分组守卫与 "
+                        "FusedTopKBiasRouter 选择 L230）；deepseek_v4/nvidia/"
+                        "model.py:240/253/270-277/303-320/357-362/419-421"
+                        "（scaling/renormalize/GateLinear fp32/bias 创建/"
+                        "mega EP 断言/fused start_idx floor）；gate_linear"
                         ".py:26（ReplicatedLinear）；cpu_router.py:81-134"
                         "（biased_topk_cpu 同语义）",
         branch_predicate="scoring_func=sqrtsoftplus 且 topk_method=noaux_tc 且 "
@@ -349,7 +353,8 @@ ENTRIES: List[SourceMapEntry] = [
                           "整宽路由缓冲未入账"],
         note="R21（2026-11-12）11 文件 pin（moe-pin.json）；count 三行 "
              "moe_gate/moe_score/moe_topk_renorm + memory 路由偏置对象 + "
-             "EP 整除断言；量化映射/swiglu clamp 仍为独立缺口"),
+             "EP 整除域（mega 断言 L357-362 + fused floor 覆盖性 L419-421 "
+             "的保守域规则）；量化映射/swiglu clamp 仍为独立缺口"),
     SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",

@@ -5,6 +5,12 @@ The default run replays the new ledger into after.json + attribution.json and
 refuses to overwrite the baseline. Changed op groups must all be members of
 EXPECTED_CHANGED_OPS (the audited V4.1 MoE routing subgraph); any other row
 changing is an attribution failure.
+
+`--check` recomputes the replay in memory and verifies it against the
+committed after.json/attribution.json without writing anything (the ledger
+is deterministic; the plain run also refreshes manifest identity fields
+code_revision/run_id, so re-running it after a commit legitimately dirties
+after.json — use --check for no-drift verification).
 """
 from __future__ import annotations
 
@@ -55,10 +61,39 @@ def capture_baseline() -> None:
     (FOLDER / "before.json").write_text(
         json.dumps(before, ensure_ascii=False, indent=1) + "\n",
         encoding="utf-8", newline="\n")
+    provenance["before_sha256"] = hashlib.sha256(
+        (FOLDER / "before.json").read_bytes()).hexdigest()
     (FOLDER / "baseline-provenance.json").write_text(
         json.dumps(provenance, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8", newline="\n")
     print("baseline captured at", head)
+
+
+def check() -> None:
+    """无漂移复算：与已提交 after.json/attribution.json 核对，不写任何文件。"""
+    scenario = ScenarioV2.from_json(json.loads(
+        (FOLDER / "scenario.json").read_text(encoding="utf-8")))
+    committed_after = json.loads(
+        (FOLDER / "after.json").read_text(encoding="utf-8"))
+    att = json.loads((FOLDER / "attribution.json").read_text(encoding="utf-8"))
+    before = json.loads((FOLDER / "before.json").read_text(encoding="utf-8"))
+    fresh = run_v2(scenario).to_json()
+    # 账本本体必须逐字段复现（manifest 身份字段 code_revision/run_id 随
+    # HEAD 变化，属登记性漂移；work/metrics 数值不得漂移）
+    assert fresh["work"] == committed_after["work"], \
+        "work 账本与已提交 after.json 不一致（确定性被破坏）"
+    for key, val in committed_after["metrics"].items():
+        if key.startswith("M01_"):
+            assert fresh["metrics"][key] == val, key
+    # 归因仍然成立：逐字段 delta = Σ by_op delta；审计面外行冻结
+    old, new = before["work"]["target_decode"], fresh["work"]["target_decode"]
+    for key in old["totals"]:
+        delta = new["totals"][key] - old["totals"][key]
+        assert delta == sum(g["delta"][key] for g in att["by_op"].values()), key
+    AUDITED = set(att["expected_changed_ops"])
+    frozen = lambda rows: [r for r in rows if r["op"] not in AUDITED]
+    assert frozen(old["rows"]) == frozen(new["rows"])
+    print("check OK: ledger reproduces committed after.json; attribution holds")
 
 
 def main() -> None:
@@ -121,5 +156,7 @@ def main() -> None:
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--capture-before":
         capture_baseline()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--check":
+        check()
     else:
         main()

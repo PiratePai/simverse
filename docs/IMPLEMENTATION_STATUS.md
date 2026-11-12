@@ -10,14 +10,16 @@
 **2026-11-12 R21：V4.1 MoE scoring/top-k/分组路由**（PR #11 分支
 `codex/v41-moe-route-r21`）：moe-pin.json 11 文件（vllm @f358f057，blob
 sha1 对 vllm-tree.json 逐项校验）source-checked 入册（ev-vllm-v41-moe，
-executed=False）。语义核对结论：sqrtsoftplus 打分（>20 护栏）+ noaux_tc
-偏置**只导选择不进权重** + k=6 轮**平坦**偏置 argmax（V4.1 无
-n_group/topk_group 键，无分组路由；平手最小 id、NaN→−1e30）+ sum→1 归一
-×routed_scaling 1.5（sum≤0 除 1 护栏）；GateLinear(h→E, out_dtype=fp32)
-Replicated；共享专家（1, inter 2304）**无 gate**、归一后权重 1.0 追加；
-主干 num_hash_layers=0；视觉 checkpoint bias_vl 哨兵判定；EP **整除断言**
-（n_physical % ep == 0，无余数 rank 分布——与 qwen35 pin 不同，非整除
-组合 count/memory 双侧拒绝）。落地：count 三行 moe_gate/moe_score/
+executed=False）。语义核对结论：sqrtsoftplus 打分（>20 护栏，dsv4 L85）+ noaux_tc
+偏置**只导选择不进权重**（L86-98）+ k=6 轮**平坦**偏置 argmax（V4.1 无
+n_group/topk_group 键，无分组路由；平手最小 id L94-95、NaN→−1e30 L87）
++ sum→1 归一 ×routed_scaling 1.5（sum≤0 除 1 护栏，L104-107）；
+GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）；共享专家（1,
+inter 2304）**无 gate**、归一后权重 1.0 追加（L447-464）；主干
+num_hash_layers=0（L155）；视觉 checkpoint bias_vl 哨兵判定（L63-76）；
+EP **整除域**（mega 路径 L357-362 断言 + fused 路径 L419-421 floor 覆盖
+性的保守域规则，非整除组合 count/memory 双侧拒绝——与 qwen35 pin 余数
+规则分立）。落地：count 三行 moe_gate/moe_score/
 moe_topk_renorm（FP32 logits 出口修正旧通用行）、memory 路由偏置对象
 40×3,072B、model_ir extras.moe_route + config 域校验（softmax/greedy/
 norm=false 拒绝）、公式 v2.moe_route_*、source_map sm-v41-moe-route。
@@ -32,7 +34,11 @@ G10/G16/test_model_ir_v02 的 csa2_moe_routing 断言改指 moe_deploy_variants
 （主干解除，MegaMoE/DSpark/padding skip 变体仍 unverified）；
 test_v41_hc replay 冻结面追加 MoE 行名。structure_complete 仍 False
 （量化映射/swiglu clamp/注意力核本体/MTP 尾部/compress_ratios 尾部缺口
-不变）。[报告](validation/v41-moe-route-20261112.md)；G-C13 解除。
+不变）。首轮 Codex 验收（不通过）后修正：全部行号对实销行号、EP 依据
+改写为 mega 断言+fused floor 覆盖性的保守域规则、oracle −87.3 下溢门槛
+标注 IEEE-754 解析假设、replay 工具补 --check 无漂移复算模式、PR 描述
+副本入仓（报告 §8）。[报告](validation/v41-moe-route-20261112.md)；
+G-C13 解除。
 
 **2026-11-12 PR #5/#7 合入后验收**：首次全量 261 passed / 1 failed；
 R06 fixture 的 pinned SHA256 记录为 CRLF 字节，仓内官方 pin manifest 为 LF 字节，

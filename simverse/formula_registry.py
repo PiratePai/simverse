@@ -274,10 +274,11 @@ F_MOE_ROUTE_SCORE = _f(
     "哨兵判定）否则 0——每元素：sqrtsoftplus 打分 5（>20 护栏比较+exp+加一"
     "+log+sqrt）+ bias 加 1 + NaN 护栏 2；读 = T·E·4（FP32 logits）+ "
     "T·8（input_ids int64 上界）；weight = n_bias·E·4（FP32 复制）",
-    "dsv4_topk.py L60-95（HAS_VL 哨兵/bias_vl where、weights=sqrt(softplus)"
-    "（>20 护栏）、current=weights+bias、NaN→−1e30）；cpu_router.py "
-    "L90-107（biased_topk_cpu 同语义 docstring：bias steers selection only）；"
-    "model.py L303-320（e_score_correction_bias/bias_vl 创建条件）",
+    "dsv4_topk.py L63-87（HAS_VL 哨兵/bias_vl where L63-76、weights="
+    "sqrt(softplus)（>20 护栏）L85、current=weights+bias L86、NaN→−1e30 "
+    "L87）；cpu_router.py L90-95（biased_topk_cpu 同语义 docstring：bias "
+    "steers selection only）；model.py L303-320（e_score_correction_bias/"
+    "bias_vl 创建条件）",
     "moe_score 行（每 MoE 层；选择列含 bias、权重列不含——noaux_tc）")
 F_MOE_ROUTE_TOPK = _f(
     "v2.moe_route_topk",
@@ -285,12 +286,13 @@ F_MOE_ROUTE_TOPK = _f(
     "相等选择 E、min 平手 E−1、无偏权重 gather 2E、移除 E ≈5E；槽位簿记 3），"
     "归一 sum k+1 加 + sum≤0 护栏 2 + 除 1 + 缩放乘 k；写 = T·k·8B（FP32 "
     "weights + int32 ids）",
-    "dsv4_topk.py L96-128（static_range(k) 选择循环：min(candidate) 平手最"
-    "小 id、selected_weight 取无偏 score、移除已选；L111-115 "
-    "selected_weights *= routed_scaling/sum（sum≤0 除 1）；无分组——"
-    "router_factory.py L168-205 分组仅 use_grouped_topk（V4.1 无 n_group/"
-    "topk_group 键）；fused_topk_bias_router.py L301-320 共享专家归一后以"
-    "权重 1.0 追加）",
+    "dsv4_topk.py L90-107（static_range(k) 选择循环：max L93、min(candidate)"
+    " 平手最小 id L94-95、selected_weight 取无偏 score L96-98、移除已选 "
+    "L102；L104-107 selected_weights *= routed_scaling/sum（sum≤0 除 1）；"
+    "输出 L149-150）；无分组——router_factory.py L166-173 分组仅 "
+    "use_grouped_topk（V4.1 无 n_group/topk_group 键）；"
+    "fused_topk_bias_router.py L447-464 共享专家归一后以权重 1.0 追加"
+    "（默认值 L383-385）",
     "moe_topk_renorm 行（每 MoE 层；权重=无偏 sqrtsoftplus score，sum→1 后 "
     "×routed_scaling_factor）")
 

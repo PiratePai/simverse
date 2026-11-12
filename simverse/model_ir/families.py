@@ -162,20 +162,20 @@ _CSA2_KEY_NOTES = {
 _MOE_ROUTE_KEY_NOTES = {
     "scoring_func":
         "mapped：sqrtsoftplus——weights=sqrt(softplus(logits))，>20 取 "
-        "sqrt(logits) 护栏（dsv4_topk.py L88-92；cpu_router.py L90-107 同语义"
+        "sqrt(logits) 护栏（dsv4_topk.py L85；cpu_router.py L90-95 同语义"
         " docstring）；仅此一档（mega/model.py L255-258 断言 sqrtsoftplus）",
     "topk_method":
         "mapped：noaux_tc——e_score_correction_bias[E] fp32 只导选择不进权重"
         "（deepseek_v4/nvidia/model.py L303-313 建 Parameter；dsv4_topk.py "
-        "L93-109 选择列=weights+bias、权重取无偏 score）",
+        "L85-87 选择列=weights+bias、L96-98 权重取无偏 score）",
     "norm_topk_prob":
-        "mapped：true——选中权重 sum→1 归一（dsv4_topk.py L111-115；"
+        "mapped：true——选中权重 sum→1 归一（dsv4_topk.py L104-107；"
         "cpu_router.py L107 assert renormalize；can_use_dsv4_topk 要求 "
         "renormalize）",
     "routed_scaling_factor":
         "mapped：1.5——归一后乘 routed_scaling_factor/sum（sum≤0 除 1 护栏，"
-        "dsv4_topk.py L111-115）；只作用于 routed，共享专家权重 1.0 在归一后"
-        "追加（fused_topk_bias_router.py L301-320）",
+        "dsv4_topk.py L104-107）；只作用于 routed，共享专家权重 1.0 在归一后"
+        "追加（fused_topk_bias_router.py L447-464，默认值 L383-385）",
 }
 
 
@@ -787,15 +787,17 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                               "consumer": "model_ir+count+memory",
                               "note": note}
     # R21：路由 spec（消费方：count/moe.v41_moe_route_rows、
-    # lowering/memory 路由偏置对象、count/work EP 整除校验）。
+    # lowering/memory 路由偏置对象、count/work EP 整除域校验）。
     # 常数全部来自 moe-pin.json @f358f057：
     #   * gate = GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）；
     #   * bias = e_score_correction_bias[E] fp32（noaux_tc，L303-313）；
     #   * bias_vl：vision_n_layers>0 时每 MoE 层创建（L314-320；V4.1-Flash
-    #     视觉塔 32 层 → 存在，文本 token 也逐行做哨兵判定 dsv4 L60-70）；
+    #     视觉塔 32 层 → 存在，文本 token 也逐行做哨兵判定 dsv4 L63-76）；
     #   * V4.1 主干 num_hash_layers=0（v41/nvidia/model.py L155）——无
     #     hash MoE/tid2eid 表；
-    #   * EP：n_physical(=E+eplb 冗余 0) % ep == 0 断言（L416-421）。
+    #   * EP：mega 路径断言 n_physical(=E+eplb 冗余 0) % ep == 0（L357-362）；
+    #     fused 路径 floor 除 start_idx（L419-421）非整除时覆盖不满 E——
+    #     本域按整除组合收窄（count/moe.require_divisible_ep 保守规则）。
     vision_layers = int((full_config or {}).get("vision_config", {})
                         .get("num_hidden_layers", 0) or 0)
     moe_route_spec = {
