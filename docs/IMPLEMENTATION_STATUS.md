@@ -1,6 +1,6 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 11 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 整除断言；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
+更新：2026-11-13（三轮复核修正 R21 证据链：fused EP 只按 mega 断言、共享专家独立相加、FusedMoEFactory/ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验；数值/账本不变，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 11 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #5/#7/#9/#10 已合入 main（HEAD `73738ad`）；本 PR #11 分支 `codex/v41-moe-route-r21` 待验收；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
 运行：`py -3.12 -m pytest tests -q`（2026-11-12 R21 分支：**332 passed，exit 0**。历史：R07a+R20 集成 Codex 宿主全量 311 passed；R07a 280、R20 单分支 295、R06 264/262、R05 252、R04 236、PR #3 合入时 234，k_norm 修正后 212，A 组二轮 201，hermetic 修复后 196/197。本 DSH 沙箱 `tmp_path` setup PermissionError 仅为环境回执，见 §3.9，不是代码失败）。`node --check simverse/static/workbench.js` exit 0。
 **pytest 收集数：332**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-12 R21 分支；311→332 为 R21 MoE 路由 oracle 新增 test_v41_moe_route.py 21 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
@@ -13,13 +13,16 @@ sha1 对 vllm-tree.json 逐项校验）source-checked 入册（ev-vllm-v41-moe�
 executed=False）。语义核对结论：sqrtsoftplus 打分（>20 护栏，dsv4 L85）+ noaux_tc
 偏置**只导选择不进权重**（L86-98）+ k=6 轮**平坦**偏置 argmax（V4.1 无
 n_group/topk_group 键，无分组路由；平手最小 id L94-95、NaN→−1e30 L87）
-+ sum→1 归一 ×routed_scaling 1.5（sum≤0 除 1 护栏，L104-107）；
++ sum→1 归一 ×routed_scaling 1.5（sum≤0/NaN 时分母取 1，L104-107）；
 GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）；共享专家（1,
-inter 2304）**无 gate**、归一后权重 1.0 追加（L447-464）；主干
-num_hash_layers=0（L155）；视觉 checkpoint bias_vl 哨兵判定（L63-76）；
-EP **整除域**（mega 路径 L357-362 断言 + fused 路径 L419-421 floor 覆盖
-性的保守域规则，非整除组合 count/memory 双侧拒绝——与 qwen35 pin 余数
-规则分立）。落地：count 三行 moe_gate/moe_score/
+inter 2304）**无 gate**、routed 归一后权重 1.0 **独立相加**
+（moe_output.py L151-175；FusedMoEFactory 调用未传 n_shared_experts/
+fuse_shared_experts，L447-464 融合槽未启用）；主干 num_hash_layers=0
+（L155）；视觉 checkpoint bias_vl 哨兵判定（L63-76）；EP **保守整除域**
+（仅 mega 路径 L357-362 断言；fused L419-421 的 start_idx 只赋值、未被
+所有权消费，fused 通用余数映射未入 pin/未建模，不主张 fused 非法；
+非整除组合 count/memory 双侧拒绝——与 qwen35 pin 余数规则分立）。
+落地：count 三行 moe_gate/moe_score/
 moe_topk_renorm（FP32 logits 出口修正旧通用行）、memory 路由偏置对象
 40×3,072B、model_ir extras.moe_route + config 域校验（softmax/greedy/
 norm=false 拒绝）、公式 v2.moe_route_*、source_map sm-v41-moe-route。
@@ -34,11 +37,14 @@ G10/G16/test_model_ir_v02 的 csa2_moe_routing 断言改指 moe_deploy_variants
 （主干解除，MegaMoE/DSpark/padding skip 变体仍 unverified）；
 test_v41_hc replay 冻结面追加 MoE 行名。structure_complete 仍 False
 （量化映射/swiglu clamp/注意力核本体/MTP 尾部/compress_ratios 尾部缺口
-不变）。首轮 Codex 验收（不通过）后修正：全部行号对实销行号、EP 依据
-改写为 mega 断言+fused floor 覆盖性的保守域规则、oracle −87.3 下溢门槛
-标注 IEEE-754 解析假设、replay 工具补 --check 无漂移复算模式、PR 描述
-副本入仓（报告 §8）。[报告](validation/v41-moe-route-20261112.md)；
-G-C13 解除。
+不变）。首轮 Codex 验收（不通过）后修正：全部行号对实销行号、oracle
+−87.3 normal-range 近似标注、replay 工具补 --check 无漂移复算模式、PR
+描述副本入仓（报告 §8）。第三轮复核（2026-11-13）修正证据链残留：
+fused EP 的 start_idx 只赋值、未被所有权消费（删除"floor 覆盖性"
+主张，EP 规则只按 mega 断言）；共享专家实际为独立相加（L447-464 融合槽
+未启用）；FusedMoEFactory/ExpertMapManager 未入 pin 的默认值登记为读取点；
+证据包加 before/scenario SHA256 自校验。数值/账本不变（报告 §9）。
+[报告](validation/v41-moe-route-20261112.md)；G-C13 解除。
 
 **2026-11-12 PR #5/#7 合入后验收**：首次全量 261 passed / 1 failed；
 R06 fixture 的 pinned SHA256 记录为 CRLF 字节，仓内官方 pin manifest 为 LF 字节，

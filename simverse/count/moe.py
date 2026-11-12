@@ -14,8 +14,9 @@ per-rank 配方（R01，vLLM @dc74b8cb pin；lowering/parallel.py 证据）：
 V4.1 路由细化（R21，vllm @f358f057 moe-pin.json 11 文件 source-checked）：
   * v41_moe_route_rows：sqrtsoftplus 打分 + noaux_tc 偏置平坦 top-k（无分组）
     + sum→1 归一 ×routed_scaling 三行替换通用 moe_router 行，per-rank 复制；
-  * V4.1 EP 为整除域（require_divisible_ep：mega 断言 + fused floor 覆盖性
-    的保守域规则），与 qwen35 pin 的余数规则不同。
+  * V4.1 EP 取保守整除域（require_divisible_ep）：mega 路径有 pinned
+    断言；fused 路径的通用余数映射未入 pin、未建模，因此非整除组合不在
+    本 PR 的声明域内（不等于宣称 vLLM fused 路径非法）。
 """
 from __future__ import annotations
 
@@ -57,23 +58,25 @@ def routed_capacity_bytes(E: int, hidden: int, inter: int, expert_bytes: int) ->
 
 
 def require_divisible_ep(E: int, ep: int) -> None:
-    """V4.1 EP 整除域（保守 config 域规则，非 qwen35 pin 的余数分布）。
+    """V4.1 EP 保守整除域（**本仓建模域**，不是"vLLM 两路径均有断言"）。
 
     依据（vllm @f358f057 deepseek_v4/nvidia/model.py）：
       * mega 路径 L357-362：显式断言 n_physical_experts % ep_size == 0
-        （eplb 冗余专家默认 0）；
-      * fused 路径 L419-421：experts_start_idx = ep_rank·(n_physical//ep)
-        的 floor 除法——非整除时各 rank 局部段覆盖不满 E（尾部专家无
-        owner），且与 generic FusedMoE 内部映射（qwen35 pin @dc74b8cb
-        的余数规则）在余数 rank 上口径失配，vLLM 未在该路径显式拒绝。
-    本仓据此把 V4.1 族的合法 EP 域收窄为整除组合（拒绝如 384%%7），
-    登记为保守域规则：mega 断言是直接源码证据，fused 非整除无一致覆盖
-    保证，不冒充两路径均有断言。
+        （eplb 冗余专家默认 0）——这是直接源码证据；
+      * fused 路径 L419-421 计算 experts_start_idx = ep_rank·(n_physical//ep)
+        的 floor 值，但该属性**未被 FusedMoE 的专家所有权消费**（本仓 grep
+        仅见初始化赋值；实际 EP 映射由 FusedMoE/ExpertMapManager 负责，
+        该文件未入 moe-pin，本 PR 不据它建模非整除域）。
+    因此这里只把"整除组合"纳入 V4.1 的声明/建模域：mega 路径有 pinned
+    断言，fused 路径的通用余数映射未入 pin、未建模。非整除组合（如
+    384%7）被保守拒绝，但这**不**表示 vLLM fused 路径本身非法；若要
+    放开，需另 pin ExpertMapManager 并单独核对。
     """
     if ep != 1 and E % ep:
         raise ValueError(
-            f"V4.1 MoE EP{ep} 不整除专家数 {E}（mega 路径 pinned 断言 + "
-            f"fused 路径 floor 覆盖性；eplb 冗余默认 0，本域无余数 rank 分布）")
+            f"V4.1 MoE EP{ep} 不整除专家数 {E}（保守建模域：mega 路径 "
+            f"pinned 断言；fused 通用余数映射未入 pin/未建模。"
+            f"eplb 冗余默认 0）")
 
 
 def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int,

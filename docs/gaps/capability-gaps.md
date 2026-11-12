@@ -5,7 +5,9 @@
 验收方式/当前降级/优先级。日期 2026-11-09；2026-11-10 更新（hc 建模、G-C10、
 新增 G-C11；A 组轮 G-C11 解除）；2026-11-11 更新（R04：G-C1 单机 Engram 解除）；
 2026-11-12 更新（R20：G-C12 CSA2 索引打分/top-k/candidate block 解除；R07a：G-C3
-DFlash 服务栈核对部分解除；R21：G-C13 V4.1 MoE scoring/top-k/分组路由解除）。
+DFlash 服务栈核对部分解除；R21：G-C13 V4.1 MoE scoring/top-k/分组路由解除）；
+2026-11-13 三轮复核（G-C13 证据链修正：EP 只按 mega 断言、共享专家独立相加、
+FusedMoEFactory/ExpertMapManager 未入 pin 的读取点登记）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 
@@ -52,23 +54,28 @@ DFlash 服务栈核对部分解除；R21：G-C13 V4.1 MoE scoring/top-k/分组�
   out_dtype=fp32) Replicated 路由 GEMM；sqrtsoftplus 打分（>20 护栏）；
   noaux_tc e_score_correction_bias 只导选择不进权重；k=6 轮平坦偏置
   argmax（**无分组**——config 无 n_group/topk_group 键，分组仅 V3 式
-  use_grouped_topk 路径）、平手最小 id、NaN→−1e30；sum→1 归一
-  ×routed_scaling_factor=1.5（sum≤0 除 1 护栏）；共享专家（1, inter
-  2304, 无 gate）归一后权重 1.0 追加；V4.1 主干 num_hash_layers=0；
-  视觉 checkpoint bias_vl 哨兵判定；EP 整除域（mega 路径 L357-362 断言
-  n_physical % ep == 0 + fused 路径 L419-421 floor 覆盖性的保守域规则，
-  无余数 rank 分布——与 qwen35 pin 不同，非整除组合拒绝）。
+  use_grouped_topk 路径；默认 False 在未入 pin 的 fused_moe/layer.py）、
+  平手最小 id、NaN→−1e30；sum→1 归一 ×routed_scaling_factor=1.5
+  （sum≤0/NaN 时分母取 1）；共享专家（1, inter 2304, 无 gate）在
+  routed 归一后权重 1.0 **独立相加**（moe_output.py L151-175；L447-464
+  融合槽未启用）；V4.1 主干 num_hash_layers=0；视觉 checkpoint bias_vl
+  哨兵判定；EP **保守整除域**（仅 mega 路径 L357-362 断言
+  n_physical % ep == 0；fused L419-421 的 start_idx 只赋值、未被所有权
+  消费，fused 通用余数映射未入 pin/未建模，不主张 fused 非法；与
+  qwen35 pin 不同，非整除组合在建模域内拒绝）。
   count 三行（moe_gate/moe_score/moe_topk_renorm，FP32 logits 出口修正）、
   memory 路由偏置对象（40×3,072 B）、model_ir extras.moe_route + config
   域校验（softmax/greedy/norm=false 拒绝）、公式 v2.moe_route_*。
   首轮 Codex 验收（不通过）后修正：报告/注册表全部行号对实销行号
-  （sqrtsoftplus dsv4 L85、共享追加 fused_topk_bias L447-464 等）、
-  EP 依据改写为 mega 断言+fused floor 覆盖性、oracle −87.3 下溢门槛
-  标注 IEEE-754 解析假设、replay 工具补 --check 无漂移模式、
-  PR 描述副本入仓（报告 §8）。
+  （sqrtsoftplus dsv4 L85 等）、oracle −87.3 normal-range 近似标注、
+  replay 工具补 --check 无漂移模式、PR 描述副本入仓（报告 §8）。
+  第三轮复核（2026-11-13）修正：fused EP 的 start_idx 只赋值、未被
+  所有权消费（EP 规则只按 mega 断言，删除"floor 覆盖性"）；共享专家
+  实际为独立相加；FusedMoEFactory/ExpertMapManager 未入 pin 的默认值
+  登记为读取点；证据包加 SHA256 自校验（报告 §9）。
 - **验收**：tests/test_v41_moe_route.py 21 项——pin 双侧校验与文本锚点、
   纯 stdlib 语义 oracle（归一 sum==1.5/bias 不进权重/平手最小 id/NaN/
-  fp32 下溢护栏/无组键）、手算绝对值、tp/ep 复制不变、EP 整除负例+
+  normal-range 近似护栏/无组键）、手算绝对值、tp/ep 复制不变、EP 保守域负例+
   E_local=48、count↔memory 对账、config 域负例、structure gate 不解除、
   replay 冻结。默认 TP8/B1/ctx32768 replay：decode +600,480 FLOPs、
   weight_read +122,880B、act_read +61,760B、act_write +48,000B、rows

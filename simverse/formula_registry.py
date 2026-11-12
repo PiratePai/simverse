@@ -273,7 +273,8 @@ F_MOE_ROUTE_SCORE = _f(
     "ops = T·(8E + vl)；vl = E+2（视觉 checkpoint HAS_VL，文本 token 亦逐行"
     "哨兵判定）否则 0——每元素：sqrtsoftplus 打分 5（>20 护栏比较+exp+加一"
     "+log+sqrt）+ bias 加 1 + NaN 护栏 2；读 = T·E·4（FP32 logits）+ "
-    "T·8（input_ids int64 上界）；weight = n_bias·E·4（FP32 复制）",
+    "T·8（HAS_VL 时 input_ids int64 上界，否则 0）；weight = n_bias·E·4"
+    "（FP32 复制）",
     "dsv4_topk.py L63-87（HAS_VL 哨兵/bias_vl where L63-76、weights="
     "sqrt(softplus)（>20 护栏）L85、current=weights+bias L86、NaN→−1e30 "
     "L87）；cpu_router.py L90-95（biased_topk_cpu 同语义 docstring：bias "
@@ -288,11 +289,15 @@ F_MOE_ROUTE_TOPK = _f(
     "weights + int32 ids）",
     "dsv4_topk.py L90-107（static_range(k) 选择循环：max L93、min(candidate)"
     " 平手最小 id L94-95、selected_weight 取无偏 score L96-98、移除已选 "
-    "L102；L104-107 selected_weights *= routed_scaling/sum（sum≤0 除 1）；"
-    "输出 L149-150）；无分组——router_factory.py L166-173 分组仅 "
-    "use_grouped_topk（V4.1 无 n_group/topk_group 键）；"
-    "fused_topk_bias_router.py L447-464 共享专家归一后以权重 1.0 追加"
-    "（默认值 L383-385）",
+    "L102；L104-107 selected_weights *= routed_scaling/sum（sum≤0/NaN "
+    "时分母取 1，NaN 权重本身不被清除）；输出 L149-150）；无分组——"
+    "router_factory.py L166-173 分组仅 use_grouped_topk（V4.1 无 "
+    "n_group/topk_group 键；工厂调用默认 False，见剩余限制）；"
+    "共享专家在 routed 归一后以权重 1.0 **独立相加**（moe_output.py "
+    "L151-175 shared_output 契约；FusedMoEFactory 调用未传 "
+    "n_shared_experts/fuse_shared_experts，model.py L426-449）；"
+    "fused_topk_bias_router.py L447-464 的共享槽是通用融合能力，本模型"
+    "未启用",
     "moe_topk_renorm 行（每 MoE 层；权重=无偏 sqrtsoftplus score，sum→1 后 "
     "×routed_scaling_factor）")
 

@@ -2,11 +2,12 @@
 
 证据链：moe-pin.json 11 文件（vllm @f358f057，blob sha1 对 vllm-tree.json
 逐项校验）→ source-checked 建模（count/moe.v41_moe_route_rows、model_ir
-extras.moe_route、lowering/memory 路由偏置对象、EP 整除断言）。
+extras.moe_route、lowering/memory 路由偏置对象、EP 保守整除域）。
 
 独立性声明：§1-§2 的语义 oracle 用**纯 stdlib（math）**重写 pinned Triton
-kernel 语义（不 import 生产公式/计数实现）；fp32 下溢按 exp(−87)≈0 门槛
-模拟（IEEE-754 单精度解析假设，非 pinned 源码断言——kernel 未执行）。
+kernel 语义（不 import 生产公式/计数实现）；fp32 极小值按 −87.3（最小
+normal 的对数）normal-range 下界近似，低于此在 oracle 中取 0
+（subnormal/FTZ 未实测；非 pinned 源码断言——kernel 未执行）。
 §3 手算绝对值逐字段核对生产行。§7 replay 冻结核对审计面外行逐字段
 不变。source-checked ≠ executed：kernel/CPU forward/GPU 均未执行。
 """
@@ -80,8 +81,9 @@ def test_pinned_source_key_lines_present():
     base = (REF / "vllm/models/deepseek_v4/nvidia/model.py"
             ).read_text(encoding="utf-8")
     assert ("assert self.n_physical_experts % self.ep_size == 0"
-            in base)                                                # EP 整除断言
-    assert "self.experts_start_idx = ep_rank * self.n_local_experts" in base
+            in base)                                                # mega EP 断言
+    # 注意：fused 路径 L419-421 的 experts_start_idx 只赋值、未被 FusedMoE
+    # 专家所有权消费；它不能作为"fused 路径整除/覆盖"的证据，故不作文本锚点。
     assert "out_dtype=torch.float32" in base                        # FP32 logits
     gate = (REF / "vllm/model_executor/layers/fused_moe/router/"
             "gate_linear.py").read_text(encoding="utf-8")
@@ -96,17 +98,18 @@ def test_pinned_source_key_lines_present():
 # ---------------------------------------------------------------------------
 
 def _weight(x: float) -> float:
-    """sqrtsoftplus 打分，fp32 语义：>20 取 sqrt(x)；exp(−87) 下溢为 0。
+    """sqrtsoftplus 打分，fp32 语义：>20 取 sqrt(x)；极小 exp 在 oracle 取 0。
 
-    −87.3 门槛是 **oracle 解析假设**（IEEE-754 单精度最小 normal 2^−126
-    ≈1.18e-38 → ln≈−87.3，exp 更小则下溢 0），非 pinned 源码断言——
-    Triton/CPU kernel 未执行，实际下溢行为未实测。
+    −87.3 是 **oracle 的 normal-range 下界近似**（IEEE-754 单精度最小
+    normal 2^−126≈1.18e-38 → ln≈−87.3），不是源码断言；fp32 subnormal
+    可延伸到更小的值，Triton/CPU 的 subnormal/FTZ 行为未实测。本测试只用
+    −1000 触发全 0，不依赖临界值。
     """
     if x != x:                                 # NaN 先于下溢分支（exp(NaN)=NaN）
         return float("nan")
     if x > 20.0:
         return math.sqrt(x)
-    e = math.exp(x) if x > -87.0 else 0.0     # fp32 exp 下溢门槛（oracle 假设）
+    e = math.exp(x) if x > -87.3 else 0.0     # oracle normal-range 近似
     return math.sqrt(math.log1p(e))
 
 
@@ -139,8 +142,8 @@ def test_oracle_sqrtsoftplus_values_and_guard():
     # 护栏：>20 直接 sqrt(logits)（softplus(x)≈x 截断）
     assert _weight(21.0) == math.sqrt(21.0)
     assert _weight(20.0) == pytest.approx(math.sqrt(math.log1p(math.exp(20.0))))
-    # fp32 下溢：极小 logits 打分为精确 0（sum≤0 护栏入口；−87 门槛为
-    # oracle 解析假设，非源码断言）
+    # 极小 logits 在 oracle normal-range 近似下打分为 0（sum≤0 护栏入口；
+    # −87.3 门槛为 oracle 解析假设，非源码断言，subnormal/FTZ 未实测）
     assert _weight(-1000.0) == 0.0
 
 
@@ -300,7 +303,7 @@ def test_route_rows_replicated_across_tp_and_ep():
 
 
 # ---------------------------------------------------------------------------
-# §4 EP 归属：整除断言（V4.1 pinned）与本地专家数
+# §4 EP 归属：保守整除域（仅 mega 断言）与本地专家数
 # ---------------------------------------------------------------------------
 
 def test_ep_divisibility_enforced_count_and_memory():
@@ -308,13 +311,15 @@ def test_ep_divisibility_enforced_count_and_memory():
     from simverse.model_ir import build_catalog
     from simverse.lowering.memory import target_weight_allocations
     m = build_catalog()["models"]["deepseek_v41_flash"]
-    # 384 % 7 ≠ 0 → 拒绝（pinned 断言，无余数 rank 分布）
+    # 384 % 7 ≠ 0 → 保守域拒绝。mega 路径有 pinned 断言；fused 路径的通用
+    # 余数映射未入 pin/未建模，本仓不声明它非法，只是不纳入当前建模域。
     with pytest.raises(ValueError, match="整除"):
         build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=7)
     with pytest.raises(ValueError, match="整除"):
         target_weight_allocations(m, Q8, 8, ep=7, rank=0)
-    # 整除组合放行（默认 tp8/ep8 → 每 rank 48 专家）
-    for ep in (1, 2, 3, 4, 6, 8):
+    # 实际 V4.1 合法 TP/EP 为 {1,2,4,8}（o_groups=8 约束）；全部整除。
+    # 3/6 虽整除 E，但被 ParallelPlan 的 o_groups 校验拒绝，故不列为"放行"。
+    for ep in (1, 2, 4, 8):
         build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=ep)
 
 
@@ -427,6 +432,15 @@ def test_replay_attribution_and_freeze():
     att = json.loads((EVID / "attribution.json").read_text(encoding="utf-8"))
     assert set(att["expected_changed_ops"]) == {
         "moe_router", "moe_gate", "moe_score", "moe_topk_renorm"}
+    # 证据包自校验：before/scenario 的字节哈希必须与 attribution/provenance
+    # 登记一致（防止重放基线或场景被静默替换）。
+    assert (hashlib.sha256((EVID / "before.json").read_bytes()).hexdigest()
+            == att["before_sha256"])
+    assert (hashlib.sha256((EVID / "scenario.json").read_bytes()).hexdigest()
+            == att["scenario_sha256"])
+    prov = json.loads((EVID / "baseline-provenance.json")
+                      .read_text(encoding="utf-8"))
+    assert prov["before_sha256"] == att["before_sha256"]
     before = json.loads((EVID / "before.json").read_text(encoding="utf-8"))
     after = json.loads((EVID / "after.json").read_text(encoding="utf-8"))
     old, new = before["work"]["target_decode"], after["work"]["target_decode"]

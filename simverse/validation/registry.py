@@ -177,24 +177,31 @@ _PINNED_ASSETS = [
      "score+bias L85-87、权重列=无偏 score L96-98；cpu_router.py L90-95 "
      "同语义 docstring）；k=6 轮平坦 argmax（无分组——V4.1 config 无 "
      "n_group/topk_group 键，工厂 L166-173 仅 use_grouped_topk 走 "
-     "GroupedTopKRouter）、平手取最小专家 id（L94-95）、NaN→−1e30（L87）；"
-     "sum→1 归一后 ×routed_scaling_factor=1.5（sum≤0 除 1 护栏，L104-107）；"
-     "输出 FP32 weights + int32 ids（L149-150）；共享专家（n=1, inter 2304, "
-     "无 gate）归一后以权重 1.0 追加（fused_topk_bias_router.py L447-464，"
-     "默认 L383-385）；V4.1 主干 num_hash_layers=0（v41 model.py L155，无 "
-     "hash MoE）；视觉 checkpoint（vision_n_layers=32>0）bias_vl[E] fp32 "
-     "每 MoE 层创建（L314-320）、HAS_VL 哨兵逐行判定（dsv4 L63-76）；EP "
-     "归属：mega 路径断言 n_physical(=E+eplb 冗余 0) % ep == 0（L357-362）、"
-     "fused 路径 experts_start_idx = ep_rank·(n//ep) floor（L419-421，非整"
-     "除时 rank 覆盖不满 E）——本仓按整除域收窄（require_divisible_ep 保守"
-     "域规则，非两路径均有断言）",
+     "GroupedTopKRouter；pinned model 调用未传该参数，默认 False 在 "
+     "fused_moe/layer.py——该文件未入 moe-pin，列为未入 pin 读取点）、"
+     "平手取最小专家 id（L94-95）、NaN→−1e30（L87）；"
+     "sum→1 归一后 ×routed_scaling_factor=1.5（sum≤0/NaN 时分母取 1，"
+     "L104-107）；输出 FP32 weights + int32 ids（L149-150）；共享专家"
+     "（n=1, inter 2304, 无 gate）在 routed 归一后以权重 1.0 **独立相加**"
+     "（moe_output.py L151-175；FusedMoEFactory 调用未传 n_shared_experts/"
+     "fuse_shared_experts，model.py L426-449；fused_topk_bias_router.py "
+     "L447-464 的共享槽未启用）；V4.1 主干 num_hash_layers=0（v41 model.py "
+     "L155，无 hash MoE）；视觉 checkpoint（vision_n_layers=32>0）"
+     "bias_vl[E] fp32 每 MoE 层创建（L314-320）、HAS_VL 哨兵逐行判定"
+     "（dsv4 L63-76）；EP 归属：mega 路径断言 n_physical(=E+eplb 冗余 0) "
+     "% ep == 0（L357-362）；fused 路径 L419-421 的 start_idx 只赋值、"
+     "未被所有权消费，fused 通用余数映射未入 pin/未建模——本仓按**保守"
+     "整除域**收窄（require_divisible_ep），不主张 fused 路径非法",
      str(REFS / "vllm" / "moe-pin.json"),
      "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；11 文件 blob SHA1 对 "
      "vllm-tree.json 逐项校验 + SHA256 清单",
      "V4.1 MoE 路由管线（count/moe.v41_moe_route_rows 三行、model_ir "
      "extras.moe_route、lowering/memory 路由偏置对象、count/work+memory "
-     "EP 整除域校验、公式 v2.moe_route_*、config 域校验）",
+     "保守 EP 整除域校验、公式 v2.moe_route_*、config 域校验）",
      ["源码阅读 source-checked；kernel/CPU forward/GPU 均未执行",
+      "FusedMoEFactory/ExpertMapManager 未入 moe-pin：use_grouped_topk "
+      "默认 False 与 fused EP 余数分配是未入 pin 的读取点；本 PR 只按 "
+      "pinned model 调用 + mega 断言建模，不据 fused 余数路径声明",
       "部署变体未建模：native MegaMoE（bf16_mega_gate 大批路径，需 EP+fp4 "
       "专家+SP token 分片）、FP32/bf16x3 router GEMM 分层、topk_hash_"
       "softplus_sqrt CUDA 专核与 dsv4_topk Triton 的实现差异（语义一致，"

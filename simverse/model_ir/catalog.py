@@ -67,10 +67,12 @@ _V41_EVIDENCE = ModelEvidence(
         "仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 "
         "source-checked（ev-vllm-v41-csa2），核本体未独立逐行核",
         "moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/"
-        "归一×1.5/共享专家 1.0/EP 整除）已 R21 source-checked（ev-vllm-v41-moe，"
-        "moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径"
-        "（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、"
-        "padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局",
+        "归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked"
+        "（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE "
+        "bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE"
+        "（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、"
+        "量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin"
+        "（use_grouped_topk 默认与 fused EP 余数分配未核）",
         "csa2_deploy_variants: SM100 sparse-logits（indexer_sparse_logits 消费层"
         "只打分候选块）/decode_topk CuTe 路径/TP 行分片 all-gather/PCP/DCP/"
         "fused_mqa_topk/FlashInfer plain-row bf16 变体未建模；CUDA-graph 静态"
@@ -86,8 +88,8 @@ _V41_EVIDENCE = ModelEvidence(
          "压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json "
          "21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；"
          "MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件；"
-         "count 三行+路由偏置对象+EP 整除断言）；量化映射/注意力核本体仍缺口；"
-         "hc 仅 source-checked，未执行。")
+         "count 三行+路由偏置对象+EP 保守整除域（仅 mega 断言））；量化映射/"
+         "注意力核本体仍缺口；hc 仅 source-checked，未执行。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",

@@ -314,28 +314,35 @@ ENTRIES: List[SourceMapEntry] = [
                  "GEMM → sqrtsoftplus 打分 sqrt(softplus(logits))（>20 护栏）"
                  "→ noaux_tc 偏置平坦 top-6（选择列=score+bias、权重=无偏 "
                  "score、平手最小 id、NaN→−1e30；无分组）→ sum→1 归一 ×"
-                 "routed_scaling_factor（sum≤0 除 1）→ FP32 weights + int32 "
-                 "ids；共享专家（1, inter 2304, 无 gate）归一后权重 1.0 追加",
+                 "routed_scaling_factor（sum≤0/NaN 时分母取 1）→ FP32 "
+                 "weights + int32 ids；共享专家（1, inter 2304, 无 gate）在"
+                 "routed 归一后以权重 1.0 **独立相加**（moe_output.py "
+                 "L151-175 的 shared_output 契约）",
         source_pin=VLLM_PIN,
         source_location="vllm/model_executor/layers/fused_moe/router/"
                         "dsv4_topk.py:21-38/63-76/85-107/149-150（can_use "
                         "约束、HAS_VL 哨兵、sqrtsoftplus+bias+NaN、选择循环+"
                         "归一、FP32/int32 输出）；fused_topk_bias_router.py:"
                         "98-464（fused_topk_bias 分派 + FusedTopKBiasRouter "
-                        "共享槽追加 L447-464，默认权重 1.0 L383-385）；"
+                        "通用共享槽 L447-464，默认权重 1.0 L383-385；本模型"
+                        "调用未启用，见 model.py L426-449）；"
                         "router_factory.py:166-173/215-238（分组守卫与 "
                         "FusedTopKBiasRouter 选择 L230）；deepseek_v4/nvidia/"
                         "model.py:240/253/270-277/303-320/357-362/419-421"
                         "（scaling/renormalize/GateLinear fp32/bias 创建/"
-                        "mega EP 断言/fused start_idx floor）；gate_linear"
-                        ".py:26（ReplicatedLinear）；cpu_router.py:81-134"
-                        "（biased_topk_cpu 同语义）",
+                        "mega EP 断言/fused start_idx 仅赋值未用于所有权）；"
+                        "moe_output.py:151-175（shared_output 独立相加）；"
+                        "gate_linear.py:26（ReplicatedLinear）；cpu_router.py:"
+                        "81-134（biased_topk_cpu 同语义）",
         branch_predicate="scoring_func=sqrtsoftplus 且 topk_method=noaux_tc 且 "
                          "norm_topk_prob=true 且（非 native mega moe）→ "
                          "FusedTopKBiasRouter→dsv4_topk/topk_hash_softplus_"
                          "sqrt；分组仅 use_grouped_topk（V4.1 无 n_group/"
-                         "topk_group 键）；num_hash_layers=0（v41/nvidia/"
-                         "model.py L155，无 hash MoE）",
+                         "topk_group 键；pinned model 调用未传该参数，"
+                         "FusedMoEFactory 默认 False 在 fused_moe/layer.py，"
+                         "未入 moe-pin，登记为未入 pin 读取点）；"
+                         "num_hash_layers=0（v41/nvidia/model.py L155，"
+                         "无 hash MoE）",
         thresholds="dsv4_topk Triton 档：E∈{256,384}、k=6、fp32 logits、"
                    "renormalize、bias 必须存在（不满足落 ops.topk_hash_"
                    "softplus_sqrt/CPU biased_topk_cpu，语义相同）；mega 路径"
@@ -345,6 +352,9 @@ ENTRIES: List[SourceMapEntry] = [
         both_sides_covered=True,
         evidence_kind="source-checked",
         uncovered_domain=["kernel/CPU forward/GPU 未执行（op 为解析算术口径）",
+                          "FusedMoEFactory/ExpertMapManager 未入 moe-pin："
+                          "use_grouped_topk 默认 False 与 fused EP 余数分配"
+                          "是未入 pin 读取点；本 PR 不据 fused 余数路径建模",
                           "部署变体未建模：native MegaMoE bf16_mega_gate 大批"
                           "路径（EP+fp4+SP）、FP32/bf16x3 router GEMM 分层、"
                           "dsv4_topk 与专核的指令构成差异",
@@ -353,8 +363,9 @@ ENTRIES: List[SourceMapEntry] = [
                           "整宽路由缓冲未入账"],
         note="R21（2026-11-12）11 文件 pin（moe-pin.json）；count 三行 "
              "moe_gate/moe_score/moe_topk_renorm + memory 路由偏置对象 + "
-             "EP 整除域（mega 断言 L357-362 + fused floor 覆盖性 L419-421 "
-             "的保守域规则）；量化映射/swiglu clamp 仍为独立缺口"),
+             "保守 EP 整除域（仅 mega 断言 L357-362；fused 通用余数映射未"
+             "入 pin/未建模，不主张 fused 非法）；共享专家独立相加"
+             "（moe_output.py）；量化映射/swiglu clamp 仍为独立缺口"),
     SourceMapEntry(
         entry_id="sm-dflash-round-protocol",
         model_or_method="dflash v1",

@@ -173,9 +173,12 @@ _MOE_ROUTE_KEY_NOTES = {
         "cpu_router.py L107 assert renormalize；can_use_dsv4_topk 要求 "
         "renormalize）",
     "routed_scaling_factor":
-        "mapped：1.5——归一后乘 routed_scaling_factor/sum（sum≤0 除 1 护栏，"
-        "dsv4_topk.py L104-107）；只作用于 routed，共享专家权重 1.0 在归一后"
-        "追加（fused_topk_bias_router.py L447-464，默认值 L383-385）",
+        "mapped：1.5——归一后乘 routed_scaling_factor/sum（sum≤0/NaN 分母"
+        "取 1，dsv4_topk.py L104-107）；只作用于 routed。共享专家（无 gate）在"
+        "routed 归一后以权重 1.0 独立相加（moe_output.py L151-175 的"
+        " shared_output 契约）；fused_topk_bias_router.py L447-464 的"
+        "共享槽是通用融合能力，本模型 FusedMoE 调用未启用（未传"
+        " n_shared_experts/fuse_shared_experts，model.py L426-449）",
 }
 
 
@@ -635,8 +638,9 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     按 11 文件 pin（moe-pin.json，vllm @f358f057，blob sha1 对
     vllm-tree.json 逐项校验）source-checked 建模 → mapped
     （count/moe.v41_moe_route_rows 三行 + lowering/memory 路由偏置对象；
-    V4.1 EP 整除断言；公式 v2.moe_route_*；平坦偏置 top-k 无分组——V4.1
-    config 无 n_group/topk_group 键，分组仅 V3 式 use_grouped_topk 路径）。
+    V4.1 EP 保守整除域（mega 断言；fused 通用余数映射未入 pin）；公式
+    v2.moe_route_*；平坦偏置 top-k 无分组——V4.1 config 无
+    n_group/topk_group 键，分组仅 V3 式 use_grouped_topk 路径）。
     量化映射、swiglu clamp、注意力核本体、尾部 compress_ratios 仍为显式
     缺口 → gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
@@ -796,8 +800,12 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     #   * V4.1 主干 num_hash_layers=0（v41/nvidia/model.py L155）——无
     #     hash MoE/tid2eid 表；
     #   * EP：mega 路径断言 n_physical(=E+eplb 冗余 0) % ep == 0（L357-362）；
-    #     fused 路径 floor 除 start_idx（L419-421）非整除时覆盖不满 E——
-    #     本域按整除组合收窄（count/moe.require_divisible_ep 保守规则）。
+    #     fused 路径 L419-421 的 start_idx 只赋值、未被所有权消费；fused
+    #     通用余数映射未入 pin/未建模。本域只声明整除组合
+    #     （count/moe.require_divisible_ep 保守规则），不主张 fused 非法。
+    #   * 共享专家：FusedMoEFactory 调用未传 n_shared_experts/
+    #     fuse_shared_experts（model.py L426-449）→ router 不追加共享槽，
+    #     runner 独立相加（权重 1.0；moe_output.py L151-175）。
     vision_layers = int((full_config or {}).get("vision_config", {})
                         .get("num_hidden_layers", 0) or 0)
     moe_route_spec = {
@@ -811,7 +819,9 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         "bias_vl_bytes": moe.experts * 4 if vision_layers > 0 else 0,
         "hash_layers": 0,
         "grouped": False,
-        "shared_expert_weight": 1.0,   # 归一后追加，无 gate
+        # 独立相加（非 router 融合槽）：FusedMoEFactory 调用未传
+        # n_shared_experts/fuse_shared_experts；见 moe_output.shared_output。
+        "shared_expert_weight": 1.0,
     }
     return ModelIR(
         id=model_id, label=label, family="v41_csa2", hidden=h, vocab=v,

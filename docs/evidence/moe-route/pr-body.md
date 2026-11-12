@@ -16,18 +16,18 @@
 |---|---|
 | scoring | `sqrt(softplus(logits))`，>20 取 sqrt(logits) 护栏（dsv4_topk.py L85） |
 | noaux_tc | e_score_correction_bias[E] fp32 **只导选择不进权重**（选择列 L86-87、无偏权重 L96-98） |
-| 分组 | **无分组**：config 无 n_group/topk_group 键，router_factory 仅 use_grouped_topk 走 GroupedTopKRouter——V4.1 平坦偏置 top-6 |
+| 分组 | **无分组**：config 无 n_group/topk_group 键，router_factory 仅 use_grouped_topk 走 GroupedTopKRouter——V4.1 平坦偏置 top-6。pinned model 调用未传该参数；默认 False 在 fused_moe/layer.py（未入 moe-pin，登记为未入 pin 读取点） |
 | top-k | 6 轮 argmax、无放回、平手最小 id（L94-95）、NaN→−1e30（L87） |
-| 归一/缩放 | sum→1 ×routed_scaling 1.5（sum≤0 除 1 护栏，L104-107）；只作用 routed |
-| 共享专家 | 1×inter2304 **无 gate**（≠Qwen3.6），归一后权重 1.0 追加（L447-464，默认 L383-385） |
+| 归一/缩放 | sum→1 ×routed_scaling 1.5（sum≤0/NaN 时分母取 1，L104-107；NaN 权重不被清除）；只作用 routed |
+| 共享专家 | 1×inter2304 **无 gate**（≠Qwen3.6），routed 归一后权重 1.0 **独立相加**（moe_output.py L151-175；FusedMoEFactory 调用未传 n_shared_experts/fuse_shared_experts，L447-464 的融合槽未启用） |
 | 路由 GEMM | GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）→ logits FP32 |
-| TP/EP 归属 | 路由三行 per-rank 全量复制；EP **整除域**（mega 断言 L357-362 + fused floor 覆盖性 L419-421 的保守域规则，≠qwen35 余数规则） |
+| TP/EP 归属 | 路由三行 per-rank 全量复制；EP **保守整除域**（仅 mega 断言 L357-362；fused L419-421 的 start_idx 只赋值、未被所有权消费，fused 通用余数映射未入 pin/未建模，不主张 fused 非法；≠qwen35 余数规则） |
 | 其他 | 主干 num_hash_layers=0（无 hash MoE）；视觉 checkpoint bias_vl 哨兵逐行判定 |
 
 ### 变更摘要
 
 - `simverse/count/moe.py`：v41_moe_route_rows 三行（moe_gate/moe_score/moe_topk_renorm）+ require_divisible_ep
-- `simverse/count/work.py`：ffn_or_moe_rows route 参数（v41 层替换通用 moe_router 行）；build_model_work EP 整除校验
+- `simverse/count/work.py`：ffn_or_moe_rows route 参数（v41 层替换通用 moe_router 行）；build_model_work 保守 EP 整除域校验（仅 mega 断言）
 - `simverse/model_ir/families.py`：extras.moe_route spec + 四键逐行号注记 + config 域校验（softmax/greedy/norm=false 拒绝）
 - `simverse/lowering/memory.py`：`*-w-moe-route-L{i}` 路由偏置对象（40×3,072B）+ EP 镜像校验
 - `simverse/formula_registry.py`：v2.moe_route_gate/score/topk 三条
@@ -84,3 +84,17 @@ M02/M04/M05/M06 降级与 unknown 传播不变；**structure_complete 仍 False*
 | 附带 | baseline-provenance 补 before_sha256（3addaa5f…）；PR 描述副本入仓 docs/evidence/moe-route/pr-body.md |
 
 修复后：332 passed；node check OK；`tools/replay_v41_moe.py --check` 通过。详见报告 §8。
+
+---
+
+### 第三轮复核（2026-11-13）：修正证据链残留，不改变数值
+
+| 发现 | 处置 |
+|---|---|
+| 高｜fused EP 依据仍不实 | L419-421 的 `experts_start_idx` 只赋值、未被 FusedMoE 所有权消费；fused 实际映射在未入 pin 的 ExpertMapManager（余数分配）。删除"floor 覆盖性/尾部无 owner/与 generic 失配"表述；EP 规则改为**仅 mega 断言**的保守建模域，不主张 fused 非法。行为不变（仍拒绝非整除组合） |
+| 中｜共享专家路径 | V4.1 FusedMoEFactory 调用未传 n_shared_experts/fuse_shared_experts → `num_fused_shared_experts=0`；共享专家独立相加权重 1.0（moe_output.py L151-175）。L447-464 是通用融合槽能力，不是本模型实际路径 |
+| 中｜分组默认证据链 | pinned model 调用未传 use_grouped_topk；默认 False 在 fused_moe/layer.py（未入 pin），登记为未入 pin 读取点；平坦 top-k 结论不变 |
+| 低｜oracle −87 措辞 | −87.3 是最小 normal 的对数，不是 underflow 门槛；改为 normal-range 近似，subnormal/FTZ 未实测 |
+| 低｜EP 测试域 | 只列实际合法 TP/EP {1,2,4,8}（3/6 被 o_groups=8 拒绝）；移除 dead `experts_start_idx` 锚点；加 before/scenario SHA256 自校验 |
+
+验证（本机沙箱）：`tests/test_v41_moe_route.py` 21 passed；`tools/replay_v41_moe.py --check` 通过；全量 `pytest tests` 为 326 passed + 6 个 `tmp_path` setup PermissionError（沙箱 ACL，测试本体未失败；Codex 宿主历史 332 passed）。未改 main、未合入 PR。

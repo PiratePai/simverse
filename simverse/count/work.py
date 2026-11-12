@@ -831,7 +831,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     moe_route = (model.extras or {}).get("moe_route")
     first_layer_index = model.layers[0].index if model.layers else None
     if moe_route:
-        # R21：V4.1 pinned EP 整除断言（非 qwen35 pin 的余数规则）
+        # R21：V4.1 保守 EP 整除域（mega 路径 pinned 断言 L357-362；
+        # fused 通用余数映射未入 pin/未建模，见 count/moe.require_divisible_ep）
         for layer in model.layers:
             if layer.moe is not None and layer.moe.experts:
                 require_divisible_ep(layer.moe.experts, ep)

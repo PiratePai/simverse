@@ -480,9 +480,9 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
             moe_route = (model.extras or {}).get("moe_route") \
                 if fam == "v41_csa2" else None
             if moe_route is not None:
-                # R21：V4.1 EP 整除域（与 count/work 同规则镜像；mega 路径
-                # pinned 断言 + fused floor 覆盖性的保守域规则，qwen35 pin
-                # 的余数规则不适用本族）
+                # R21：V4.1 保守 EP 整除域（与 count/work 同规则镜像）：
+                # mega 路径 pinned 断言 L357-362；fused 通用余数映射未入
+                # pin/未建模，故非整除组合不在本 PR 声明域内。
                 require_divisible_ep(moe.experts, ep)
             router_b = int(model.hidden * moe.experts * b_dense)  # replicated
             shared_b = int(3 * model.hidden * (moe.shared_intermediate // tp)
