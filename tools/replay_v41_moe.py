@@ -54,9 +54,10 @@ def capture_baseline() -> None:
         "captured_before_edits": True,
         "worktree": str(ROOT),
         "git_status_porcelain": status,
-        "note": "R21 基线：HEAD 73738ad（main，R20 CSA2 合入后）+ 预置 MoE "
-                "routing pin 源码（moe-pin.json 11 文件，blob 对 "
-                "vllm-tree.json 校验）；simverse 生产代码未改动",
+        "note": "R21 基线：HEAD 73738ad（main，R20 CSA2 合入后）+ 当时预置 "
+                "MoE routing pin 源码（moe-pin.json 11 文件；gate 修复后 "
+                "14 文件，blob 对 vllm-tree.json 校验）；simverse 生产代码"
+                "未改动",
     }
     (FOLDER / "before.json").write_text(
         json.dumps(before, ensure_ascii=False, indent=1) + "\n",

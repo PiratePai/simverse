@@ -167,18 +167,22 @@ _PINNED_ASSETS = [
       "稀疏 MLA 注意力核本体（4d+5）仍 v0.1 移植，不在本证据范围"],
      False, "2026-11-12"),
     ("ev-vllm-v41-moe", "source-checked",
-     "R21 V4.1 MoE scoring/top-k/分组路由：11 文件 pin（deepseek_v4 基类 "
+     "R21 V4.1 MoE scoring/top-k/分组路由：14 文件 pin（deepseek_v4 基类 "
      "nvidia/model.py + eplb_util、fused_moe router 8 文件（dsv4_topk/"
      "fused_topk_bias/router_factory/base/fused_moe/grouped_topk/cpu/"
-     "gate_linear）+ moe_output）。覆盖：GateLinear(h→E, out_dtype=fp32) "
-     "Replicated 路由 GEMM（model.py L270-277）；sqrtsoftplus 打分 "
+     "gate_linear）+ moe_output + linear.py/base_loader.py/fused_moe/"
+     "layer.py）。覆盖：GateLinear(h→E, out_dtype=fp32) Replicated 路由 "
+     "GEMM（model.py L270-277），**未传 quant_config/params_dtype → 权重/"
+     "输入为 model dtype BF16 2B**（linear.py L287-295/L179-199；"
+     "base_loader.py L86；gate_linear.py L306-341；每层 weight 3,932,160 B）；"
+     "sqrtsoftplus 打分 "
      "sqrt(softplus(logits))（>20 取 sqrt(logits) 护栏，dsv4_topk.py L85）；"
      "noaux_tc e_score_correction_bias[E] fp32 只导选择不进权重（选择列="
      "score+bias L85-87、权重列=无偏 score L96-98；cpu_router.py L90-95 "
      "同语义 docstring）；k=6 轮平坦 argmax（无分组——V4.1 config 无 "
      "n_group/topk_group 键，工厂 L166-173 仅 use_grouped_topk 走 "
-     "GroupedTopKRouter；pinned model 调用未传该参数，默认 False 在 "
-     "fused_moe/layer.py——该文件未入 moe-pin，列为未入 pin 读取点）、"
+     "GroupedTopKRouter；pinned model 调用未传该参数，默认 False 已随 "
+     "fused_moe/layer.py 入 pin）、"
      "平手取最小专家 id（L94-95）、NaN→−1e30（L87）；"
      "sum→1 归一后 ×routed_scaling_factor=1.5（sum≤0/NaN 时分母取 1，"
      "L104-107）；输出 FP32 weights + int32 ids（L149-150）；共享专家"
@@ -193,17 +197,19 @@ _PINNED_ASSETS = [
      "未被所有权消费，fused 通用余数映射未入 pin/未建模——本仓按**保守"
      "整除域**收窄（require_divisible_ep），不主张 fused 路径非法",
      str(REFS / "vllm" / "moe-pin.json"),
-     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；11 文件 blob SHA1 对 "
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；14 文件 blob SHA1 对 "
      "vllm-tree.json 逐项校验 + SHA256 清单",
-     "V4.1 MoE 路由管线（count/moe.v41_moe_route_rows 三行、model_ir "
-     "extras.moe_route、lowering/memory 路由偏置对象、count/work+memory "
-     "保守 EP 整除域校验、公式 v2.moe_route_*、config 域校验）",
+     "V4.1 MoE 路由管线（count/moe.v41_moe_route_rows 三行，gate 权重/"
+     "输入 BF16 2B；model_ir extras.moe_route；lowering/memory router_b + "
+     "路由偏置对象；count/work+memory 保守 EP 整除域校验；公式 "
+     "v2.moe_route_*；config 域校验）",
      ["源码阅读 source-checked；kernel/CPU forward/GPU 均未执行",
-      "FusedMoEFactory/ExpertMapManager 未入 moe-pin：use_grouped_topk "
-      "默认 False 与 fused EP 余数分配是未入 pin 的读取点；本 PR 只按 "
-      "pinned model 调用 + mega 断言建模，不据 fused 余数路径声明",
+      "ExpertMapManager 未入 moe-pin：fused EP 余数分配是未入 pin 的"
+      "读取点；本 PR 只按 pinned model 调用 + mega 断言建模，不据 fused "
+      "余数路径声明",
       "部署变体未建模：native MegaMoE（bf16_mega_gate 大批路径，需 EP+fp4 "
-      "专家+SP token 分片）、FP32/bf16x3 router GEMM 分层、topk_hash_"
+      "专家+SP token 分片）；GateLinear 的 bf16 专核/cuBLAS 档未执行"
+      "（fp32/bf16x3 分层只适用 fp32 router 权重）；topk_hash_"
       "softplus_sqrt CUDA 专核与 dsv4_topk Triton 的实现差异（语义一致，"
       "指令构成不同）",
       "dsv4_topk Triton 档约束 E∈{256,384}、k=6、fp32、renormalize（不满足"
@@ -211,8 +217,8 @@ _PINNED_ASSETS = [
       "E/k 其他值未独立核",
       "DSpark 草稿层 MoE（dspark_n_routed_experts=128/k=3，128 专家 gate_"
       "threshold=1）为方法层字段，本 PR 不建模",
-      "quantization_config（fp8/fp4 专家）仍缺：路由行字节按场景 dense_w "
-      "计价，gate 权重未按 checkpoint 量化布局核实",
+      "quantization_config（fp8/fp4 专家）仍缺：gate 权重已核实为未量化"
+      " BF16 2B（不是场景 dense_w），专家/其余 dense 权重的量化布局未映射",
       "padding skip（VLLM_MOE_SKIP_PADDING）与 CUDA-graph 整宽路由缓冲、"
       "defer_moe_finalize（需 routed_scaling==1.0，V4.1-Flash=1.5 不适用）"
       "未入账；VL 图像 token 的 bias_vl 选择分支只登记未选路",

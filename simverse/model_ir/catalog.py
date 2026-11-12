@@ -68,10 +68,11 @@ _V41_EVIDENCE = ModelEvidence(
         "source-checked（ev-vllm-v41-csa2），核本体未独立逐行核",
         "moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/"
         "归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked"
-        "（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE "
+        "（ev-vllm-v41-moe，moe-pin.json 14 文件）；gate 权重/输入 BF16 "
+        "2B 已 R21 修正；未建模：native MegaMoE "
         "bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE"
         "（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、"
-        "量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin"
+        "量化专家权重布局；ExpertMapManager 未入 pin"
         "（use_grouped_topk 默认与 fused EP 余数分配未核）",
         "csa2_deploy_variants: SM100 sparse-logits（indexer_sparse_logits 消费层"
         "只打分候选块）/decode_topk CuTe 路径/TP 行分片 all-gather/PCP/DCP/"
@@ -87,9 +88,10 @@ _V41_EVIDENCE = ModelEvidence(
          "cpu_offload 运行时行为未覆盖）；CSA2 索引打分/top-k/candidate block/"
          "压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json "
          "21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；"
-         "MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件；"
-         "count 三行+路由偏置对象+EP 保守整除域（仅 mega 断言））；量化映射/"
-         "注意力核本体仍缺口；hc 仅 source-checked，未执行。")
+         "MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 14 文件；"
+         "count 三行 + gate BF16 权重/输入 + 路由偏置对象 + EP 保守整除域"
+         "（仅 mega 断言））；量化映射/注意力核本体仍缺口；hc 仅 "
+         "source-checked，未执行。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",

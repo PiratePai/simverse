@@ -256,18 +256,23 @@ F_CSA2_SPARSE_INDEX_BUILD = _f(
     "sparse_index_build 行（decode 每 (kv源,索引源,r) 运行首层一次；"
     "SWA-only 运行首 L0 topk=0）")
 
-# ---- V4.1 MoE 路由（DeepSeek-V4.1-Flash；证据 moe-pin.json 11 文件 pin
+# ---- V4.1 MoE 路由（DeepSeek-V4.1-Flash；证据 moe-pin.json 14 文件 pin
 #       @f358f057 blob 对 vllm-tree.json，source-checked 2026-11-12 R21；
 #       op 口径同 R04/R05/R20：解析算术 op（exp/log/sqrt/比较各 1），非
 #       kernel 指令数；字节为 unfused 逻辑访问参考，非实测 HBM）----
 F_MOE_ROUTE_GATE = _f(
     "v2.moe_route_gate",
-    "FLOPs = 2·T·h·E；weight_read = h·E·B_gate；写 = T·E·4B（FP32 logits）",
+    "FLOPs = 2·T·h·E；weight_read = h·E·B_gate；act_read = T·h·B_act；"
+    "B_gate=B_act=2（BF16 model dtype）；写 = T·E·4B（FP32 logits）",
     "deepseek_v4/nvidia/model.py L270-277（GateLinear(input=h, output=E, "
-    "bias=False, out_dtype=torch.float32)）；router/gate_linear.py L26 "
-    "（ReplicatedLinear 子类，fp32 出口分层）",
-    "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；替换通用 "
-    "moe_router 行的 FP32 logits 出口）")
+    "bias=False, out_dtype=torch.float32，未传 quant_config/params_dtype）；"
+    "linear.py L287-295（params_dtype=torch.get_default_dtype()，"
+    "quant_config None→UnquantizedLinearMethod）L179-199（weight dtype="
+    "params_dtype）；base_loader.py L86（set_default_torch_dtype("
+    "model_config.dtype)）；router/gate_linear.py L26/L306-341（Replicated "
+    "子类；bf16/fp32 输入分支）",
+    "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；权重/输入 "
+    "按 BF16 2B，FP32 仅 logits 出口）")
 F_MOE_ROUTE_SCORE = _f(
     "v2.moe_route_score",
     "ops = T·(8E + vl)；vl = E+2（视觉 checkpoint HAS_VL，文本 token 亦逐行"

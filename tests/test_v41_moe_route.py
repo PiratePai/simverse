@@ -1,6 +1,6 @@
 """R21：V4.1 MoE scoring/top-k/分组路由独立 oracle（tests/test_v41_moe_route.py）。
 
-证据链：moe-pin.json 11 文件（vllm @f358f057，blob sha1 对 vllm-tree.json
+证据链：moe-pin.json 14 文件（vllm @f358f057，blob sha1 对 vllm-tree.json
 逐项校验）→ source-checked 建模（count/moe.v41_moe_route_rows、model_ir
 extras.moe_route、lowering/memory 路由偏置对象、EP 保守整除域）。
 
@@ -46,7 +46,7 @@ def test_pin_manifest_files_match_tree_and_disk():
     by_path = {e["path"]: e["sha"] for e in tree["tree"] if e["type"] == "blob"}
     assert pin["commit"] == tree["sha"] == \
         "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5"
-    assert len(pin["files"]) == 11
+    assert len(pin["files"]) == 14
     for f in pin["files"]:
         data = (REF / f["path"]).read_bytes()
         blob = hashlib.sha1(b"blob %d\x00" % len(data) + data).hexdigest()
@@ -54,14 +54,17 @@ def test_pin_manifest_files_match_tree_and_disk():
         assert hashlib.sha256(data).hexdigest() == f["sha256"]
         assert f["size"] == len(data)
         assert f["tree_match"] is True
-    # 核心五文件必须在册（路由语义的直接来源）
+    # 核心八文件必须在册（路由语义 + gate 权重 dtype 的直接来源）
     paths = {f["path"] for f in pin["files"]}
     for p in ("vllm/models/deepseek_v4/nvidia/model.py",
               "vllm/model_executor/layers/fused_moe/router/dsv4_topk.py",
               "vllm/model_executor/layers/fused_moe/router/fused_topk_bias_"
               "router.py",
               "vllm/model_executor/layers/fused_moe/router/router_factory.py",
-              "vllm/model_executor/layers/fused_moe/router/gate_linear.py"):
+              "vllm/model_executor/layers/fused_moe/router/gate_linear.py",
+              "vllm/model_executor/layers/linear.py",
+              "vllm/model_executor/model_loader/base_loader.py",
+              "vllm/model_executor/layers/fused_moe/layer.py"):
         assert p in paths
 
 
@@ -88,6 +91,25 @@ def test_pinned_source_key_lines_present():
     gate = (REF / "vllm/model_executor/layers/fused_moe/router/"
             "gate_linear.py").read_text(encoding="utf-8")
     assert "class GateLinear(ReplicatedLinear)" in gate             # 复制路由 GEMM
+    # GateLinear 未传 quant_config/params_dtype：LinearBase 取默认 dtype，
+    # quant_config=None → UnquantizedLinearMethod；base_loader 在 model dtype
+    # 内实例化。这是 gate 权重/输入 2B（V4.1 bf16）的直接源码链。
+    linear = (REF / "vllm/model_executor/layers/linear.py"
+              ).read_text(encoding="utf-8")
+    assert "if quant_config is None:" in linear
+    assert "self.quant_method = UnquantizedLinearMethod()" in linear
+    assert "params_dtype = torch.get_default_dtype()" in linear
+    assert "dtype=params_dtype" in linear
+    assert "class ReplicatedLinear(LinearBase)" in linear
+    loader = (REF / "vllm/model_executor/model_loader/base_loader.py"
+              ).read_text(encoding="utf-8")
+    assert "with set_default_torch_dtype(model_config.dtype):" in loader
+    fused_layer = (REF / "vllm/model_executor/layers/fused_moe/layer.py"
+                   ).read_text(encoding="utf-8")
+    assert "use_grouped_topk: bool = False" in fused_layer
+    assert "n_shared_experts: int | None = None" in fused_layer
+    assert "fuse_shared_experts: bool = False" in fused_layer
+    assert "num_fused_shared_experts = (" in fused_layer
     v41 = (REF / "vllm/models/deepseek_v41/nvidia/model.py"
            ).read_text(encoding="utf-8")
     assert "num_hash_layers=0" in v41                              # 主干无 hash MoE
@@ -238,12 +260,14 @@ def test_route_rows_hand_computed_absolute_values():
     route = build_catalog()["models"]["deepseek_v41_flash"].extras["moe_route"]
     T = 3
     rows = {r["layer_op"]: r
-            for r in v41_moe_route_rows(moe, route, T, H, Q8)}
-    # gate：2·T·h·E；权重 h·E·1B（dense_w=8）；FP32 logits 写 T·E·4
+            for r in v41_moe_route_rows(moe, route, T, H)}
+    # gate：2·T·h·E；GateLinear 未量化 → 权重/输入 BF16 2B；
+    # FP32 logits 写 T·E·4
     g = rows["moe_gate"]
     assert g["flops"] == 2 * 3 * 5120 * 384 == 11_796_480
-    assert g["weight_read"] == g["weight_capacity"] == 5120 * 384
-    assert g["act_read"] == 3 * 5120
+    assert g["weight_read"] == g["weight_capacity"] == 5120 * 384 * 2
+    assert g["weight_capacity"] == 3_932_160
+    assert g["act_read"] == 3 * 5120 * 2 == 30_720
     assert g["act_write"] == 3 * 384 * 4
     # score：T·(9E+2)；偏置 2·E·4（bias+bias_vl）；读 T·(E·4+8)
     s = rows["moe_score"]
@@ -256,6 +280,44 @@ def test_route_rows_hand_computed_absolute_values():
     assert t["flops"] == 3 * (6 * (5 * 384 + 3) + 2 * 6 + 4) == 3 * 11_554
     assert t["act_write"] == 3 * 6 * 8
     assert t["weight_read"] == t["weight_capacity"] == 0
+
+
+def test_gate_bytes_follow_model_dtype_not_scenario_quant():
+    """GateLinear 权重/输入按 model dtype（BF16 2B），不随场景 quant 变。
+
+    GateLinear 未传 quant_config/params_dtype：linear.py L287-295 取
+    torch.get_default_dtype()，base_loader.py L86 在 model dtype 内实例化；
+    out_dtype=fp32 只约束 logits 输出。Q8 的 act=8/dense_w=8 不能套到 gate。
+    """
+    from simverse.count import build_model_work
+    from simverse.lowering.memory import target_weight_allocations
+    from simverse.model_ir import build_catalog
+    m = build_catalog()["models"]["deepseek_v41_flash"]
+    Q4 = {"dense_w": 4, "expert_w": 4, "act": 4, "kv": 8, "state": 32}
+
+    def gate_sig(q):
+        return [(r.op, r.weight_read, r.weight_capacity, r.act_read,
+                 r.act_write)
+                for r in build_model_work(m, "decode", 1, 512, 1, q, tp=8)
+                if r.op == "moe_gate"]
+
+    sig8, sig4 = gate_sig(Q8), gate_sig(Q4)
+    assert sig8 == sig4 and len(sig8) == 40
+    assert all(w == 5120 * 384 * 2 and cap == 5120 * 384 * 2
+               and ar == 5120 * 2 and aw == 384 * 4
+               for _, w, cap, ar, aw in sig8)
+
+    # memory 侧同一账：-w-moe-L 的 router 分量必须是 2B，不是 dense_w/8。
+    allocs = {a.alloc_id: a.bytes
+              for a in target_weight_allocations(m, Q8, 8, ep=1, rank=0)
+              if "-w-moe-L" in a.alloc_id}
+    inter = 2304 // 8
+    router = 5120 * 384 * 2
+    shared = int(3 * 5120 * inter * (Q8["dense_w"] / 8))
+    experts = int(384 * 3 * 5120 * inter * (Q8["expert_w"] / 8))
+    assert len(allocs) == 40
+    assert allocs["target-w-moe-L0"] == router + shared + experts
+    assert router == 3_932_160 and 40 * router == 157_286_400
 
 
 def test_build_model_work_route_rows_and_shared_no_gate():
@@ -367,6 +429,12 @@ def test_route_spec_constants_from_pinned_source():
     assert spec["renormalize"] is True
     assert spec["routed_scaling"] == 1.5
     assert spec["gate_out_dtype"] == "fp32" and spec["logits_itemsize"] == 4
+    # GateLinear 未传 quant_config/params_dtype：权重与输入是模型 dtype。
+    assert spec["model_dtype"] == "bfloat16"
+    assert spec["gate_weight_dtype"] == "bfloat16"
+    assert spec["gate_weight_itemsize"] == 2
+    assert spec["gate_act_dtype"] == "bfloat16"
+    assert spec["gate_act_itemsize"] == 2
     assert spec["bias_bytes"] == 384 * 4
     # V4.1-Flash 是视觉 checkpoint（vision 32 层）→ bias_vl 存在
     assert spec["bias_vl_bytes"] == 384 * 4

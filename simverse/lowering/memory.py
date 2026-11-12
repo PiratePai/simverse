@@ -484,7 +484,11 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                 # mega 路径 pinned 断言 L357-362；fused 通用余数映射未入
                 # pin/未建模，故非整除组合不在本 PR 声明域内。
                 require_divisible_ep(moe.experts, ep)
-            router_b = int(model.hidden * moe.experts * b_dense)  # replicated
+            # GateLinear 权重是 model dtype（BF16），不是场景 quant 的
+            # dense_w；其余 shared/gate 保持原配方。
+            gate_w_b = (int(moe_route["gate_weight_itemsize"])
+                        if moe_route is not None else b_dense)
+            router_b = int(model.hidden * moe.experts * gate_w_b)  # replicated
             shared_b = int(3 * model.hidden * (moe.shared_intermediate // tp)
                            * b_dense) if moe.shared_intermediate else 0
             gate_b = int(model.hidden * b_dense) if moe.shared_gate else 0
@@ -498,10 +502,13 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                 experts_b = int(moe.experts * 3 * model.hidden
                                 * (moe.intermediate // tp) * b_expert)
                 note = f"EP off inter/tp={moe.intermediate // tp}（每 rank 全 E）"
+            router_note = (f"router {moe_route['gate_weight_dtype']} "
+                           f"{gate_w_b}B" if moe_route is not None else
+                           "router 场景 dense_w")
             allocs.append(Allocation(
                 f"{role}-w-moe-L{li}", "weights", role,
                 router_b + shared_b + gate_b + experts_b,
-                live_note=f"常驻（router/shared_gate 复制；{note}）"))
+                live_note=f"常驻（{router_note}/shared_gate 复制；{note}）"))
             if moe_route is not None:
                 # R21：路由偏置向量（FP32 每卡复制，不随 tp/ep 缩放）——
                 # e_score_correction_bias[E]（noaux_tc）+ bias_vl[E]（视觉

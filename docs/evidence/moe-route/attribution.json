@@ -15,9 +15,9 @@
   },
   "after": {
     "flops": 7176453222,
-    "weight_read": 1570319808,
+    "weight_read": 1648963008,
     "weight_read_expected": 530843184.0,
-    "act_read": 10308094,
+    "act_read": 10512894,
     "act_write": 6330096,
     "kv_read": 42467988,
     "kv_write": 24076,
@@ -27,9 +27,9 @@
   },
   "delta": {
     "flops": 600480,
-    "weight_read": 122880,
+    "weight_read": 78766080,
     "weight_read_expected": 0.0,
-    "act_read": 61760,
+    "act_read": 266560,
     "act_write": 48000,
     "kv_read": 0,
     "kv_write": 0,
@@ -53,9 +53,9 @@
       },
       "after": {
         "flops": 157286400,
-        "weight_read": 78643200,
+        "weight_read": 157286400,
         "weight_read_expected": 0.0,
-        "act_read": 204800,
+        "act_read": 409600,
         "act_write": 61440,
         "kv_read": 0,
         "kv_write": 0,
@@ -65,9 +65,9 @@
       },
       "delta": {
         "flops": 157286400,
-        "weight_read": 78643200,
+        "weight_read": 157286400,
         "weight_read_expected": 0.0,
-        "act_read": 204800,
+        "act_read": 409600,
         "act_write": 61440,
         "kv_read": 0,
         "kv_write": 0,
@@ -77,7 +77,7 @@
       },
       "rows_before": 0,
       "rows_after": 40,
-      "t_ms_delta": 0.02357095225962155
+      "t_ms_delta": 0.047107668677531994
     },
     "moe_router": {
       "before": {
@@ -203,7 +203,7 @@
       "t_ms_delta": 6.198407457407254e-07
     }
   },
-  "t_ms_delta": 6.95054613117918e-05,
+  "t_ms_delta": 0.023606221879219902,
   "before_memory": {
     "steady_bytes": 35690092992,
     "transient_peak_bytes": 13312,
@@ -216,7 +216,7 @@
     "allocatable_kind": "unknown"
   },
   "after_memory": {
-    "steady_bytes": 35690215872,
+    "steady_bytes": 35768859072,
     "transient_peak_bytes": 13312,
     "peak_complete": false,
     "unknown_components": [
@@ -227,7 +227,7 @@
     "allocatable_kind": "unknown"
   },
   "before_known_peak": 35690106304,
-  "after_known_peak": 35690229184,
+  "after_known_peak": 35768872384,
   "expected_changed_ops": [
     "moe_gate",
     "moe_router",

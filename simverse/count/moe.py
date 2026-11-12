@@ -11,7 +11,7 @@ per-rank 配方（R01，vLLM @dc74b8cb pin；lowering/parallel.py 证据）：
   * EP 开（ep=tp）：每 rank E//ep(+余数) 个整专家；期望流量按均匀路由
     的本地份额计算（E_l/E 比例），显式登记 expectation。
 
-V4.1 路由细化（R21，vllm @f358f057 moe-pin.json 11 文件 source-checked）：
+V4.1 路由细化（R21，vllm @f358f057 moe-pin.json 14 文件 source-checked）：
   * v41_moe_route_rows：sqrtsoftplus 打分 + noaux_tc 偏置平坦 top-k（无分组）
     + sum→1 归一 ×routed_scaling 三行替换通用 moe_router 行，per-rank 复制；
   * V4.1 EP 取保守整除域（require_divisible_ep）：mega 路径有 pinned
@@ -79,16 +79,22 @@ def require_divisible_ep(E: int, ep: int) -> None:
             f"eplb 冗余默认 0）")
 
 
-def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int,
-                       quant: dict) -> list:
+def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int) -> list:
     """V4.1 MoE 路由三行（gate/score/topk_renorm）——**per-rank 全量复制**。
 
-    证据（moe-pin.json 11 文件，vllm @f358f057，blob sha1 对 vllm-tree.json
-    逐项校验；source-checked 2026-11-12 R21，未执行 kernel/CPU/GPU）：
+    证据（moe-pin.json 14 文件，vllm @f358f057，blob sha1 对 vllm-tree.json
+    逐项校验；source-checked 2026-11-12/13 R21，未执行 kernel/CPU/GPU）：
       * gate：GateLinear(h→E, bias=False, out_dtype=fp32) 为 ReplicatedLinear
         子类（deepseek_v4/nvidia/model.py L270-277，out_dtype 在 L274；
         router/gate_linear.py L26）→ 每 rank 全量 GEMM，router logits
-        **FP32**；
+        **FP32**；**权重与输入 activation 是 model dtype**：GateLinear 未传
+        quant_config/params_dtype → LinearBase `params_dtype =
+        torch.get_default_dtype()`、`quant_config is None →
+        UnquantizedLinearMethod`（linear.py L287-295、L179-199）；
+        base_loader 在 `set_default_torch_dtype(model_config.dtype)` 内
+        实例化（base_loader.py L86）→ V4.1 config dtype=bfloat16 时 gate
+        权重/输入均 2B（不是场景 quant 的 dense_w/act）。gate_linear.py
+        forward 的 bf16/fp32 分支（L306-341）要求 x.dtype=bf16；
       * scoring sqrtsoftplus：weights = sqrt(softplus(logits))，logits>20 取
         sqrt(logits) 数值护栏（dsv4_topk.py L85）；选择列 = weights +
         e_score_correction_bias（L86），NaN→−1e30（L87）；CPU 侧
@@ -109,8 +115,10 @@ def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int,
     """
     E, k = moe.experts, moe.top_k
     T = tokens
-    b_router = quant["dense_w"] / 8
-    b_act = quant["act"] / 8
+    # GateLinear 权重/输入 = model dtype（spec 来自 config dtype），
+    # 不是场景 quant 的 dense_w/act；logits 出口才是 FP32 4B。
+    gate_w_bytes = int(route["gate_weight_itemsize"])
+    gate_a_bytes = int(route["gate_act_itemsize"])
     has_vl = bool(route.get("bias_vl_bytes"))
     vl_ops = (E + 2) if has_vl else 0            # where E + 哨兵 2 比较/token
     vl_ids_read = T * 8 if has_vl else 0         # input_ids int64 上界
@@ -119,14 +127,17 @@ def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int,
     score_ops = T * (8 * E + vl_ops)             # 打分 5 + bias 加 1 + NaN 护栏 2
     topk_ops = T * (k * (5 * E + 3) + 2 * k + 4)  # k 轮选择 + 归一/缩放
     return [{
-        # GateLinear：Replicated，每 rank 全量 h×E；FP32 logits 出口
+        # GateLinear：Replicated，每 rank 全量 h×E；BF16 权重/输入，
+        # FP32 logits 出口
         "layer_op": "moe_gate", "flops": 2 * T * hidden * E,
-        "weight_read": int(hidden * E * b_router),
-        "weight_capacity": int(hidden * E * b_router),
-        "act_read": int(T * hidden * b_act), "act_write": int(T * E * 4),
+        "weight_read": int(hidden * E * gate_w_bytes),
+        "weight_capacity": int(hidden * E * gate_w_bytes),
+        "act_read": int(T * hidden * gate_a_bytes),
+        "act_write": int(T * E * 4),
         "formula": FR.F_MOE_ROUTE_GATE, "statistic": "exact",
         "shape": f"[{T},{hidden}]@[{hidden},{E}] replicated（GateLinear "
-                 "out_dtype=fp32，不随 tp/ep 缩放）",
+                 f"{route['gate_weight_dtype']} 权重/输入 "
+                 f"{gate_w_bytes}B，out_dtype=fp32；不随 tp/ep 缩放）",
     }, {
         # sqrtsoftplus 打分 + 偏置加 + NaN 护栏（+ VL 哨兵判定）
         "layer_op": "moe_score", "flops": score_ops,

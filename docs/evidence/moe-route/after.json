@@ -1,15 +1,15 @@
 {
  "schema_version": "0.2",
  "manifest": {
-  "run_id": "sha256:8be9e27ba4cdaaefa18d15325b5bdd0972141b84c41d15ebe5ca0a99ae5f6a2c",
+  "run_id": "sha256:214bcb06f8ecd331e11a3ba33b48cba97788301db5926bb564c30ea7bb21bdfa",
   "status": "completed",
   "input_digest": "sha256:f51b4110ccfdc0014f63c5c5a42b824bd53294c0e56ee7c0ad54d3101159faea",
-  "model_ir_digest": "sha256:df4b31319e0d7c4c57297e9e89316ac230896ac9f3efc0c988ea4b01523bd815",
+  "model_ir_digest": "sha256:8bf762bddffb31b8f6b4028b763a034dd6dabf94cd86074fca861362edb6e50f",
   "method_digest": "sha256:bc10470a78cc508de34929445a502d43bcccdcfe6562ea1dee44c6a3a5f477e2",
   "lowering_digest": "",
   "cost_digest": "sha256:88dd8e1cfa72f4798537a815bbc71708639ae57c03c3436c570972cc5268ad74",
   "device_snapshot_digest": "sha256:ad4b44a3f2ce32dcbe660392989d9a2fb7501aaa0046279e76ba8a95cbc68abc",
-  "code_revision": "73738ad5ebb126064ede79b8b7cf637a61dd2eec",
+  "code_revision": "53b04fd7f1ba23726041c2500ec15a3cc4c981a7",
   "parent_run_id": null,
   "created_at": "",
   "progress": 0.0,
@@ -102,7 +102,7 @@
     "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）",
     "mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模",
     "csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核",
-    "moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 整除）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局",
+    "moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）",
     "csa2_deploy_variants: SM100 sparse-logits（indexer_sparse_logits 消费层只打分候选块）/decode_topk CuTe 路径/TP 行分片 all-gather/PCP/DCP/fused_mqa_topk/FlashInfer plain-row bf16 变体未建模；CUDA-graph 静态整宽 logits 缓冲与 -inf 尾写、cooperative 候选值相等边界近似未入账",
     "quantization_config: FP8/FP4 配置未映射到本仓计算精度（compressor/weights_proj/wk 的 bf16 固定与打包记录宽度为 pinned 事实，其余量化路径仍缺）"
    ],
@@ -111,7 +111,7 @@
     "dflash_v1": "unsupported",
     "mtp": "unverified"
    },
-   "note": "Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 cpu_offload 运行时行为未覆盖）；CSA2 索引打分/top-k/candidate block/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json 21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件；count 三行+路由偏置对象+EP 整除断言）；量化映射/注意力核本体仍缺口；hc 仅 source-checked，未执行。"
+   "note": "Engram 已 source-checked 建模（R04，ev-vllm-v41-engram；DP 交换与 cpu_offload 运行时行为未覆盖）；CSA2 索引打分/top-k/candidate block/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2，csa2-pin.json 21 文件；短上下文旁路/decode/prefill 分支/候选所有权入册 source_map）；MoE 路由已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件；count 三行+路由偏置对象+EP 保守整除域（仅 mega 断言））；量化映射/注意力核本体仍缺口；hc 仅 source-checked，未执行。"
   },
   "gaps": [
    "quantization_config: 量化配置未映射（场景精度独立输入，不冒充已消费）",
@@ -393,7 +393,7 @@
    "text_config.norm_topk_prob": {
     "status": "mapped",
     "consumer": "model_ir+count+memory",
-    "note": "mapped：true——选中权重 sum→1 归一（dsv4_topk.py L111-115；cpu_router.py L107 assert renormalize；can_use_dsv4_topk 要求 renormalize）"
+    "note": "mapped：true——选中权重 sum→1 归一（dsv4_topk.py L104-107；cpu_router.py L107 assert renormalize；can_use_dsv4_topk 要求 renormalize）"
    },
    "text_config.num_attention_heads": {
     "status": "mapped",
@@ -483,12 +483,12 @@
    "text_config.routed_scaling_factor": {
     "status": "mapped",
     "consumer": "model_ir+count+memory",
-    "note": "mapped：1.5——归一后乘 routed_scaling_factor/sum（sum≤0 除 1 护栏，dsv4_topk.py L111-115）；只作用于 routed，共享专家权重 1.0 在归一后追加（fused_topk_bias_router.py L301-320）"
+    "note": "mapped：1.5——归一后乘 routed_scaling_factor/sum（sum≤0/NaN 分母取 1，dsv4_topk.py L104-107）；只作用于 routed。共享专家（无 gate）在routed 归一后以权重 1.0 独立相加（moe_output.py L151-175 的 shared_output 契约）；fused_topk_bias_router.py L447-464 的共享槽是通用融合能力，本模型 FusedMoE 调用未启用（未传 n_shared_experts/fuse_shared_experts，model.py L426-449）"
    },
    "text_config.scoring_func": {
     "status": "mapped",
     "consumer": "model_ir+count+memory",
-    "note": "mapped：sqrtsoftplus——weights=sqrt(softplus(logits))，>20 取 sqrt(logits) 护栏（dsv4_topk.py L88-92；cpu_router.py L90-107 同语义 docstring）；仅此一档（mega/model.py L255-258 断言 sqrtsoftplus）"
+    "note": "mapped：sqrtsoftplus——weights=sqrt(softplus(logits))，>20 取 sqrt(logits) 护栏（dsv4_topk.py L85；cpu_router.py L90-95 同语义 docstring）；仅此一档（mega/model.py L255-258 断言 sqrtsoftplus）"
    },
    "text_config.sliding_window": {
     "status": "mapped",
@@ -508,7 +508,7 @@
    "text_config.topk_method": {
     "status": "mapped",
     "consumer": "model_ir+count+memory",
-    "note": "mapped：noaux_tc——e_score_correction_bias[E] fp32 只导选择不进权重（deepseek_v4/nvidia/model.py L303-313 建 Parameter；dsv4_topk.py L93-109 选择列=weights+bias、权重取无偏 score）"
+    "note": "mapped：noaux_tc——e_score_correction_bias[E] fp32 只导选择不进权重（deepseek_v4/nvidia/model.py L303-313 建 Parameter；dsv4_topk.py L85-87 选择列=weights+bias、L96-98 权重取无偏 score）"
    },
    "text_config.use_cache": {
     "status": "metadata-only",
@@ -586,7 +586,7 @@
     "note": "视觉塔不在本仓文本推理 scope；未执行，不作为结构完备证据"
    }
   },
-  "digest": "sha256:df4b31319e0d7c4c57297e9e89316ac230896ac9f3efc0c988ea4b01523bd815"
+  "digest": "sha256:8bf762bddffb31b8f6b4028b763a034dd6dabf94cd86074fca861362edb6e50f"
  },
  "method_plan": {
   "method_id": "baseline",
@@ -619,9 +619,9 @@
   "target_decode": {
    "totals": {
     "flops": 7176453222,
-    "weight_read": 1570319808,
+    "weight_read": 1648963008,
     "weight_read_expected": 530843184.0,
-    "act_read": 10308094,
+    "act_read": 10512894,
     "act_write": 6330096,
     "kv_read": 42467988,
     "kv_write": 24076,
@@ -908,19 +908,19 @@
      "layer": 0,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -1412,19 +1412,19 @@
      "layer": 1,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -2210,19 +2210,19 @@
      "layer": 2,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -2693,19 +2693,19 @@
      "layer": 3,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -3176,19 +3176,19 @@
      "layer": 4,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -3659,19 +3659,19 @@
      "layer": 5,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -4142,19 +4142,19 @@
      "layer": 6,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -4625,19 +4625,19 @@
      "layer": 7,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -5339,19 +5339,19 @@
      "layer": 8,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -5822,19 +5822,19 @@
      "layer": 9,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -6305,19 +6305,19 @@
      "layer": 10,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -6788,19 +6788,19 @@
      "layer": 11,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -7271,19 +7271,19 @@
      "layer": 12,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -7754,19 +7754,19 @@
      "layer": 13,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -8468,19 +8468,19 @@
      "layer": 14,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -9014,19 +9014,19 @@
      "layer": 15,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -9497,19 +9497,19 @@
      "layer": 16,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -9980,19 +9980,19 @@
      "layer": 17,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -10463,19 +10463,19 @@
      "layer": 18,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -10946,19 +10946,19 @@
      "layer": 19,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -11681,19 +11681,19 @@
      "layer": 20,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -12164,19 +12164,19 @@
      "layer": 21,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -12647,19 +12647,19 @@
      "layer": 22,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -13130,19 +13130,19 @@
      "layer": 23,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -13760,19 +13760,19 @@
      "layer": 24,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -14243,19 +14243,19 @@
      "layer": 25,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -14726,19 +14726,19 @@
      "layer": 26,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -15209,19 +15209,19 @@
      "layer": 27,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -15839,19 +15839,19 @@
      "layer": 28,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -16322,19 +16322,19 @@
      "layer": 29,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -16805,19 +16805,19 @@
      "layer": 30,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -17288,19 +17288,19 @@
      "layer": 31,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -17918,19 +17918,19 @@
      "layer": 32,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -18401,19 +18401,19 @@
      "layer": 33,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -18884,19 +18884,19 @@
      "layer": 34,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -19367,19 +19367,19 @@
      "layer": 35,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -19997,19 +19997,19 @@
      "layer": 36,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -20480,19 +20480,19 @@
      "layer": 37,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -20963,19 +20963,19 @@
      "layer": 38,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -21446,19 +21446,19 @@
      "layer": 39,
      "op": "moe_gate",
      "flops": 3932160,
-     "weight_read": 1966080,
+     "weight_read": 3932160,
      "weight_read_expected": null,
-     "act_read": 5120,
+     "act_read": 10240,
      "act_write": 1536,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 1966080,
+     "weight_capacity": 3932160,
      "state_capacity": 0,
      "formula": "v2.moe_route_gate",
      "statistic": "exact",
-     "shape": "[1,5120]@[5120,384] replicated（GateLinear out_dtype=fp32，不随 tp/ep 缩放）",
+     "shape": "[1,5120]@[5120,384] replicated（GateLinear bfloat16 权重/输入 2B，out_dtype=fp32；不随 tp/ep 缩放）",
      "exec_count": 1,
      "role": "target"
     },
@@ -21784,7 +21784,7 @@
  "memory": {},
  "cost": {
   "target_decode": {
-   "t_ms": 116.16029927936404,
+   "t_ms": 116.18383599578195,
    "collectives": {
     "per_layer": [
      {
@@ -22225,9 +22225,9 @@
   "memory": {
    "target_r0": {
     "rank_id": "target-r0",
-    "steady_bytes": 35690215872,
+    "steady_bytes": 35768859072,
     "transient_peak_bytes": 13312,
-    "known_peak_bytes": 35690229184,
+    "known_peak_bytes": 35768872384,
     "host_resident_bytes": 25344443520,
     "nominal_bytes": 80000000000,
     "allocatable_bytes": null,
@@ -22289,13 +22289,13 @@
       "alloc_id": "target-w-moe-L0",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22380,13 +22380,13 @@
       "alloc_id": "target-w-moe-L1",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22432,13 +22432,13 @@
       "alloc_id": "target-w-moe-L2",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22484,13 +22484,13 @@
       "alloc_id": "target-w-moe-L3",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22536,13 +22536,13 @@
       "alloc_id": "target-w-moe-L4",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22588,13 +22588,13 @@
       "alloc_id": "target-w-moe-L5",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22640,13 +22640,13 @@
       "alloc_id": "target-w-moe-L6",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22692,13 +22692,13 @@
       "alloc_id": "target-w-moe-L7",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22744,13 +22744,13 @@
       "alloc_id": "target-w-moe-L8",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22796,13 +22796,13 @@
       "alloc_id": "target-w-moe-L9",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22848,13 +22848,13 @@
       "alloc_id": "target-w-moe-L10",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22900,13 +22900,13 @@
       "alloc_id": "target-w-moe-L11",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -22952,13 +22952,13 @@
       "alloc_id": "target-w-moe-L12",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23004,13 +23004,13 @@
       "alloc_id": "target-w-moe-L13",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23095,13 +23095,13 @@
       "alloc_id": "target-w-moe-L14",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23147,13 +23147,13 @@
       "alloc_id": "target-w-moe-L15",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23199,13 +23199,13 @@
       "alloc_id": "target-w-moe-L16",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23251,13 +23251,13 @@
       "alloc_id": "target-w-moe-L17",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23303,13 +23303,13 @@
       "alloc_id": "target-w-moe-L18",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23355,13 +23355,13 @@
       "alloc_id": "target-w-moe-L19",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23407,13 +23407,13 @@
       "alloc_id": "target-w-moe-L20",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23459,13 +23459,13 @@
       "alloc_id": "target-w-moe-L21",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23511,13 +23511,13 @@
       "alloc_id": "target-w-moe-L22",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23563,13 +23563,13 @@
       "alloc_id": "target-w-moe-L23",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23615,13 +23615,13 @@
       "alloc_id": "target-w-moe-L24",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23667,13 +23667,13 @@
       "alloc_id": "target-w-moe-L25",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23719,13 +23719,13 @@
       "alloc_id": "target-w-moe-L26",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23771,13 +23771,13 @@
       "alloc_id": "target-w-moe-L27",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23823,13 +23823,13 @@
       "alloc_id": "target-w-moe-L28",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23875,13 +23875,13 @@
       "alloc_id": "target-w-moe-L29",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23927,13 +23927,13 @@
       "alloc_id": "target-w-moe-L30",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -23979,13 +23979,13 @@
       "alloc_id": "target-w-moe-L31",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24031,13 +24031,13 @@
       "alloc_id": "target-w-moe-L32",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24083,13 +24083,13 @@
       "alloc_id": "target-w-moe-L33",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24135,13 +24135,13 @@
       "alloc_id": "target-w-moe-L34",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24187,13 +24187,13 @@
       "alloc_id": "target-w-moe-L35",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24239,13 +24239,13 @@
       "alloc_id": "target-w-moe-L36",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24291,13 +24291,13 @@
       "alloc_id": "target-w-moe-L37",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24343,13 +24343,13 @@
       "alloc_id": "target-w-moe-L38",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24395,13 +24395,13 @@
       "alloc_id": "target-w-moe-L39",
       "kind": "weights",
       "role": "target",
-      "bytes": 855736320,
+      "bytes": 857702400,
       "shared_identity": null,
       "lifecycle": "resident",
       "consumers": [
        "target"
       ],
-      "live_note": "常驻（router/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
+      "live_note": "常驻（router bfloat16 2B/shared_gate 复制；EP off inter/tp=288（每 rank 全 E））",
       "placement": "gpu"
      },
      {
@@ -24536,7 +24536,7 @@
       "role": "target",
       "stage": "decode",
       "label": "单 token decode 前向",
-      "t_ms": 116.16029927936404,
+      "t_ms": 116.18383599578195,
       "depends_on": [],
       "start_ms": 0.0,
       "detail": {
@@ -24544,9 +24544,9 @@
       }
      }
     ],
-    "t_round_ms": 116.16029927936404,
+    "t_round_ms": 116.18383599578195,
     "E_N": 1.0,
-    "tpot_ms": 116.16029927936404,
+    "tpot_ms": 116.18383599578195,
     "reason": null
    }
   ],
@@ -24555,7 +24555,7 @@
  },
  "metrics": {
   "M01_tpot_analytical": {
-   "value": 116.16029927936404,
+   "value": 116.18383599578195,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -24580,7 +24580,7 @@
    "sample": null
   },
   "M01_tpot_baseline": {
-   "value": 116.16029927936404,
+   "value": 116.18383599578195,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -24621,7 +24621,7 @@
    "formula_ref": "v2.roofline",
    "input_refs": [],
    "assumption_refs": [],
-   "reason": "不参与排名：配置覆盖/forward 源码证据未同时完备（详见 model_config_coverage 与 model_forward_evidence）; config 覆盖不完整：4 项缺口；未登记键不得默认 ignored; forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 整除）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局; 当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; Engram host 查表与预取时延未知；阶段耗时仅为 GPU 侧解析下界; target_r0 known_peak=35690229184B（steady=35690215872）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
+   "reason": "不参与排名：配置覆盖/forward 源码证据未同时完备（详见 model_config_coverage 与 model_forward_evidence）; config 覆盖不完整：4 项缺口；未登记键不得默认 ignored; forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）; 当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; Engram host 查表与预取时延未知；阶段耗时仅为 GPU 侧解析下界; target_r0 known_peak=35768872384B（steady=35768859072）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
    "interval": null,
    "sample": null
   },
@@ -24672,7 +24672,7 @@
    "sample": null
   },
   "M04_round_ms": {
-   "value": 116.16029927936404,
+   "value": 116.18383599578195,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -24696,7 +24696,7 @@
   },
   "M04_stage_breakdown_ms": {
    "decode": {
-    "value": 116.16029927936404,
+    "value": 116.18383599578195,
     "unit": "ms",
     "scope": {
      "phase": "steady-decode",
@@ -24745,7 +24745,7 @@
    "sample": null
   },
   "M06_memory_target_r0": {
-   "value": 35690229184,
+   "value": 35768872384,
    "unit": "B",
    "scope": {
     "phase": "steady-decode",
@@ -24773,7 +24773,7 @@
    "sample": null
   },
   "M06_memory_target_r0_detail": {
-   "steady_bytes": 35690215872,
+   "steady_bytes": 35768859072,
    "transient_peak_bytes": 13312,
    "peak_complete": false,
    "unknown_components": [
@@ -24808,7 +24808,7 @@
     "sample": null
    },
    "weight_read": {
-    "value": 1570319808,
+    "value": 1648963008,
     "unit": "B",
     "scope": {
      "phase": "steady-decode",
@@ -24854,7 +24854,7 @@
     "sample": null
    },
    "act_read": {
-    "value": 10308094,
+    "value": 10512894,
     "unit": "B",
     "scope": {
      "phase": "steady-decode",
@@ -25040,7 +25040,7 @@
    },
    "model_forward_evidence": {
     "status": "approximated",
-    "reason": "forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 整除）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局",
+    "reason": "forward 仅部分源码核过；未核路径：engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；cpu_offload 运行时行为（预取流/TLB/阈值）未建模——单机 Engram 算子已 source-checked（ev-vllm-v41-engram，R04）；mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模；csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 source-checked（ev-vllm-v41-csa2），核本体未独立逐行核；moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked（ev-vllm-v41-moe，moe-pin.json 11 文件）；未建模：native MegaMoE bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、量化专家权重布局；FusedMoEFactory/ExpertMapManager 未入 pin（use_grouped_topk 默认与 fused EP 余数分配未核）",
     "affected_metrics": [
      "M02 部署排名资格",
      "M04 轮分解"
@@ -25092,7 +25092,7 @@
    },
    "memory_target_r0": {
     "status": "unknown",
-    "reason": "target_r0 known_peak=35690229184B（steady=35690215872）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
+    "reason": "target_r0 known_peak=35768872384B（steady=35768859072）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
     "affected_metrics": [
      "M02 加速比",
      "M06 显存"
@@ -25350,20 +25350,20 @@
    "version": "0.2"
   },
   "v2.moe_route_gate": {
-   "expr": "FLOPs = 2·T·h·E；weight_read = h·E·B_gate；写 = T·E·4B（FP32 logits）",
-   "source": "deepseek_v4/nvidia/model.py L270-277（GateLinear(input=h, output=E, bias=False, out_dtype=torch.float32)）；router/gate_linear.py L26 （ReplicatedLinear 子类，fp32 出口分层）",
-   "applies": "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；替换通用 moe_router 行的 FP32 logits 出口）",
+   "expr": "FLOPs = 2·T·h·E；weight_read = h·E·B_gate + 输入 T·h·B_act；B_gate=B_act=2（BF16 model dtype）；写 = T·E·4B（FP32 logits）",
+   "source": "deepseek_v4/nvidia/model.py L270-277（GateLinear(input=h, output=E, bias=False, out_dtype=torch.float32，未传 quant_config/params_dtype）；linear.py L287-295（params_dtype=torch.get_default_dtype()，quant_config None→UnquantizedLinearMethod）L179-199（weight dtype=params_dtype）；base_loader.py L86（set_default_torch_dtype(model_config.dtype)）；router/gate_linear.py L26/L306-341（Replicated 子类；bf16/fp32 输入分支）",
+   "applies": "moe_gate 行（每 MoE 层，per-rank 全量复制，不随 tp/ep 缩放；权重/输入 按 BF16 2B，FP32 仅 logits 出口）",
    "version": "0.2"
   },
   "v2.moe_route_score": {
-   "expr": "ops = T·(8E + vl)；vl = E+2（视觉 checkpoint HAS_VL，文本 token 亦逐行哨兵判定）否则 0——每元素：sqrtsoftplus 打分 5（>20 护栏比较+exp+加一+log+sqrt）+ bias 加 1 + NaN 护栏 2；读 = T·E·4（FP32 logits）+ T·8（input_ids int64 上界）；weight = n_bias·E·4（FP32 复制）",
-   "source": "dsv4_topk.py L60-95（HAS_VL 哨兵/bias_vl where、weights=sqrt(softplus)（>20 护栏）、current=weights+bias、NaN→−1e30）；cpu_router.py L90-107（biased_topk_cpu 同语义 docstring：bias steers selection only）；model.py L303-320（e_score_correction_bias/bias_vl 创建条件）",
+   "expr": "ops = T·(8E + vl)；vl = E+2（视觉 checkpoint HAS_VL，文本 token 亦逐行哨兵判定）否则 0——每元素：sqrtsoftplus 打分 5（>20 护栏比较+exp+加一+log+sqrt）+ bias 加 1 + NaN 护栏 2；读 = T·E·4（FP32 logits）+ T·8（HAS_VL 时 input_ids int64 上界，否则 0）；weight = n_bias·E·4（FP32 复制）",
+   "source": "dsv4_topk.py L63-87（HAS_VL 哨兵/bias_vl where L63-76、weights=sqrt(softplus)（>20 护栏）L85、current=weights+bias L86、NaN→−1e30 L87）；cpu_router.py L90-95（biased_topk_cpu 同语义 docstring：bias steers selection only）；model.py L303-320（e_score_correction_bias/bias_vl 创建条件）",
    "applies": "moe_score 行（每 MoE 层；选择列含 bias、权重列不含——noaux_tc）",
    "version": "0.2"
   },
   "v2.moe_route_topk": {
    "expr": "ops = T·[k·(5E+3) + 2k+4]——k 轮平坦偏置 argmax（每轮 max 归约 E−1、相等选择 E、min 平手 E−1、无偏权重 gather 2E、移除 E ≈5E；槽位簿记 3），归一 sum k+1 加 + sum≤0 护栏 2 + 除 1 + 缩放乘 k；写 = T·k·8B（FP32 weights + int32 ids）",
-   "source": "dsv4_topk.py L96-128（static_range(k) 选择循环：min(candidate) 平手最小 id、selected_weight 取无偏 score、移除已选；L111-115 selected_weights *= routed_scaling/sum（sum≤0 除 1）；无分组——router_factory.py L168-205 分组仅 use_grouped_topk（V4.1 无 n_group/topk_group 键）；fused_topk_bias_router.py L301-320 共享专家归一后以权重 1.0 追加）",
+   "source": "dsv4_topk.py L90-107（static_range(k) 选择循环：max L93、min(candidate) 平手最小 id L94-95、selected_weight 取无偏 score L96-98、移除已选 L102；L104-107 selected_weights *= routed_scaling/sum（sum≤0/NaN 时分母取 1，NaN 权重本身不被清除）；输出 L149-150）；无分组——router_factory.py L166-173 分组仅 use_grouped_topk（V4.1 无 n_group/topk_group 键；工厂调用默认 False，见剩余限制）；共享专家在 routed 归一后以权重 1.0 **独立相加**（moe_output.py L151-175 shared_output 契约；FusedMoEFactory 调用未传 n_shared_experts/fuse_shared_experts，model.py L426-449）；fused_topk_bias_router.py L447-464 的共享槽是通用融合能力，本模型未启用",
    "applies": "moe_topk_renorm 行（每 MoE 层；权重=无偏 sqrtsoftplus score，sum→1 后 ×routed_scaling_factor）",
    "version": "0.2"
   },

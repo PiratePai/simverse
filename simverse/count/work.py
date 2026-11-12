@@ -556,7 +556,7 @@ def ffn_or_moe_rows(stage: str, li: int, layer: LayerIR, T: int, h: int,
             # R21：V4.1 路由三行（gate/score/topk_renorm）替换通用 moe_router
             # 行（FP32 logits 出口 + sqrtsoftplus/noaux_tc 语义）；routed/
             # shared(+gate) 行不变。
-            moe_dicts = (v41_moe_route_rows(layer.moe, route, T, h, quant)
+            moe_dicts = (v41_moe_route_rows(layer.moe, route, T, h)
                          + moe_dicts[1:])
         for r in moe_dicts:
             rows.append(OpRow(stage, li, r["layer_op"], flops=r["flops"],

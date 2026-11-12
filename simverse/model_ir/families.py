@@ -157,8 +157,10 @@ _CSA2_KEY_NOTES = {
 }
 
 # R21（2026-11-12）：V4.1 MoE 路由键的 mapped 注记（证据 moe-pin.json
-# 11 文件 + ev-vllm-v41-moe；消费者 count/moe.v41_moe_route_rows、
+# 14 文件 + ev-vllm-v41-moe；消费者 count/moe.v41_moe_route_rows、
 # lowering/memory 路由偏置对象）。
+_MODEL_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
+
 _MOE_ROUTE_KEY_NOTES = {
     "scoring_func":
         "mapped：sqrtsoftplus——weights=sqrt(softplus(logits))，>20 取 "
@@ -635,7 +637,7 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     memory 记录/环形状态/缓冲对象；公式 v2.csa2_*；短上下文旁路、
     prefill/decode 分支、candidate 所有权见 source_map sm-v41-csa2-indexer）。
     MoE 路由（scoring/top-k/归一化/缩放/共享专家/EP 归属）：2026-11-12 R21
-    按 11 文件 pin（moe-pin.json，vllm @f358f057，blob sha1 对
+    按 14 文件 pin（moe-pin.json，vllm @f358f057，blob sha1 对
     vllm-tree.json 逐项校验）source-checked 建模 → mapped
     （count/moe.v41_moe_route_rows 三行 + lowering/memory 路由偏置对象；
     V4.1 EP 保守整除域（mega 断言；fused 通用余数映射未入 pin）；公式
@@ -782,7 +784,7 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         if key.startswith("dspark_"):
             coverage[key] = {"status": "metadata-only", "consumer": "methods",
                              "note": "V4.1 原生 DSpark 方法参数（方法层绑定，非模型结构）"}
-    # R21：V4.1 MoE 路由键的 mapped 注记（11 文件 pin moe-pin.json，
+    # R21：V4.1 MoE 路由键的 mapped 注记（14 文件 pin moe-pin.json，
     # source-checked 2026-11-12）
     for key, note in _MOE_ROUTE_KEY_NOTES.items():
         path = f"{text_prefix}.{key}" if text_prefix else key
@@ -793,7 +795,9 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     # R21：路由 spec（消费方：count/moe.v41_moe_route_rows、
     # lowering/memory 路由偏置对象、count/work EP 整除域校验）。
     # 常数全部来自 moe-pin.json @f358f057：
-    #   * gate = GateLinear(h→E, out_dtype=fp32) Replicated（L270-277）；
+    #   * gate = GateLinear(h→E, out_dtype=fp32) Replicated（L270-277），
+    #     未传 quant_config/params_dtype → 权重/输入 BF16 2B（linear.py
+    #     L287-295/L179-199；base_loader.py L86）；fp32 只是 logits 出口；
     #   * bias = e_score_correction_bias[E] fp32（noaux_tc，L303-313）；
     #   * bias_vl：vision_n_layers>0 时每 MoE 层创建（L314-320；V4.1-Flash
     #     视觉塔 32 层 → 存在，文本 token 也逐行做哨兵判定 dsv4 L63-76）；
@@ -808,6 +812,16 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     #     runner 独立相加（权重 1.0；moe_output.py L151-175）。
     vision_layers = int((full_config or {}).get("vision_config", {})
                         .get("num_hidden_layers", 0) or 0)
+    # GateLinear 未传 quant_config/params_dtype：LinearBase 取
+    # torch.get_default_dtype()，base_loader 在 set_default_torch_dtype(
+    # model_config.dtype) 内实例化 → 权重/输入均为模型 dtype（V4.1 config
+    # dtype=bfloat16）。gate_out_dtype=fp32 只约束 logits 出口，不是权重。
+    model_dtype = str((full_config or {}).get("dtype", "bfloat16")).lower()
+    if model_dtype not in _MODEL_DTYPE_BYTES:
+        raise ValueError(f"V4.1 模型 dtype {model_dtype!r} 未核："
+                         "gate 权重/输入字节只登记 "
+                         f"{sorted(_MODEL_DTYPE_BYTES)}")
+    model_dtype_bytes = _MODEL_DTYPE_BYTES[model_dtype]
     moe_route_spec = {
         "scoring": "sqrtsoftplus",
         "topk_method": "noaux_tc",
@@ -815,6 +829,14 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         "routed_scaling": float(tc["routed_scaling_factor"]),
         "gate_out_dtype": "fp32",
         "logits_itemsize": 4,
+        # GateLinear(h→E, out_dtype=fp32) 未传 quant_config/params_dtype；
+        # 权重与输入 activation 都是 model dtype（bf16），见 linear.py/
+        # base_loader.py pin。
+        "model_dtype": model_dtype,
+        "gate_weight_dtype": model_dtype,
+        "gate_weight_itemsize": model_dtype_bytes,
+        "gate_act_dtype": model_dtype,
+        "gate_act_itemsize": model_dtype_bytes,
         "bias_bytes": moe.experts * 4,
         "bias_vl_bytes": moe.experts * 4 if vision_layers > 0 else 0,
         "hash_layers": 0,
