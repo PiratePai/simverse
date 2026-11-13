@@ -429,6 +429,7 @@ def _coverage(family: str, config: Dict[str, Any], gaps_hint: Dict[str, str] = N
         if path.startswith("quantization_config."):
             covered[path] = {"status": "unsupported-semantic", "consumer": "-",
                              "note": "量化配置未映射到本仓计算精度；场景精度为独立输入"}
+            gaps.append(f"{path}: 量化配置叶键未映射（不默认忽略）")
             continue
         if suffix.startswith("dspark_"):
             covered[path] = {"status": "metadata-only", "consumer": "methods",
@@ -900,8 +901,10 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         coverage[f"quantization_config.{key}"] = {
             "status": "mapped", "consumer": "model_ir+count+memory",
             "note": note}
+    mapped_quant_paths = {"quantization_config"} | {
+        f"quantization_config.{key}" for key in _V41_QUANT_KEY_NOTES}
     gaps = [g for g in gaps
-            if not g.startswith("quantization_config")]
+            if g.split(":", 1)[0] not in mapped_quant_paths]
     # R21：路由 spec（消费方：count/moe.v41_moe_route_rows、
     # lowering/memory 路由偏置对象、count/work EP 整除域校验）。
     # 常数全部来自 moe-pin.json @f358f057：
