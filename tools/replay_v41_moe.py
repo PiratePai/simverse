@@ -76,10 +76,10 @@ def check() -> None:
     1. R21 证据内部一致：before→after 的逐字段 delta = Σ by_op delta，
        审计面外行逐字段冻结（全部对已提交文件，历史场景 act=8 自洽）。
     2. 当前代码复现**当前**账本：R21 场景按 R22 契约把 quant.act 覆盖为
-       16（磁盘证据字节不动）后复算，work 账本必须与 R22 证据
-       （docs/evidence/quant-map/after.json，同拓扑场景）逐字段相等——
-       两场景仅 quant.act/workload 注记不同，均不进账本。当前的无漂移
-       复算入口是 tools/replay_v41_quant.py --check。
+       16（磁盘证据字节不动）后复算，work 账本必须与**最新一轮**证据
+       （R24：docs/evidence/swiglu-tail/after.json，同拓扑场景）逐字段
+       相等——场景仅 quant.act/workload 注记不同，均不进账本。当前的
+       无漂移复算入口是 tools/replay_v41_swiglu.py --check。
     """
     sc_data = json.loads(
         (FOLDER / "scenario.json").read_text(encoding="utf-8"))
@@ -97,17 +97,17 @@ def check() -> None:
     frozen = lambda rows: [r for r in rows if r["op"] not in AUDITED]
     assert frozen(old["rows"]) == frozen(committed["rows"])
     assert set(att["by_op"]) <= AUDITED
-    # ② 当前代码复现当前账本（R22 证据；manifest 身份字段除外）
+    # ② 当前代码复现当前账本（R24 证据；manifest 身份字段除外）
     sc_data["quant"]["act"] = 16          # R22 契约覆盖（磁盘证据不动）
     fresh = run_v2(ScenarioV2.from_json(sc_data)).to_json()
-    r22_after = json.loads(
-        (ROOT / "docs/evidence/quant-map" / "after.json")
+    r24_after = json.loads(
+        (ROOT / "docs/evidence/swiglu-tail" / "after.json")
         .read_text(encoding="utf-8"))
-    assert fresh["work"] == r22_after["work"], (
-        "复算账本与 R22 证据不一致（确定性被破坏；入口 "
-        "tools/replay_v41_quant.py --check）")
+    assert fresh["work"] == r24_after["work"], (
+        "复算账本与 R24 证据不一致（确定性被破坏；入口 "
+        "tools/replay_v41_swiglu.py --check）")
     print("check OK: R21 attribution internally consistent; current ledger "
-          "reproduces the R22 evidence (docs/evidence/quant-map)")
+          "reproduces the R24 evidence (docs/evidence/swiglu-tail)")
 
 def main() -> None:
     scenario = ScenarioV2.from_json(json.loads(

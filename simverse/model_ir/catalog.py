@@ -55,7 +55,8 @@ _V41_EVIDENCE = ModelEvidence(
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch",
                    "sm-v41-mhc-kernels", "sm-v41-csa2-indexer",
-                   "sm-v41-moe-route", "sm-v41-quant-dispatch"),
+                   "sm-v41-moe-route", "sm-v41-quant-dispatch",
+                   "sm-v41-swiglu-tail"),
     unverified_paths=(
         "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与"
         "EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；"
@@ -66,15 +67,31 @@ _V41_EVIDENCE = ModelEvidence(
         "csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）"
         "仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 "
         "source-checked（ev-vllm-v41-csa2），核本体未独立逐行核",
+        "swiglu_deploy_variants: SwiGLU clamp 主干（共享专家 SiluAndMulWithClamp"
+        "+路由专家 fused MoE clamp，6 op/elem 计量）已 R24 source-checked"
+        "（ev-vllm-v41-swiglu-tail，swiglu-tail-pin.json 13 文件）；未建模/"
+        "未执行：masked 每 expert padded 激活路径（fused_moe/activation.py "
+        "L246-260）、pad-aware Triton 跳过未路由槽/非本地专家的运行时差异"
+        "（utils.py L801-818；本仓按逻辑 assignment 计费）、clamp CUDA kernel"
+        "与 native 的数值等价（vLLM 测试在册 tests/kernels/core/"
+        "test_activation.py L251-285，本仓未执行）、SWIGLUOAI/SWIGLUSTEP 家族"
+        "常数（7.0/1.702，V4.1 域外）、native MegaMoE activation clamp 路径"
+        "（deepseek_v4/nvidia/model.py L393-394，SM100 域外，语义同源未执行）",
+        "dspark_draft_compress: compress_ratios 尾部 [40:43] 已 R24 归属"
+        "DSpark/nextn 草稿层（0=纯 SWA，attention.py L375-386 按层号消费、"
+        "L399-401 is_backbone 门控——草稿层永不为 kv/index 源；dspark.py "
+        "L128-136 层号 L..L+mtp-1）；DSpark 草稿层本体（MoE E=128/k=3、context "
+        "KV、非因果 topk 扩展）未建模，非零尾部值域外拒绝",
         "moe_deploy_variants: MoE 路由主干（sqrtsoftplus/noaux_tc/平坦 top-k/"
         "归一×1.5/共享专家 1.0/EP 保守整除域）已 R21 source-checked"
         "（ev-vllm-v41-moe，moe-pin.json 14 文件）；gate 权重沿 model "
         "loader BF16、输入由 pinned mHC layer_input BF16 证明（2B；域 "
         "official V4.1 bf16）；未建模：native MegaMoE "
         "bf16_mega_gate 大批路径（EP+fp4+SP token 分片）、DSpark 草稿层 MoE"
-        "（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲、"
-        "量化专家权重布局；ExpertMapManager 未入 pin"
-        "（use_grouped_topk 默认与 fused EP 余数分配未核）",
+        "（E=128/k=3 方法层字段）、padding skip/CUDA-graph 整宽路由缓冲；"
+        "ExpertMapManager 未入 pin"
+        "（use_grouped_topk 默认与 fused EP 余数分配未核）；"
+        "量化专家权重布局已 R22 mapped（ev-vllm-v41-quant）",
         "csa2_deploy_variants: SM100 sparse-logits（indexer_sparse_logits 消费层"
         "只打分候选块）/decode_topk CuTe 路径/TP 行分片 all-gather/PCP/DCP/"
         "fused_mqa_topk/FlashInfer plain-row bf16 变体未建模；CUDA-graph 静态"
@@ -100,8 +117,11 @@ _V41_EVIDENCE = ModelEvidence(
          "BF16）+ 路由偏置对象 + EP 保守整除域（仅 mega 断言））；量化映射"
          "已 R22 source-checked（ev-vllm-v41-quant，quant-pin.json 20 文件；"
          "MXFP8 线性/MXFP4 专家/scale 开销/打包/TP-EP 分片/Marlin SM90 执行域"
-         " BF16 激活；Humming/SM100/emulation 部署变体登记缺口）；注意力核"
-         "本体仍缺口；hc 仅 source-checked，未执行。")
+         " BF16 激活；Humming/SM100/emulation 部署变体登记缺口）；SwiGLU "
+         "clamp（共享专家+路由专家 6 op/elem 激活行）与 compress_ratios 尾部"
+         "（归 DSpark 草稿层，0=纯 SWA，非零域外拒绝）已 R24 source-checked"
+         "（ev-vllm-v41-swiglu-tail，swiglu-tail-pin.json 13 文件）；"
+         "注意力核本体仍缺口；hc 仅 source-checked，未执行。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",
@@ -220,7 +240,8 @@ def _v41() -> ModelIR:
                    evidence_refs=("ev-v41-config", "ev-vllm-v41-mhc",
                                   "ev-vllm-v41-model",
                                   "ev-vllm-v41-engram", "ev-vllm-v41-csa2",
-                                  "ev-vllm-v41-moe", "ev-vllm-v41-quant"))
+                                  "ev-vllm-v41-moe", "ev-vllm-v41-quant",
+                                  "ev-vllm-v41-swiglu-tail"))
 
 
 def _qwen36() -> ModelIR:

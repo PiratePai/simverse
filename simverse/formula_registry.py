@@ -365,6 +365,24 @@ F_EN_CHAIN = _f("v2.en_chain", "E[N] = 1 + Σ_{i=1..K} Π_{j≤i} α_j",
 F_EN_BLOCK = _f("v2.en_block",
                 "DFlash 块验收 E[N] = 1 + Σ_{i=1..K_blk} Π_{j≤i} β_j（块内逐位同链式）",
                 "z-lab/dflash _rejection_sample：逐位拒绝+残差 bonus", "块草稿验收")
+F_SWIGLU_CLAMP_ACT = _f(
+    "v2.swiglu_clamp_act",
+    "ops = rows·inter_rank·6——SwiGLU clamp 激活逐元素 6 算术 op"
+    "（gate clamp-max 1 + up clamp-min 1 + up clamp-max 1 + sigmoid 1 + 乘 2）；"
+    "out = gate·sigmoid(alpha·gate)·(up+beta)，V4.1 alpha=1.0/beta=0.0 → "
+    "silu(clamp(gate))·clamp(up)；字节流量已归 moe_routed/moe_shared 行",
+    "activation.py L208-250（SiluAndMulWithClamp.forward_native L241-243："
+    "gate=clamp(x[:d],max=limit) 单侧、up=clamp(x[d:],min=-limit,max=limit)"
+    " 双侧）；fused MoE：FusedMoEConfig.swiglu_limit（config.py L1365）→ "
+    "ApplyMoEActivationConfig.from_configs（fused_moe/activation.py L182-185，"
+    "clamp_limit=gemm1_clamp_limit or moe_config.swiglu_limit）→ 注册执行域 "
+    "Marlin gemm1/gemm2 之间 apply_moe_activation（marlin_moe.py L140-158；"
+    "silu_and_mul_with_clamp 同语义 L293-312、swiglu_limit_func utils.py "
+    "L819-835，HAS_LIMIT=swiglu_limit>0 L812）；共享专家 MLP.act_fn="
+    "SiluAndMulWithClamp（deepseek_v4/nvidia/model.py L176-183 经 L331 接线；"
+    "CPU 变体同构 cpu/model.py L101-102）；swiglu-tail-pin.json 13 文件",
+    "V4.1 moe_act/moe_shared_act 行（R24）；其他家族无 extras.swiglu 不适用")
+
 F_DFLASH_MSG = _f("v2.dflash_msg",
                   "T→D hidden 消息 = produced·Σ_{l∈target_ids} h·B_act（fc 输入拼接）；"
                   "D→T = K_blk·B_token",

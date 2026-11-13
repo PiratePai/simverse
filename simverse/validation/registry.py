@@ -287,6 +287,48 @@ _PINNED_ASSETS = [
       "集合通信/激活字节按模型隐状态 BF16 计（逻辑访问口径）；Marlin "
       "W8A16/W4A16 的逐 kernel 实际 HBM 流量未执行核验"],
      False, "2026-11-13"),
+    ("ev-vllm-v41-swiglu-tail", "source-checked",
+     "R24 V4.1 SwiGLU clamp + compress_ratios 尾部：13 文件 pin（语义核 "
+     "activation.py SiluAndMulWithClamp L208-250——gate=clamp(max=limit) "
+     "单侧、up=clamp(min=-limit,max=limit) 双侧、out=gate·sigmoid(alpha·"
+     "gate)·(up+beta)，V4.1 alpha=1.0/beta=0.0；fused MoE 消费链 "
+     "FusedMoEConfig.swiglu_limit（config.py L1365）→ ApplyMoEActivation"
+     "Config.from_configs（fused_moe/activation.py L182-185 clamp_limit="
+     "gemm1_clamp_limit or moe_config.swiglu_limit）→ 注册执行域 Marlin "
+     "gemm1/gemm2 之间 apply_moe_activation（marlin_moe.py L140-158）；"
+     "silu_and_mul_with_clamp L293-312/swiglu_limit_func utils.py L819-835 "
+     "（HAS_LIMIT=swiglu_limit>0 L812）同语义；共享专家 MLP.act_fn="
+     "SiluAndMulWithClamp（deepseek_v4/nvidia/model.py L176-183/L252/L331，"
+     "CPU 变体同构 cpu/model.py L101-102/L132）；尾部归属：get_compress_"
+     "ratios 'MTP layers included' + 派生路径补 [0]*num_nextn_predict_"
+     "layers（deepseek_v4_utils.py L6-18）、DSpark 草稿层以层号 L..L+mtp-1 "
+     "构造（dspark.py L93-96/L128-136）、attention.py L375-386 按层号取 "
+     "compress_ratios[layer_id]（else 分支 0=纯 SWA）、L399-401 is_backbone "
+     "门控使草稿层永不为 kv/index 源、后端只按去重层型集合消费（sparse_"
+     "swa.py L494-502）",
+     str(REFS / "vllm" / "swiglu-tail-pin.json"),
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5；13 文件 blob SHA1 对 "
+     "vllm-tree.json 逐项校验 + SHA256 清单",
+     "V4.1 SwiGLU clamp 激活（count/moe.moe_act/moe_shared_act 行 6 算术 "
+     "op/元素；model_ir extras.swiglu + swiglu_limit 键 mapped）与 "
+     "compress_ratios 尾部归属（extras.kv_spec.draft_compress_ratios；"
+     "长度域 L 或 L+mtp、非零尾部域外拒绝）；公式 v2.swiglu_clamp_act",
+     ["源码阅读 source-checked；kernel/CPU forward/GPU 均未执行",
+      "clamp CUDA kernel 与 native 的数值等价未执行（vLLM 侧测试在册 "
+      "tests/kernels/core/test_activation.py L62-66/L251-285，本仓未跑）",
+      "masked 每 expert padded 激活路径（fused_moe/activation.py L246-260）"
+      "与 pad-aware Triton 跳过未路由槽/非本地专家的运行时差异未入账"
+      "（utils.py L801-818；本仓按逻辑 assignment 计费，与 moe_routed 同口径）",
+      "SWIGLUOAI/SWIGLUSTEP 家族常数（limit=7.0/alpha=1.702，fused_moe/"
+      "activation.py L268-275）为 V4.1 域外变体，未建模",
+      "native MegaMoE activation clamp（deepseek_v4/nvidia/model.py "
+      "L393-394）语义同源但 SM100 域外（注册执行域 Marlin），未执行",
+      "DSpark 草稿层本体未建模：非零尾部值（草稿层消费压缩 KV）无 official"
+      " 证据，按域外拒绝；草稿层 MoE（E=128/k=3）维持 R21 方法层登记",
+      "op 计数为解析算术口径（clamp 比较/sigmoid/乘各 1，非 kernel 指令"
+      "数）；Qwen36 家族无 extras.swiglu，其 silu 微操作维持 R06 冻结口径"
+      "（跨模型计量差异已登记）"],
+     False, "2026-11-13"),
     ("ev-vllm-v41-dspark", "source-checked",
      "vLLM V4.1 DSpark speculator：num_reqs 批处理、复用 V4 decoder 的事实",
      str(REFS / "vllm" / "vllm" / "v1" / "worker" / "gpu" / "spec_decode" / "dspark" / "speculator.py"),

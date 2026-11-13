@@ -563,17 +563,20 @@ def ffn_or_moe_rows(stage: str, li: int, layer: LayerIR, T: int, h: int,
                     quant: dict, tp: int = 1, ep: int = 1,
                     local_experts: Optional[int] = None,
                     route: Optional[dict] = None,
-                    quant_recipe: Optional[dict] = None) -> List[OpRow]:
+                    quant_recipe: Optional[dict] = None,
+                    act_recipe: Optional[dict] = None) -> List[OpRow]:
     b_w, b_a = quant["dense_w"] / 8, quant["act"] / 8
     rows: List[OpRow] = []
     if layer.moe is not None and layer.moe.experts:
         moe_dicts = moe_rows(layer.moe, T, h, quant, tp=tp, ep=ep,
                              local_experts=local_experts,
-                             quant_recipe=quant_recipe)
+                             quant_recipe=quant_recipe,
+                             act_recipe=act_recipe)
         if route is not None:
             # R21：V4.1 路由三行（gate/score/topk_renorm）替换通用 moe_router
             # 行（FP32 logits 出口 + sqrtsoftplus/noaux_tc 语义）；routed/
-            # shared(+gate) 行不变。
+            # shared(+gate) 行不变；R24 的 moe_act/moe_shared_act 行随
+            # moe_dicts[1:] 保留。
             moe_dicts = (v41_moe_route_rows(layer.moe, route, T, h)
                          + moe_dicts[1:])
         for r in moe_dicts:
@@ -880,6 +883,10 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     hc_spec = (model.extras or {}).get("hc")
     engram_spec = (model.extras or {}).get("engram")
     moe_route = (model.extras or {}).get("moe_route")
+    # R24：V4.1 SwiGLU clamp 激活配方（extras.swiglu；Qwen36 等其他家族
+    # 无此键 → 无 act 行，其 silu 微操作维持 R06 冻结口径，见
+    # tests/test_qwen36_forward_r06.py 的登记差异）
+    act_recipe = (model.extras or {}).get("swiglu")
     first_layer_index = model.layers[0].index if model.layers else None
     if moe_route:
         # R21：V4.1 保守 EP 整除域（mega 路径 pinned 断言 L357-362；
@@ -928,7 +935,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         T = B * Q
         rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
                                 local_experts=_local_experts(layer),
-                                route=moe_route, quant_recipe=quant_recipe)
+                                route=moe_route, quant_recipe=quant_recipe,
+                                act_recipe=act_recipe)
         if layer.kind == MLA_CSA2 and hc_spec:
             # mHC 边界核融合 norm+残差（F_MHC_POST_PRE）：不再另计通用 norm/add 行
             rows += hc_boundary_rows(stage, li, T, h, hc_spec, quant,

@@ -42,12 +42,13 @@ quantization_config 5 叶键 mapped（见 G-C14）。
   kernel/CPU/GPU 执行、实际 split-k 与部署变体未验证（源码已由 R05 pin 入册）。
   CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE
   scoring/top-k/分组路由已由 R21 解除（见 G-C13）；量化映射已由 R22 解除
-  （见 G-C14）；swiglu clamp、稀疏 MLA 注意力核本体、compress_ratios 尾部
-  仍为独立缺口。
+  （见 G-C14）；SwiGLU clamp 与 compress_ratios 尾部已由 R24 解除
+  （见 G-C15）；稀疏 MLA 注意力核本体仍为独立缺口。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
   mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需
-  swiglu/稀疏 MLA 核本体/compress_ratios 尾部缺口闭环（CSA2 索引、MoE 路由
-  与量化映射已分别由 R20/R21/R22 解除）。
+  稀疏 MLA 核本体缺口闭环（CSA2 索引、MoE 路由、量化映射、SwiGLU/尾部
+  已分别由 R20/R21/R22/R24 解除；config 覆盖已完备，结构资格仅由
+  forward 证据阻断）。
 - **当前降级**：structure gate 拦截（capability 可见；Engram 单机/hc 部分已不再缺）。
 - **优先级**：P0（必需模型场景）。
 
@@ -141,7 +142,47 @@ quantization_config 5 叶键 mapped（见 G-C14）。
   marlin_moe/marlin_utils_fp8 is_supported_config 细节未逐项 pin；成本层
   gemm 峰值档未随 W8A16（bf16 TC）改路由（乐观算力上限，登记）。
 - **当前降级**：无（执行域按注册设备固定为 Marlin W8A16/W4A16，变体以
-  extras.quant 披露）；structure_complete 仍由 swiglu/核本体/尾部缺口阻断。
+  extras.quant 披露）；structure_complete 曾由 swiglu/核本体/尾部缺口阻断
+  ——swiglu/尾部已由 R24 解除（见 G-C15），现仅由核本体阻断。
+- **优先级**：P0（必需模型场景）。
+
+## G-C15 ~~V4.1 SwiGLU clamp + compress_ratios 尾部~~ → 已解除（2026-11-13 R24）⭐P0
+
+- **解除交付**：swiglu-tail-pin.json 13 文件 pin（vllm @f358f057，blob
+  sha1 对 vllm-tree.json 逐项校验 + SHA256 落盘）source-checked 入册
+  （ev-vllm-v41-swiglu-tail，executed=False；sm-v41-swiglu-tail）。
+  SwiGLU clamp 语义：gate=clamp(max=limit) **单侧**、up=clamp(min=-limit,
+  max=limit) **双侧**、out=gate·sigmoid(alpha·gate)·(up+beta)，V4.1
+  alpha=1.0/beta=0.0 → silu(clamp(gate))·clamp(up)（activation.py
+  L208-250）；触发条件 MLP 侧 swiglu_limit is not None、Triton 侧
+  HAS_LIMIT=limit>0（utils.py L812，0 值两路分叉 → 域外拒绝）。
+  消费两路（注册执行域）：路由专家 gemm1→激活→gemm2（Marlin
+  apply_moe_activation，marlin_moe.py L140-158；clamp_limit 回退链
+  fused_moe/activation.py L182-185）+ 共享专家 MLP.act_fn（nvidia
+  model.py L176-183/L331；CPU 变体同构）。尾部 [40:43] 逐项归
+  DSpark/nextn 草稿层（dspark.py L128-136 层号 L..L+mtp-1；attention.py
+  L375-386 按层号消费、else 分支 0=纯 SWA；L399-401 is_backbone 门控
+  → 草稿层永不为 kv/index 源；后端仅按去重层型集合消费，
+  sparse_swa.py L494-502）。落地：count/moe moe_act/moe_shared_act 行
+  （6 算术 op/元素，字节已归 moe_routed/moe_shared 单一所有者）、
+  formula v2.swiglu_clamp_act、model_ir extras.swiglu +
+  kv_spec.draft_compress_ratios + swiglu_limit 键 mapped + config 域
+  （limit>0 有限；长度 ∈ {L, L+mtp}；尾部值 ∈{0,1,2} 且非零域外拒绝）；
+  独立 oracle 32 项（tests/test_v41_swiglu.py：纯 stdlib clamp oracle/
+  边界与饱和/SWIGLUOAI 家族差异/手算绝对值 TP1/TP8/EP8/负例 11 项/
+  replay 归因冻结）+ 前后 replay 逐 op 归因（evidence/swiglu-tail；
+  --check 无漂移；Δflops=+483,840、Δrows=+80、字节全 0、M06 不变）。
+  附带补漏：candidate_block_size 键入 struct 集合（R20 注记因键漏登记
+  未生效，长期误挂"未登记 config 键"缺口）。V4.1 config 覆盖自此完备
+  （config_coverage_complete=True；结构资格仍由核本体 forward 证据阻断）。
+- **仍缺（登记不冒充）**：clamp CUDA kernel 与 native 的数值等价未执行
+  （vLLM 测试在册未跑）；masked 每 expert padded 激活路径与 pad-aware
+  Triton 跳过未路由槽的运行时差异未入账（按逻辑 assignment 计费）；
+  SWIGLUOAI/SWIGLUSTEP 家族常数（7.0/1.702）域外；native MegaMoE
+  activation clamp（SM100）语义同源未执行；DSpark 草稿层本体未建模
+  （非零尾部按域外拒绝，不猜语义）。
+- **当前降级**：无（激活行为 source-checked 计量；执行变体以
+  unverified_paths 披露）；structure_complete 仅由稀疏 MLA 核本体阻断。
 - **优先级**：P0（必需模型场景）。
 
 ## G-C12 ~~V4.1 CSA2 索引打分/top-k/candidate block~~ → 已解除（2026-11-12 R20）⭐P0

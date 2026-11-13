@@ -1,0 +1,98 @@
+{
+  "commit": "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+  "repo": "vllm-project/vllm",
+  "note": "R24 V4.1 SwiGLU clamp + compress_ratios 尾部 pin；路径相对 references/vllm/；blob sha1 对 ../vllm-tree.json 逐项校验（13 文件：SiluAndMulWithClamp 语义 activation.py、fused MoE clamp 消费 activation.py/utils.py/config.py/marlin_moe.py/layer.py、模型接线 deepseek_v4 nvidia+cpu model.py、尾部归属 deepseek_v41/attention.py + deepseek_v4_utils.py + dspark.py + sparse_swa.py、vLLM 侧语义测试 test_activation.py）",
+  "files": [
+    {
+      "path": "vllm/model_executor/layers/activation.py",
+      "size": 30247,
+      "blob_sha1": "808d6e711277b4c7e975bec18db8eaf492008f94",
+      "sha256": "bebeddbd4997f49f54471ee31ac42b22c3c11dfe25244e55d20c36f390489c05",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/activation.py",
+      "size": 16782,
+      "blob_sha1": "bcee30e6e5c7f7b9491e4ad00ec9c32d9311bbec",
+      "sha256": "b5226793847cf68bf77823f5912d8d8f32895535b5bc46f04e6057a56f613966",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/utils.py",
+      "size": 33262,
+      "blob_sha1": "fa0ae3713a1093dec67f969eab726206e13f2b94",
+      "sha256": "3185cbf74a523de9f83671e5ac1850c8e13956791b266c35b859a767dbb031ff",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/config.py",
+      "size": 60456,
+      "blob_sha1": "7f8198d312917a8a797854369d2dab23267c4a2b",
+      "sha256": "5cef7f9dfc8020a1822f5f6c5f0694659bc48d2e62e622e4d431f7b3745279f3",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/experts/marlin_moe.py",
+      "size": 34738,
+      "blob_sha1": "58b03b5f5a9048c1d65223a0fad2ff19368b2998",
+      "sha256": "29e04ba6bf91193c6cb0c25708c6d18ebc7628490e070d02998fee9b8a503c42",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/model_executor/layers/fused_moe/layer.py",
+      "size": 20787,
+      "blob_sha1": "cbe6d0ce893875789ad0896e049b9d4f5664aa93",
+      "sha256": "95b94b8696577ee7bf4a05fa6f05d113b1c0eabdb12536119db4fe9e4b1341e0",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/models/deepseek_v4/nvidia/model.py",
+      "size": 56555,
+      "blob_sha1": "cc2d2d6c994dbfba781a9ba760e8a7323d65ef06",
+      "sha256": "38ec5686051722ddf3741cfdb720d009165174a8387d0e4902e67602b69bf799",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/models/deepseek_v4/cpu/model.py",
+      "size": 32853,
+      "blob_sha1": "2e6f76c09e07addc9af681b1429c2753df59e0a4",
+      "sha256": "58070053dbbd35aa2b464ce7d0cf341a303fe479f7426c8d03f6740b89f0dc26",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/models/deepseek_v41/attention.py",
+      "size": 71234,
+      "blob_sha1": "780eef57dededa881e600ca5de2763ae2da13ff4",
+      "sha256": "12827be271ae0e8a6bbcdb8c8dcfbbbac2486d293edca8ff2f5c5565cd3f2aba",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/transformers_utils/deepseek_v4_utils.py",
+      "size": 812,
+      "blob_sha1": "f65f1bb52626f10ce8b79f1c738614f45840234f",
+      "sha256": "574991cb86d85960d185d3aa99066b8ca8e5f040d6b9e0387674f1f261aa1e43",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/models/deepseek_v41/nvidia/dspark.py",
+      "size": 24671,
+      "blob_sha1": "c2db26bb8eb2140a37ecb69bc004088aa02c7c48",
+      "sha256": "94267e775a73d93fa5ed121218abda2c267722597aa74eb72edb97c63935955f",
+      "tree_match": true
+    },
+    {
+      "path": "vllm/v1/attention/backends/mla/sparse_swa.py",
+      "size": 54613,
+      "blob_sha1": "b6c090aa3fabe975fca70d7ae4410c4f693f88f6",
+      "sha256": "56594499e686d287e4fbfd2586591f91cfbee9ad62976040e166d022373a3167",
+      "tree_match": true
+    },
+    {
+      "path": "tests/kernels/core/test_activation.py",
+      "size": 18484,
+      "blob_sha1": "9303e23553af7c62347296c049b10a18ba4c4b48",
+      "sha256": "c1028b168f5ecab5fb49e6d82cfe9377836c55e15a4b6b15adade5ad4c85dec1",
+      "tree_match": true
+    }
+  ]
+}

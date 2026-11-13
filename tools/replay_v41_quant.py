@@ -79,7 +79,15 @@ def capture_baseline() -> None:
 
 
 def check() -> None:
-    """无漂移复算：与已提交 after.json/attribution.json 核对，不写任何文件。"""
+    """复算核对（R24 后契约）：分两层，不写任何文件。
+
+    1. R22 证据内部一致：before→after 的逐字段 delta = Σ by_op delta、
+       审计面外行逐字段冻结（全部对已提交文件，历史切片自洽）。
+    2. 当前代码复现**当前**账本：必须与最新一轮证据（R24：
+       docs/evidence/swiglu-tail/after.json，同拓扑场景）逐字段相等——
+       R22 的 after.json 是历史切片（不含 R24 moe_act/moe_shared_act
+       行）。无漂移复算入口是 tools/replay_v41_swiglu.py --check。
+    """
     scenario = ScenarioV2.from_json(json.loads(
         (FOLDER / "scenario.json").read_text(encoding="utf-8")))
     committed_after = json.loads(
@@ -87,19 +95,24 @@ def check() -> None:
     att = json.loads((FOLDER / "attribution.json").read_text(encoding="utf-8"))
     before = json.loads((FOLDER / "before.json").read_text(encoding="utf-8"))
     fresh = run_v2(scenario).to_json()
-    assert fresh["work"] == committed_after["work"], \
-        "work 账本与已提交 after.json 不一致（确定性被破坏）"
-    for key, val in committed_after["metrics"].items():
-        if key.startswith("M01_"):
-            assert fresh["metrics"][key] == val, key
-    old, new = before["work"]["target_decode"], fresh["work"]["target_decode"]
+    # ① R22 内部一致性（历史切片）
+    old = before["work"]["target_decode"]
+    committed = committed_after["work"]["target_decode"]
     for key in old["totals"]:
-        delta = new["totals"][key] - old["totals"][key]
+        delta = committed["totals"][key] - old["totals"][key]
         assert delta == sum(g["delta"][key] for g in att["by_op"].values()), key
     AUDITED = set(att["expected_changed_ops"])
     frozen = lambda rows: [r for r in rows if r["op"] not in AUDITED]
-    assert frozen(old["rows"]) == frozen(new["rows"])
-    print("check OK: ledger reproduces committed after.json; attribution holds")
+    assert frozen(old["rows"]) == frozen(committed["rows"])
+    # ② 当前代码复现当前账本（R24 证据；manifest 身份字段除外）
+    r24_after = json.loads(
+        (ROOT / "docs/evidence/swiglu-tail" / "after.json")
+        .read_text(encoding="utf-8"))
+    assert fresh["work"] == r24_after["work"], (
+        "当前复算账本与 R24 证据不一致（确定性被破坏；入口 "
+        "tools/replay_v41_swiglu.py --check）")
+    print("check OK: R22 attribution internally consistent; current ledger "
+          "reproduces the R24 evidence (docs/evidence/swiglu-tail)")
 
 
 def main() -> None:
