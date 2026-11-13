@@ -296,9 +296,14 @@ def test_g9_complete_config_leaves_registered_no_default_ignore():
     # 缺口不含 candidate 族键
     # R22：quantization_config 5 叶键已按 quant-pin.json（20 文件）
     # source-checked → mapped，不再是 gap（同 R04 Engram 先例的合法门禁
-    # 更新；swiglu/尾部/核本体缺口不变，仍在阻断）。
+    # 更新）。
+    # R24（2026-11-13）：swiglu_limit 与 compress_ratios[40:43] 尾部已按
+    # swiglu-tail-pin.json（13 文件）source-checked → mapped/归属登记，
+    # 不再是 gap（底层事实变化的合法门禁更新，非放宽——注意力核本体
+    # unverified_paths 仍阻断 structure_complete；candidate_block_size 为
+    # R20 已 mapped 键的登记补漏）。
     assert "quantization_config" not in gap_keys
-    assert "swiglu_limit" in gap_keys
+    assert "text_config.swiglu_limit" not in gap_keys
     quant_cov = {k.split(".")[-1]: v["status"]
                  for k, v in m.coverage.items()
                  if k.startswith("quantization_config.")}
@@ -310,7 +315,9 @@ def test_g9_complete_config_leaves_registered_no_default_ignore():
                            "candidate_topk_blocks", "index_topk",
                            "index_n_heads", "index_head_dim",
                            "kv_source_layer_ids", "index_source_layer_ids"}
-    assert any("compress_ratios[40:43]" in g for g in m.gaps)
+    assert not any("compress_ratios[" in g for g in m.gaps)
+    assert m.extras["kv_spec"]["draft_compress_ratios"] == [0, 0, 0]
+    assert m.extras["swiglu"]["limit"] == 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +337,9 @@ def test_g10_evidence_levels_separated_and_not_overclaimed():
     assert q.evidence.gpu_measurement == "none"
     assert q.evidence.method_status["mtp"] == "unverified"
     assert "sm-qwen35-gdn-decode-branch" in q.evidence.checked_paths
-    assert not v.config_coverage_complete and not v.forward_evidence_complete
+    # R24：V4.1 config 覆盖已完备（最后一个 unsupported 叶键 swiglu_limit
+    # 与尾部缺口解除）；forward 证据仍缺核本体 → 结构资格仍 False。
+    assert v.config_coverage_complete and not v.forward_evidence_complete
     # Engram 归因更新（2026-11-11 R04）：单机 Engram 算子已 pin + source-checked
     # → checked_paths/证据引用在册；未核范围收窄为 DP 交换/cpu_offload 运行时
     # 行为（本断言曾要求 engram_forward ∈ unverified_paths——底层事实变化，

@@ -1,17 +1,65 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-13（R22：V4.1 量化映射按 20 文件 pin（quant-pin.json）source-checked 建模——
+更新：2026-11-13（R24：V4.1 SwiGLU clamp 与 compress_ratios 尾部按 13 文件
+pin（swiglu-tail-pin.json）source-checked 解除——clamp 语义 gate 单侧/up
+双侧、alpha=1/beta=0、触发 is-not-None vs >0（0 值分叉域外拒绝）；消费两路
+（共享专家 MLP.act_fn + 路由专家 gemm1→激活→gemm2，注册执行域 Marlin 经
+apply_moe_activation 同 clamp）；新增 moe_act/moe_shared_act 行（6 算术
+op/元素，字节已归原行单一所有者）；尾部 [40:43] 逐项归 DSpark/nextn 草稿层
+（层号 40-42、0=纯 SWA、is_backbone 门控永不为源；非零尾部域外拒绝）；
+candidate_block_size 补入 struct 集合（R20 注记因漏登记未生效的修复）；
+V4.1 config 覆盖自此完备（structure_complete 仍由注意力核本体阻断）。
+早前 R22：V4.1 量化映射按 20 文件 pin（quant-pin.json）source-checked 建模——
 quantization_config 5 叶键 mapped：MXFP8 线性（e4m3 1B+ue8m0 (1,32) scale，checkpoint 32×32 块
 装载展开）+ MXFP4 路由专家（打包 2 值/byte+scale+Marlin I→128/H→256 分配对齐）+ embed/lm_head/
 norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fmt 键 loader 不消费、按声明
 矛盾拒绝；场景 V41_QUANT 冻结；known_peak +14.36 GB（Marlin 对齐主导）；Humming/SM100/emulation
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #12 已合入 main；R22 验收修复在 `codex/r22-acceptance-fix`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：本次 R22 验收修复在 Codex 宿主执行 `py -3.12 -m pytest tests -q`：**367 passed，exit 0**；`tools/replay_v41_quant.py --check` 与 `node --check simverse/static/workbench.js` 均 exit 0。历史回执（非本次执行）：dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）；R07a+R20 集成 311 passed，R07a 280、R20 单分支 295、R06 264/262、R05 252、R04 236、PR #3 合入时 234。
-**pytest 收集数：367**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-13 R22 验收修复；365→367 = 量化未知叶键缺口传播与草稿位宽默认值回归 2 项；334→365 = R22 量化映射 31 项（tests/test_v41_quant.py）；此前 311→334 = R21 21 项 + gate BF16 1 项 + dtype 域负例 1 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
+代码身份：本仓 git（PR #13 已合入 main；R24 在分支 `codex/v41-swiglu-tail-r24`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：本次 R24 在 ZCode 宿主（D:/Github/new-viewer-r24 工作树）执行
+`py -3.12 -m pytest tests -q`：**399 passed，exit 0**（见 §R24）；
+`py -3.12 tools/replay_v41_swiglu.py --check` 与 `node --check
+simverse/static/workbench.js` 均 exit 0。历史回执（非本次执行）：
+R22 验收修复 367 passed；`tools/replay_v41_quant.py --check` 与 `node --check simverse/static/workbench.js` 均 exit 0。历史回执（非本次执行）：dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）；R07a+R20 集成 311 passed，R07a 280、R20 单分支 295、R06 264/262、R05 252、R04 236、PR #3 合入时 234。
+**pytest 收集数：399**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-13 R24；367→399 = SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；334→365 = R22 量化映射 31 项（tests/test_v41_quant.py），365→367 = 量化未知叶键缺口传播与草稿位宽默认值回归 2 项；此前 311→334 = R21 21 项 + gate BF16 1 项 + dtype 域负例 1 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-13 R24：V4.1 SwiGLU clamp + compress_ratios 尾部**（分支
+`codex/v41-swiglu-tail-r24`）：swiglu-tail-pin.json 13 文件（vllm
+@f358f057，blob sha1 对 vllm-tree.json 逐项校验，源文件落盘）source-checked
+入册（ev-vllm-v41-swiglu-tail，executed=False；sm-v41-swiglu-tail）。
+语义结论：clamp gate=clamp(max=limit) **单侧**、up=clamp(±limit) **双侧**、
+out=gate·sigmoid(alpha·gate)·(up+beta)，V4.1 alpha=1.0/beta=0.0（无
+swiglu_alpha/beta 键→FusedMoEConfig 默认）；触发 MLP is-not-None vs Triton
+HAS_LIMIT>0（utils.py L812）在 0 值分叉 → config 域拒绝 0/负/非有限/缺失；
+消费两路均在注册执行域（Marlin apply_moe_activation L140-158 + 共享专家
+MLP.act_fn；MegaMoE activation clamp 语义同源但 SM100 域外）。尾部
+[40:43] 逐项归 DSpark/nextn 草稿层（dspark.py L128-136 层号 40-42；
+attention.py L375-386 按层号消费、else 分支 0=纯 SWA；L399-401
+is_backbone 门控永不为 kv/index 源；后端按去重层型集合消费
+sparse_swa.py L494-502）；长度域 {L, L+mtp}、尾部值 {0,1,2}、非零域外
+拒绝（草稿前向未建模不猜语义）；入册 extras.kv_spec.draft_compress_
+ratios。落地：count/moe moe_act/moe_shared_act 行（6 算术 op/元素；字节
+0 单一所有者防重复计费）、formula v2.swiglu_clamp_act、model_ir
+extras.swiglu + swiglu_limit 键 mapped、coverage note 更新；附带补漏
+candidate_block_size 入 struct 集合（R20 注记因键漏登记未生效，官方资产
+长期误挂"未登记 config 键"缺口，G9 断言被 text_config 前缀绕过未暴露）。
+V4.1 config_coverage_complete 自此 True；structure_complete 仍 False（仅
+稀疏 MLA 核本体阻断）。默认 TP8/B1/ctx32768 replay（quant=V41_QUANT）：
+decode flops +483,840（40×(6·288·6+288·6)）、rows +80、全部字节字段与
+M06 known_peak 不变、M01 +3.26e-07 ms（evidence/swiglu-tail
+attribution.json 逐 op 归因，--check 无漂移复算）。新增 32 项独立 oracle
+（tests/test_v41_swiglu.py：pin 三重校验/纯 stdlib clamp 数值 oracle（单
+双侧不对称/边界/饱和/NaN/SWIGLUOAI 家族差异）/手算 TP1/TP8/EP8 绝对值/
+负例 11（swiglu 域 6+尾部 5）/Qwen36 无 act 行/replay 冻结/公式-证据-
+source_map 注册）。既有断言随事实更新（G9/G10/test_model_ir_v02/
+test_v41_moe_route 结构缺口断言；test_v41_hc 冻结面追加 moe_act/
+moe_shared_act 行名，各附因——合法门禁更新非放宽）。[报告]
+(validation/v41-swiglu-tail-20261113.md)；G-C15 主干解除。剩余：clamp
+kernel 数值等价/masked/pad-aware 运行时差异/SWIGLUOAI 家族/MegaMoE
+SM100 执行变体、DSpark 草稿本体与非零尾部——登记不冒充。
 
 **2026-11-13 R22：V4.1 量化映射（quantization_config → 布局/字节/执行域）**
 （分支 `v41-quant-map-r22`）：quant-pin.json 20 文件（vllm @f358f057，

@@ -1,0 +1,8 @@
+{
+  "head": "b8585a1bd2733cc3e282dfd31bc92f546e48c1ee",
+  "captured_before_edits": true,
+  "worktree": "D:/Github/new-viewer",
+  "git_status_porcelain": "",
+  "note": "R24 基线：main b8585a1（R22 合入后）的干净生产代码执行捕获（R24 工作树 D:/Github/new-viewer-r24 当时已含本 PR 改动，故在主工作树捕获）；场景/拓扑与 R22 quant-map 相同（quant=V41_QUANT 冻结档）",
+  "before_sha256": "54750f03d524ec1b62c8ea42ceb2f12734fa4a3b9e0b80092632236ac8d69d70"
+}

@@ -89,23 +89,31 @@ def test_v41_structure_and_gaps(cat):
     m = cat["models"]["deepseek_v41_flash"]
     assert len(m.layers) == 40
     assert m.kind_counts() == {"mla_csa2": 40}
-    assert not m.structure_complete          # CSA2/MoE/量化仍阻断（不冒充）
-    assert not m.config_coverage_complete
+    assert not m.structure_complete          # 注意力核本体仍阻断（不冒充）
+    # R24：swiglu_limit/尾部缺口解除后 config 覆盖完备；结构资格仍由
+    # forward 证据（核本体 unverified_paths）阻断——两栏不得互相冒充。
+    assert m.config_coverage_complete and not m.forward_evidence_complete
     assert m.evidence.forward_source == "partial-source"
     gap_keys = {g.split(":")[0] for g in m.gaps}
     assert not gap_keys & {"hc_mult", "hc_eps", "hc_sinkhorn_iters"}  # hc 已解除
     assert not gap_keys & {f"engram_{k}" for k in (
         "vocab_size", "num_embeddings", "layer_ids", "n_heads", "head_dim",
         "max_ngram_size", "compressed_vocab_size", "pad_token_id")}  # R04 已解除
-    # 2026-11-10 审查新增：swiglu clamp/candidate block/compress_ratios 尾部/
     # R22：quantization_config 5 叶键已 mapped（quant-pin.json 20 文件），
-    # 不再是 gap；swiglu/尾部/核本体缺口不变。
+    # 不再是 gap。
+    # R24（2026-11-13）：swiglu_limit 与 compress_ratios[40:43] 尾部已按
+    # swiglu-tail-pin.json 13 文件 source-checked 解除（合法门禁更新，
+    # 非放宽）；structure_complete 仍由注意力核本体 unverified_paths 阻断。
     # R20（2026-11-12）：CSA2 索引/candidate 键已 mapped（csa2-pin.json 21
-    # 文件 source-checked）；剩余缺口不含 candidate/index 拓扑键。
-    assert "swiglu_limit" in gap_keys and "quantization_config" not in gap_keys
+    # 文件 source-checked）；R24 补 candidate_block_size 入 struct 集合
+    # （R20 注记此前因键漏登记未生效）。
+    assert "text_config.swiglu_limit" not in gap_keys
+    assert "quantization_config" not in gap_keys
     assert not gap_keys & {"candidate_block_size", "candidate_source_layer_id",
                            "candidate_topk_blocks", "index_topk"}
-    assert any("compress_ratios[40:43]" in g for g in m.gaps)
+    assert not any("compress_ratios[" in g for g in m.gaps)
+    assert m.coverage["text_config.swiglu_limit"]["status"] == "mapped"
+    assert m.extras["swiglu"]["limit"] == 10.0
     # R21（2026-11-12）：MoE 路由主干已 source-checked（ev-vllm-v41-moe），
     # csa2_moe_routing 缺口改列 moe_deploy_variants（MegaMoE/DSpark/padding
     # skip 等部署变体仍 unverified）。

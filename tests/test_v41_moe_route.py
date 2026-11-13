@@ -536,11 +536,15 @@ def test_structure_complete_still_false_and_gaps():
     m = build_catalog()["models"]["deepseek_v41_flash"]
     gap_keys = {g.split(":")[0] for g in m.gaps}
     assert not m.structure_complete
-    assert "swiglu_limit" in gap_keys
+    # R24：swiglu_limit 与 compress_ratios 尾部已按 swiglu-tail-pin.json
+    # 13 文件 source-checked 解除（ev-vllm-v41-swiglu-tail；底层事实变化
+    # 的合法门禁更新，非放宽——注意力核本体 unverified_paths 仍阻断
+    # structure_complete）。
+    assert "text_config.swiglu_limit" not in gap_keys
+    assert not any("compress_ratios[" in g for g in m.gaps)
     # R22：量化映射已解除（ev-vllm-v41-quant）；quantization_config 不再
     # 是 gap，覆盖登记为 mapped。
     assert "quantization_config" not in gap_keys
-    assert any("compress_ratios[40:43]" in g for g in m.gaps)
     # 证据四栏：source-checked 未冒充 executed
     assert m.evidence.cpu_forward == "not-run"
     assert m.evidence.gpu_measurement == "none"

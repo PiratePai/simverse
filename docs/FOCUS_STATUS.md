@@ -1,5 +1,18 @@
 # 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06 增补）
 
+2026-11-13 R24（V4.1 SwiGLU clamp + compress_ratios 尾部）：13 文件 pin
+（swiglu-tail-pin.json，vllm @f358f057）source-checked 解除 swiglu_limit
+与尾部 [40:43] 缺口。clamp 语义 gate 单侧 max/up 双侧 ±10、alpha=1/beta=0；
+消费两路（共享专家 MLP.act_fn + 路由专家 gemm1→激活→gemm2，注册执行域
+Marlin 经 apply_moe_activation 同 clamp）→ 新增 moe_act/moe_shared_act 行
+（6 算术 op/元素；decode TP8 +483,840 flops/+80 行，字节 0 单一所有者）。
+尾部逐项归 DSpark/nextn 草稿层（层号 40-42、0=纯 SWA、is_backbone 门控
+永不为源；非零尾部域外拒绝）。附带补漏 candidate_block_size 键入 struct
+集合。**V4.1 config 覆盖自此完备**；structure_complete 仍 False（仅稀疏
+MLA 核本体阻断）。oracle 32 项（tests/test_v41_swiglu.py）；replay
+evidence/swiglu-tail --check 无漂移。详见
+[validation/v41-swiglu-tail-20261113.md](validation/v41-swiglu-tail-20261113.md)。
+
 2026-11-12 R06（Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照）：fixture 级
 形状与算量对照已执行（探针独立跑 pin 官方 forward，h=32/2 层/4E 随机权重，
 prefill+decode 逐 GEMM/conv/router/因果对/无放回 assignment 与本仓

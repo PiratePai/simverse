@@ -65,12 +65,18 @@ _STRUCT_KEYS = {
                  "num_key_value_heads", "head_dim", "q_lora_rank", "o_lora_rank",
                  "o_groups", "qk_rope_head_dim", "index_head_dim", "index_n_heads",
                  "index_topk", "candidate_topk_blocks", "candidate_source_layer_id",
+                 # R24 补漏：R20 已按 csa2-pin mapped（_CSA2_KEY_NOTES 有注记、
+                 # parse 以 cb 消费），但键漏在 struct 集合外 → 官方资产的
+                 # text_config.candidate_block_size 长期误挂"未登记 config 键"
+                 # 缺口（G9 断言被 text_config 前缀绕过未暴露）。补入集合使
+                 # R20 注记生效；语义不变（块粒度 8）。
+                 "candidate_block_size",
                  "sliding_window", "compress_ratios", "kv_source_layer_ids",
                  "index_source_layer_ids", "vocab_size", "n_routed_experts",
                  "n_shared_experts", "num_experts_per_tok", "moe_intermediate_size",
                  "routed_scaling_factor", "scoring_func", "topk_method",
                  "max_position_embeddings", "tie_word_embeddings",
-                 "num_nextn_predict_layers", "norm_topk_prob",
+                 "num_nextn_predict_layers", "norm_topk_prob", "swiglu_limit",
                  # mHC（2026-11-10 mapped：count/work.hc_boundary_rows +
                  # lowering/memory hc 权重；vLLM pin source-checked）
                  "hc_mult", "hc_eps", "hc_sinkhorn_iters",
@@ -152,8 +158,30 @@ _CSA2_KEY_NOTES = {
         "mapped：SWA 窗 128（attention.py L373；SWA 记录 584/528 B/token 见"
         " scenario.v41_kv_record）",
     "compress_ratios":
-        "mapped（主干 40 项）：0=纯 SWA、1=全压缩、2=2:1 池化（sparse_mla.py"
-        " L34-43；compressor.py L295-310 ratio1 无门控）；MTP 尾部另列缺口",
+        "mapped（主干 40 项 + 尾部 3 项）：主干 0=纯 SWA、1=全压缩、2=2:1"
+        " 池化（sparse_mla.py L34-43；compressor.py L295-310 ratio1 无门控）；"
+        "尾部 [40:43] 逐项归 DSpark/nextn 草稿层 0/1/2（attention.py L375-386"
+        " 按层号消费、L399-401 is_backbone 门控——草稿层永不为 kv/index 源；"
+        "official 资产尾部全 0=纯 SWA；非零尾部为域外拒绝，R24）",
+}
+
+# R24（2026-11-13）：V4.1 SwiGLU clamp 键的 mapped 注记（证据
+# swiglu-tail-pin.json 13 文件 + ev-vllm-v41-swiglu-tail；消费者
+# count/moe.moe_rows 的 moe_act/moe_shared_act 行 + extras.swiglu）。
+_SWIGLU_KEY_NOTES = {
+    "swiglu_limit":
+        "mapped：SwiGLU clamp 10.0（activation.py L208-250 SiluAndMulWithClamp："
+        "gate=clamp(x[:d],max=limit) 单侧、up=clamp(x[d:],min=-limit,max=limit)"
+        " 双侧、out=gate·sigmoid(alpha·gate)·(up+beta)，V4.1 alpha=1.0/beta=0.0"
+        " → silu(gate)·up；触发条件 swiglu_limit is not None，Triton 侧 "
+        "HAS_LIMIT=swiglu_limit>0，utils.py L812）。消费三路：共享专家 MLP "
+        "SiluAndMulWithClamp（deepseek_v4/nvidia/model.py L176-183 经 L331）+ "
+        "路由专家 fused MoE 激活（FusedMoEConfig.swiglu_limit L1365 → "
+        "ApplyMoEActivationConfig.from_configs L182-185 → silu_and_mul_with_"
+        "clamp L293-312；注册执行域 Marlin 亦经 apply_moe_activation L150-155"
+        " 消费，marlin_moe.py）+ native MegaMoE activation clamp（L393-394，"
+        "SM100 域外）。算量：moe_act/moe_shared_act 行 6 算术 op/元素"
+        "（clamp 3+sigmoid 1+乘 2）",
 }
 
 # R21（2026-11-12）：V4.1 MoE 路由键的 mapped 注记（证据 moe-pin.json
@@ -695,8 +723,10 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     norm/gate BF16 未量化；Marlin SM90 执行域 act=BF16）。执行变体
     （Humming/TRTLLM SM100/emulation 反量化）登记 capability-gaps，不进
     本 gaps。
-    swiglu clamp、注意力核本体、尾部 compress_ratios 仍为显式
-    缺口 → gaps 非空，structure_complete=False。
+    swiglu clamp（R24：moe_act/moe_shared_act 行 + extras.swiglu）与
+    compress_ratios 尾部（R24：逐项归 DSpark 草稿层，0=纯 SWA）已
+    source-checked 映射；稀疏 MLA 注意力核本体仍为显式缺口 →
+    gaps 非空，structure_complete=False。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
     tc = config
@@ -708,8 +738,37 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     ratios = tc["compress_ratios"]
     kv_ids, ix_ids = tc["kv_source_layer_ids"], tc["index_source_layer_ids"]
     candidate = tc.get("candidate_source_layer_id", -1)
+    mtp_layers = int(tc.get("num_nextn_predict_layers", 0) or 0)
     if len(ratios) < L or any(r not in (0, 1, 2) for r in ratios[:L]):
         raise ValueError("compress_ratios 必须覆盖所有主干层且仅含 0/1/2")
+    # R24：compress_ratios 尾部归属（swiglu-tail-pin.json，vllm @f358f057）。
+    # 尾部 [L:] 逐项归 DSpark/nextn 草稿层：dspark.py L128-136 以
+    # prefix layers.{num_hidden_layers+i} 构造草稿层（层号 L..L+mtp-1），
+    # attention.py L381-386 按层号取 compress_ratios[layer_id]（不足长度的
+    # 层号落 else 分支 compress_ratio=0 纯 SWA；上游派生路径同样补
+    # [0]*num_nextn_predict_layers，deepseek_v4_utils.py L6-18 "MTP layers
+    # included"）。L399-401 的 is_backbone 门控使草稿层永不为 kv/index
+    # 源。域约束（本仓建模域，非源码断言）：
+    #   * 长度只允许 L（尾部缺省→草稿层 else 分支全 0）或 L+mtp；
+    #     超出 L+mtp 的项无任何层号消费（死配置），不得静默忽略；
+    #   * 尾部值域 {0,1,2}（attention.py L387-392 对任意层校验）；
+    #   * 非零尾部 = 草稿层消费压缩 KV——DSpark 草稿路径未建模（R21 缺口
+    #     不变），无 official 证据，按域外拒绝（不猜语义）。
+    if len(ratios) not in (L, L + mtp_layers):
+        raise ValueError(
+            f"compress_ratios 长度 {len(ratios)} 不在域：只允许主干 {L} 项或"
+            f" {L}+num_nextn_predict_layers({mtp_layers})={L + mtp_layers} 项"
+            "（超出部分无层号消费，attention.py 层号止于 L+mtp-1）")
+    draft_ratios = list(ratios[L:])
+    if len(draft_ratios) < mtp_layers:
+        draft_ratios = draft_ratios + [0] * (mtp_layers - len(draft_ratios))
+    if any(r not in (0, 1, 2) for r in draft_ratios):
+        raise ValueError("compress_ratios 尾部（草稿层）只允许 0/1/2")
+    if any(draft_ratios):
+        raise ValueError(
+            "compress_ratios 尾部含非零值：DSpark/nextn 草稿层的压缩 KV 消费"
+            "路径未建模（official 资产尾部全 0=纯 SWA；attention.py L375-386"
+            " 支持非零层号取值，但草稿前向未入 pin，不猜语义）")
     if kv_ids != sorted(set(kv_ids)) or ix_ids != sorted(set(ix_ids)):
         raise ValueError("缓存源层必须递增不重复")
     if not set(kv_ids).issubset(ix_ids) or any(ratios[i] == 0 for i in set(kv_ids) | set(ix_ids)):
@@ -797,6 +856,27 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             f"V4.1 scale_fmt={quant_cfg.get('scale_fmt')!r} 不在域：official"
             " 资产 ue8m0；该键不被 loader 消费（fp8.py L155-172），实际"
             " scale dtype 由 expert_dtype=='fp4' 派生，不一致按声明矛盾拒绝")
+    # R24：SwiGLU clamp 域校验（swiglu-tail-pin.json，vllm @f358f057）。
+    # 语义（activation.py L208-250 SiluAndMulWithClamp）：gate=clamp(max=limit)
+    # 单侧、up=clamp(min=-limit,max=limit) 双侧、out=gate·sigmoid(alpha·gate)·
+    # (up+beta)；V4.1 无 swiglu_alpha/swiglu_beta config 键 → FusedMoEConfig
+    # 默认 None → alpha=1.0/beta=0.0（fused_moe/activation.py L186-193）→ 退化
+    # silu(gate)·up。触发条件：MLP 侧 swiglu_limit is not None（model.py
+    # L176-183），Triton 侧 HAS_LIMIT=swiglu_limit>0（utils.py L812）——值 0
+    # 在两路径语义分叉（MLP 仍构造 clamp(0) 病态核、Triton 关 clamp），且
+    # official 资产恒 10.0，故 0/负/非有限值一律域外拒绝，不猜语义。
+    swiglu_raw = tc.get("swiglu_limit")
+    if not isinstance(swiglu_raw, (int, float)) or isinstance(swiglu_raw, bool):
+        raise ValueError(
+            f"V4.1 swiglu_limit={swiglu_raw!r} 缺失/非数值：official 资产恒"
+            " 10.0（clamp 激活为 V4.1 结构性组成，无 clamp 变体不在"
+            " source-checked 域）")
+    if not (swiglu_raw > 0) or swiglu_raw != swiglu_raw or swiglu_raw in (
+            float("inf"), float("-inf")):
+        raise ValueError(
+            f"V4.1 swiglu_limit={swiglu_raw!r} 不在域：须为正有限数（MLP 侧"
+            " is-not-None 触发、Triton 侧 >0 触发在 0 处分叉，official 10.0；"
+            " activation.py L226-243/utils.py L812）")
     layers = []
     r_hist: Dict[int, int] = {}
     for i in range(L):
@@ -815,8 +895,8 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
                         produces_candidates=i == candidate),
             moe=moe))
     gaps_hint = {
-        "swiglu_limit": "SwiGLU clamp（10.0）未进入本仓 MLP 计数/数值语义；"
-                        "不冒充已消费",
+        # R24 后 swiglu_limit 已 mapped（_SWIGLU_KEY_NOTES）；此 dict 保留
+        # 给未来确需 unsupported-semantic 的键，当前为空。
     }
     # hc_* / engram_* 8 键 → mapped（hc：count/work.hc_boundary_rows +
     # lowering/memory hc 权重，vllm model.py pin @f358f057 source-checked
@@ -837,10 +917,30 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         if path in coverage and coverage[path]["status"] == "mapped":
             coverage[path] = {"status": "mapped", "consumer": "model_ir+count+memory",
                               "note": note}
-    if len(ratios) > L:
-        gaps.append(
-            f"compress_ratios[{L}:{len(ratios)}]: 尾部 {len(ratios) - L} 项未进入"
-            "主干层图（MTP/草稿层作用未建模；不能当作已消费）")
+    # R24：SwiGLU clamp 键的 mapped 注记（swiglu-tail-pin.json 13 文件，
+    # source-checked 2026-11-13；消费者 count/moe.moe_act/moe_shared_act 行）
+    for key, note in _SWIGLU_KEY_NOTES.items():
+        path = f"{text_prefix}.{key}" if text_prefix else key
+        if path in coverage and coverage[path]["status"] == "mapped":
+            coverage[path] = {"status": "mapped", "consumer": "model_ir+count",
+                              "note": note}
+    # R24：SwiGLU clamp 规格（消费方：count/moe.moe_rows 的 moe_act/
+    # moe_shared_act 行；语义/行号证据见上方域校验与 _SWIGLU_KEY_NOTES）。
+    # ops_per_elem=6：gate clamp-max 1 + up clamp-min 1 + up clamp-max 1 +
+    # sigmoid 1 + 乘 2（解析算术 op 口径，与 R21 路由行同惯例）。
+    swiglu_spec = {
+        "limit": float(swiglu_raw),
+        "gate": "clamp_max",
+        "up": "clamp_minmax",
+        "alpha": 1.0,
+        "beta": 0.0,
+        "ops_per_elem": 6,
+        "applies_to": ["moe_routed", "moe_shared"],
+        # native MegaMoE activation clamp（model.py L393-394）同为该语义，
+        # 但 SM100 域外（R22 执行域 = Marlin W8A16/W4A16，经 marlin_moe.py
+        # L150-155 的 apply_moe_activation 消费同一 clamp）
+        "mega_path": "same-semantics-out-of-domain",
+    }
     # mHC 参数（消费方：count/work.hc_boundary_rows、lowering/memory）。
     # post_alpha=2.0 为源码常数（model.py self.hc_post_alpha），入册便于对账。
     hc_spec = {
@@ -1056,13 +1156,18 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
             "candidate_source_layer_id": int(candidate),
             "sliding_window": tc["sliding_window"],
             "compress_ratios": ratios,
+            # R24：尾部逐项归 DSpark/nextn 草稿层（dspark.py L128-136 层号
+            # L..L+mtp-1；attention.py L381-386 按层号消费；0=纯 SWA 草稿
+            # 注意力，非零域外拒绝——草稿前向未建模，见 parse 头部域校验）
+            "draft_compress_ratios": draft_ratios,
             "kv_source_layer_ids": kv_ids,
             "index_source_layer_ids": ix_ids,
         },
         "hc": hc_spec,
         "engram": engram_spec,
         "moe_route": moe_route_spec,
-        "quant": quant_spec})
+        "quant": quant_spec,
+        "swiglu": swiglu_spec})
 
 
 def parse_dflash_draft(config: Dict[str, Any], source: SourceIdentity, model_id: str,

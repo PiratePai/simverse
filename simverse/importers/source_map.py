@@ -290,23 +290,90 @@ ENTRIES: List[SourceMapEntry] = [
              "attribution.json 与 v41-csa2-indexer-20261112.md"),
     SourceMapEntry(
         entry_id="sm-v41-csa2-moe-unverified",
-        model_or_method="deepseek_v41_flash 量化/注意力核",
-        semantic="稀疏 MLA 注意力核本体（flops 4d+5、bmm 尺度）仍 v0.1 移植；"
-                 "quantization_config 未映射到计算精度（CSA2 索引管线 R20 已"
-                 "另立 sm-v41-csa2-indexer；MoE 路由 R21 已另立 "
-                 "sm-v41-moe-route）",
+        model_or_method="deepseek_v41_flash 注意力核",
+        semantic="稀疏 MLA 注意力核本体（flops 4d+5、bmm 尺度）仍 v0.1 移植"
+                 "（CSA2 索引管线 R20 已另立 sm-v41-csa2-indexer；MoE 路由 "
+                 "R21 已另立 sm-v41-moe-route；量化 R22 已另立 sm-v41-quant-"
+                 "dispatch；SwiGLU/尾部 R24 已另立 sm-v41-swiglu-tail）",
         source_pin=VLLM_PIN,
         source_location="vllm/models/deepseek_v41/nvidia/model.py:204-327"
-                        "（sparse-MLA 选择）；quantization_config（config "
-                        "JSON，未映射）",
+                        "（sparse-MLA 选择）",
         branch_predicate="config scoring_func=sqrtsoftplus、topk_method=noaux_tc",
         input_domain="V4.1-Flash 全 40 层",
         both_sides_covered=False,
         uncovered_domain=["稀疏 MLA 注意力核本体未独立逐行核（flops 4d+5 为"
-                          "v0.1 移植口径）",
-                          "quantization_config 未映射到计算精度"],
-        note="2026-11-10 审查、R20 缩窄（索引/候选）、R21 缩窄（MoE 路由已"
-             "解除）；剩余路径不能因 config 通过而标完整或参与部署排名"),
+                          "v0.1 移植口径）"],
+        note="2026-11-10 审查、R20 缩窄（索引/候选）、R21 缩窄（MoE 路由）、"
+             "R22 缩窄（量化映射已解除——旧文本'quantization_config 未映射'"
+             "随事实更新）、R24 缩窄（SwiGLU clamp/compress_ratios 尾部已"
+             "解除）；剩余核本体路径不能因 config 通过而标完整或参与部署排名"),
+    SourceMapEntry(
+        entry_id="sm-v41-swiglu-tail",
+        model_or_method="deepseek_v41_flash SwiGLU clamp + compress_ratios 尾部",
+        semantic="SwiGLU clamp 激活：gate=clamp(x[:d],max=limit) 单侧、"
+                 "up=clamp(x[d:],min=-limit,max=limit) 双侧、out=gate·"
+                 "sigmoid(alpha·gate)·(up+beta)，V4.1 alpha=1.0/beta=0.0 → "
+                 "silu(clamp(gate))·clamp(up)；触发条件 MLP 侧 "
+                 "swiglu_limit is not None、Triton 侧 HAS_LIMIT=limit>0。"
+                 "消费两路（注册执行域）：路由专家 gemm1/w13→激活→gemm2/w2"
+                 "（Marlin 亦经 apply_moe_activation 回调消费）与共享专家 "
+                 "MLP.act_fn=SiluAndMulWithClamp。compress_ratios 尾部"
+                 "[L:L+mtp] 逐项归 DSpark/nextn 草稿层（层号 L..L+mtp-1），"
+                 "0=纯 SWA 草稿注意力；is_backbone 门控使草稿层永不为 "
+                 "kv/index 源；后端仅按去重层型集合消费（尾部 0 与主干 0 "
+                 "同组，不产生新 tile-scheduler plan）",
+        source_pin=VLLM_PIN,
+        source_location="vllm/model_executor/layers/activation.py:208-250"
+                        "（SiluAndMulWithClamp：docstring L209-224、init "
+                        "L226-242、forward_native L239-243、forward_cuda "
+                        "L245-250）；fused_moe/config.py:1365（FusedMoEConfig"
+                        ".swiglu_limit）；fused_moe/activation.py:176-197"
+                        "（from_configs：clamp_limit=gemm1_clamp_limit or "
+                        "moe_config.swiglu_limit，alpha/beta 默认 1.0/0.0）、"
+                        "246-275（masked 路径：clamp None→0.0；SWIGLUOAI/"
+                        "SWIGLUSTEP 家族常数 7.0/1.702）、293-312（silu_and_"
+                        "mul_with_clamp：XPU 分解/CUDA 融核同语义）；"
+                        "fused_moe/utils.py:801-835（_swiglu_limit_pad_"
+                        "aware HAS_LIMIT=swiglu_limit>0 L812；swiglu_limit_"
+                        "func L819-835）；fused_moe/experts/marlin_moe.py:"
+                        "140-158（注册执行域激活位：apply_moe_activation 于 "
+                        "gemm1 与 gemm2 之间）；deepseek_v4/nvidia/model.py:"
+                        "176-183/252/331（MLP act_fn 接线/swiglu_limit 读取/"
+                        "shared_experts 传递；444 fused 工厂透传）、393-394"
+                        "（native MegaMoE activation clamp，SM100 域外）、"
+                        "deepseek_v4/cpu/model.py:101-102/132（CPU 变体同构）；"
+                        "尾部：transformers_utils/deepseek_v4_utils.py:6-18"
+                        "（get_compress_ratios 'MTP layers included'，派生"
+                        "路径补 [0]*num_nextn_predict_layers）、"
+                        "deepseek_v41/attention.py:375-386（按层号消费+else "
+                        "分支 0=纯 SWA）、399-401（is_backbone 门控）、"
+                        "deepseek_v41/nvidia/dspark.py:93-96/128-136（草稿层"
+                        "数与 layers.{L+i} 层号）、v1/attention/backends/mla/"
+                        "sparse_swa.py:494-502（去重层型集合消费）",
+        branch_predicate="config swiglu_limit=10.0（official；0/负/非有限域外"
+                         "拒绝——MLP is-not-None 与 Triton >0 在 0 处分叉）；"
+                         "compress_ratios 长度 ∈ {L, L+num_nextn_predict_"
+                         "layers}，尾部值 ∈ {0,1,2} 且非零域外拒绝",
+        input_domain="V4.1-Flash 主干 40 MoE 层（共享+路由专家）与 3 个 "
+                     "DSpark/nextn 草稿层",
+        both_sides_covered=True,
+        uncovered_domain=["clamp CUDA kernel 与 native 的数值等价未执行"
+                          "（vLLM 测试在册 test_activation.py L62-66/L251-"
+                          "285，本仓未跑）",
+                          "masked 每 expert padded 激活路径（activation.py "
+                          "L246-260）与 pad-aware Triton 跳过未路由槽/非本地"
+                          "专家的运行时差异未入账（按逻辑 assignment 计费）",
+                          "SWIGLUOAI（alpha=1.702/beta=1.0/limit=7.0）与 "
+                          "SWIGLUSTEP 家族为 V4.1 域外",
+                          "native MegaMoE activation clamp（SM100）语义同源"
+                          "未执行",
+                          "DSpark 草稿层本体（MoE E=128/k=3、非因果 topk）"
+                          "未建模；非零 compress_ratios 尾部按域外拒绝"],
+        note="R24（2026-11-13）source-checked 入册（swiglu-tail-pin.json 13 "
+             "文件，blob sha1 对 vllm-tree.json 逐项校验）；落地 "
+             "count/moe.moe_act/moe_shared_act 行（6 算术 op/元素，字节已归 "
+             "moe_routed/moe_shared 单一所有者）、formula v2.swiglu_clamp_"
+             "act、model_ir extras.swiglu + kv_spec.draft_compress_ratios"),
     SourceMapEntry(
         entry_id="sm-v41-moe-route",
         model_or_method="deepseek_v41_flash MoE 路由",
@@ -383,7 +450,7 @@ ENTRIES: List[SourceMapEntry] = [
              "整除域（仅 mega 断言 L357-362；fused 通用余数映射未入 pin/"
              "未建模，不主张 fused 非法）；共享专家独立相加"
              "（moe_output.py）；量化映射已由 R22 另立 sm-v41-quant-"
-             "dispatch 解除；swiglu clamp 仍为独立缺口"),
+             "dispatch 解除；swiglu clamp/尾部已由 R24 另立 sm-v41-swiglu-tail 解除"),
     SourceMapEntry(
         entry_id="sm-v41-quant-dispatch",
         model_or_method="deepseek_v41_flash 量化映射",

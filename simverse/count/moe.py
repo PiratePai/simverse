@@ -167,7 +167,8 @@ def v41_moe_route_rows(moe, route: dict, tokens: int, hidden: int) -> list:
 
 def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 1,
              local_experts: int | None = None,
-             quant_recipe: dict | None = None) -> list:
+             quant_recipe: dict | None = None,
+             act_recipe: dict | None = None) -> list:
     """一层 MoE 的账本行（router/routed/shared(+gate)）——**per-rank 口径**。
 
     tp/ep/local_experts 来自 lowering/parallel.ParallelPlan：
@@ -183,6 +184,21 @@ def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 
         inter 精确计，不把补齐块算成算量；
       * 激活字节 = BF16 2B（≤SM90 Marlin W8A16/W4A16 执行域）；
       * shared 字节并入 ue8m0 scale（3·h·I_r/32）。
+    R24 act_recipe（V4.1 extras.swiglu；swiglu-tail-pin.json，vllm
+    @f358f057）在场时追加 moe_act/moe_shared_act 两行：
+      * 语义（activation.py L208-250 SiluAndMulWithClamp）：gate=clamp(max=
+        limit) 单侧、up=clamp(min=-limit,max=limit) 双侧、out=gate·sigmoid(
+        alpha·gate)·(up+beta)，V4.1 alpha=1.0/beta=0.0 → silu(gate)·up；
+      * 消费位置：路由专家在 gemm1/w13 与 gemm2/w2 之间（注册执行域
+        Marlin：marlin_moe.py L140-158 apply_moe_activation，clamp_limit
+        取自 FusedMoEConfig.swiglu_limit，fused_moe/activation.py L182-185；
+        fused 别路 silu_and_mul_with_clamp/swiglu_limit_func 同语义，
+        activation.py L293-312/utils.py L819-835）；共享专家 MLP.act_fn
+        （deepseek_v4/nvidia/model.py L176-183 经 L331 接线）；
+      * flops = 元素数 × ops_per_elem(6)：clamp 3 + sigmoid 1 + 乘 2
+        （解析算术 op 口径，与 R21 路由行同惯例）；
+      * 字节 0：激活中间缓存读写已在 moe_routed/moe_shared 行的
+        act_read/act_write 计价（单一所有者，防重复计费）。
     返回 list[dict]，字段与 count.work.OpRow 对齐；期望字段单列
     weight_read_expected（float），不与精确整数列混排。
     """
@@ -264,6 +280,24 @@ def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 
         "statistic": "expectation" if ep_on else "expectation",
         "shape": shape,
     }]
+    if act_recipe is not None:
+        # R24：SwiGLU clamp 激活行（路由专家，gemm1→激活→gemm2）。
+        # flops = assignment×inter_rank 元素 × 6 op/elem；TP 关 assignment=
+        # T·k 精确、EP 开为期望本地份额（与 moe_routed 同 statistic）。
+        # 字节 0：中间缓存读写已归 moe_routed 行（单一所有者）。
+        ops_per_elem = int(act_recipe["ops_per_elem"])
+        rows.append({
+            "layer_op": "moe_act",
+            "flops": int(act_assign * inter_rank * ops_per_elem),
+            "weight_read": 0, "weight_capacity": 0,
+            "act_read": 0, "act_write": 0,
+            "formula": FR.F_SWIGLU_CLAMP_ACT,
+            "statistic": "expectation" if ep_on else "exact",
+            "shape": f"clamp(gate,max={act_recipe['limit']})·silu·clamp("
+                     f"up,±{act_recipe['limit']}) act_assign="
+                     f"{act_assign:g}×{inter_rank}（{ops_per_elem} op/elem；"
+                     "字节已归 moe_routed）",
+        })
     if moe.shared_intermediate:
         si = moe.shared_intermediate
         si_rank = si // tp                    # dense MLP 配方：inter/tp（EP 不改）
@@ -288,6 +322,20 @@ def moe_rows(moe, tokens: int, hidden: int, quant: dict, tp: int = 1, ep: int = 
             "formula": FR.F_GEMM, "statistic": "exact",
             "shape": f"shared inter={si}/tp{tp}={si_rank}{shared_note}",
         })
+        if act_recipe is not None:
+            # R24：共享专家 MLP 的 SwiGLU clamp 激活行（SiluAndMulWithClamp，
+            # deepseek_v4/nvidia/model.py L176-183/L331）。字节 0：中间缓存
+            # 读写已归 moe_shared 行（单一所有者）。
+            rows.append({
+                "layer_op": "moe_shared_act",
+                "flops": int(T * si_rank * act_recipe["ops_per_elem"]),
+                "weight_read": 0, "weight_capacity": 0,
+                "act_read": 0, "act_write": 0,
+                "formula": FR.F_SWIGLU_CLAMP_ACT, "statistic": "exact",
+                "shape": f"SiluAndMulWithClamp(limit={act_recipe['limit']}) "
+                         f"{T}×{si_rank}（{act_recipe['ops_per_elem']} op/"
+                         "elem；字节已归 moe_shared）",
+            })
         if moe.shared_gate:
             rows.append({
                 # shared_expert_gate：ReplicatedLinear(h,1)，每 rank 复制

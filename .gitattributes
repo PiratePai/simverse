@@ -16,3 +16,6 @@ docs/evidence/moe-route/*.json binary
 
 # R22 原始 replay 快照（同 R05/R20/R21 先例）：保留捕获字节防行尾转换破坏 SHA256。
 docs/evidence/quant-map/*.json binary
+
+# R24 原始 replay 快照（同 R05/R20/R21/R22 先例）：保留捕获字节防行尾转换破坏 SHA256。
+docs/evidence/swiglu-tail/*.json binary

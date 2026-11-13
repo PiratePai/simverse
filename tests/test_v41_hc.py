@@ -483,7 +483,11 @@ def test_replay_preserves_engram_and_non_hc_rows():
         #（docs/evidence/quant-map）。
         "q_a_proj", "kv_proj", "q_b_proj", "o_a_proj", "o_b_proj",
         "index_q_proj", "q_rope", "k_rope", "o_rope", "moe_routed",
-        "moe_shared", "engram_wkv", "final_norm", "lm_head", "embed_lookup"}
+        "moe_shared", "engram_wkv", "final_norm", "lm_head", "embed_lookup",
+        # R24（2026-11-13）：SwiGLU clamp 新增 moe_act/moe_shared_act 激活行
+        #（+483,840 flops/+80 行；字节 0）。由 tests/test_v41_swiglu.py 的
+        # replay 归因单独冻结（docs/evidence/swiglu-tail）。
+        "moe_act", "moe_shared_act"}
     def non_hc(rows):
         return [{k: v for k, v in r.items() if k != "stage"}
                 for r in rows
