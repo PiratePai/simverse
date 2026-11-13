@@ -1,0 +1,65 @@
+{
+ "schema_version": "0.2",
+ "name": "unnamed",
+ "model_id": "qwen36_35b_a3b",
+ "draft_id": "dflash_qwen36_35b_a3b",
+ "method_id": "mtp",
+ "k": 1,
+ "block_size": null,
+ "deployment": {
+  "mode": "colocated",
+  "target_device": "h100_sxm",
+  "target_tp": 8,
+  "target_ep": 1,
+  "draft_device": "l40",
+  "draft_tp": 1,
+  "link": "pcie5",
+  "draft_on_target_group": true,
+  "pipeline_microbatches": 2,
+  "pipeline_rounds": 6,
+  "budget": null,
+  "draft_budget": null,
+  "engram_table_placement": "cpu_offload",
+  "v41_kv_record": "fp8_ds_mla_sm90"
+ },
+ "workload": {
+  "batch": 1,
+  "ctx_tokens": 32768,
+  "osl_tokens": null,
+  "arrival": "fixed-batch",
+  "source_kind": "hypothesis",
+  "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+ },
+ "acceptance": {
+  "kind": "geometric",
+  "alpha": 0.75
+ },
+ "quant": {
+  "dense_w": 8,
+  "expert_w": 4,
+  "act": 8,
+  "kv": 8,
+  "state": 32
+ },
+ "draft_quant": {
+  "dense_w": 8,
+  "expert_w": 8,
+  "act": 8,
+  "kv": 8,
+  "state": 32
+ },
+ "draft_ctx_kv_path": "fused_raw",
+ "cost_profile": null,
+ "seed": 0,
+ "notes": "",
+ "rng": {
+  "algorithm": "pcg64-xsl-rr",
+  "master_seed": 0,
+  "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+  "semantic_key_fields": {
+   "model": "qwen36_35b_a3b",
+   "method": "mtp",
+   "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+  }
+ }
+}

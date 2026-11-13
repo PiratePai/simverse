@@ -497,6 +497,59 @@ _PINNED_ASSETS = [
      ["模型已移出活跃 catalog；profile 绑定 235B，禁止跨模型使用；"
       "不是 Qwen3.6/V4.1 的真实性证据；无端到端实测对照"],
      True),
+    ("ev-vllm-qwen36-mtp", "source-checked",
+     "Qwen3.6-35B-A3B 原生 MTP 头（R23）：vLLM Qwen3_5MoeMTP 逐行核对——"
+     "combine=双预归一+cat+fc(2h→h, ColumnParallel gather_output=True, 无激活"
+     "/无残差直加)；层=full_attention decoder 层（gated GQA+MoE，几何=目标 "
+     "full 层）×n_predict（Qwen3.6=1）；层选择 spec_step_idx%n（K>n 循环复用）；"
+     "加载只消费 mtp.*/embed_tokens/lm_head（mtp.→model. 重映射）；colocated "
+     "经 load_eagle_model 物理共享目标 embed/lm_head（零字节）；每轮 K 均匀步"
+     "（无 catch-up）；final norm+共享 lm_head 每步读 1 候选",
+     "identity/vllm_qwen36_mtp_pin/manifest.json",
+     "vllm-project/vllm @10a854ed6b3bbd7411c65ccbf87594e71c4d322c"
+     "（8 文件 SHA256/blob sha1 清单在 manifest：qwen3_5_mtp、qwen3_next_mtp、"
+     "config/speculative、eagle/utils、mtp/target_dependent_ar speculator、"
+     "2 个 config 测试 + e2e 测试）",
+     "R23：count/draft.mtp_step_rows、methods/plans.plan_mtp、lowering/memory "
+     "MTP 对象、pipeline mtp 分支（逐步阶段+草稿通信+dt 拒绝）；"
+     "method_status['mtp']=source-checked 的依据",
+     ["source-checked 源码阅读，非 CPU 执行/实测；真实 checkpoint mtp.* 权重"
+      "未本机加载（名单由 e2e weight_map 复制逻辑+loader 重映射证明）",
+      "n_predict>1 多模块（MultiModuleMTPSpeculator/index_share）、"
+      "draft_lm_head_quantization、local_argmax_reduction、probabilistic "
+      "采样档未建模",
+      "草稿 prefill KV 同步（tdar _prefill 全量执行）未入稳态 TPOT 账本",
+      "HF transformers 无 MTP forward（主模型忽略 mtp.*）——HF 栏与推理栈栏"
+      "分立，不能互相冒充"],
+     False, "2026-11-13"),
+    ("ev-sglang-qwen36-mtp", "source-checked",
+     "SGLang Qwen3_5ForCausalLMMTP 对照核对（R23）：fc nn.Linear(2h→h)+双预归一"
+     "（GemmaRMSNorm）；mtp_config.full_attention_interval=1/num_hidden_layers=1；"
+     "set_embed_and_head/set_lm_head_from_target 权重物理共享（del 后指目标权重）；"
+     "forward cat/fc 同构——跨栈确认主干语义",
+     "identity/sglang_qwen36_mtp_pin/manifest.json",
+     "sgl-project/sglang @1b2870d33de7b5f31844fd74e97eea6d7896c53a"
+     "（1 文件 SHA256/blob sha1 清单在 manifest）",
+     "R23：MTP 头主干语义的第二栈依据（vLLM 主 pin 的跨栈确认）",
+     ["source-checked 非执行；SGLang NPU/量化分支（ascend unquant override）"
+      "未建模；服务循环细节（worker 调度）未逐行核（主干 forward 语义对照）"],
+     False, "2026-11-13"),
+    ("ev-qwen36-mtp-cpu-numeric", "numeric-checked",
+     "Qwen3.6 原生 MTP 头小尺寸独立数学对照（R23）：pinned vLLM 结构的忠实"
+     "torch 复刻（fc+双预归一+full-attn 门控 GQA+MoE 路由+共享专家+final norm）"
+     "与独立逐 token 标量参考互相逐元素核对；中间张量形状与输出数值、以及"
+     "本仓 mtp_step_rows 逐算子 FLOPs/字节对账",
+     "tests/fixtures/qwen36_mtp_r23_numeric.json",
+     "tools/probe_qwen36_mtp_numeric.py（torch 2.15.0+cpu / Python 3.12 "
+     "本机执行；结构按 assets/identity/vllm_qwen36_mtp_pin @10a854ed 手工"
+     "复刻，双实现互核）",
+     "h=32、1 full-attn 层（4 头/kv2/d16）、4E top-2+shared、V=97、"
+     "K=3 步循环（MTP1 同层复用）；atol=1e-5",
+     ["只验证随机权重小尺寸 MTP 头数学，不覆盖真实 checkpoint 权重/融合 "
+      "kernel/部署性能；vLLM 模块本身未在 CPU 执行（复刻实现，结构逐行对源）",
+      "fixture 级证据：模型级 cpu_forward 保持 not-run，不构成完整 forward "
+      "或部署验证；部署排名资格不变"],
+     True, "2026-11-13"),
 ]
 
 

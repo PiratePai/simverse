@@ -11,7 +11,47 @@ ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
 （GateLinear 权重沿 loader BF16、输入由 mHC layer_input BF16；新增
 linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）；
 2026-11-13 R22：G-C14 新增（量化映射主干已解除、执行变体登记），
-quantization_config 5 叶键 mapped（见 G-C14）。
+quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新增
+（Qwen3.6 原生 MTP forward 主干已解除、执行/变体登记）。
+
+## G-C15 ~~Qwen3.6 原生 MTP forward 证据与仿真映射~~ → 主干已解除（2026-11-13 R23）⭐P0
+
+- **解除交付**：双栈官方实现逐行核对——vLLM @`10a854ed`
+  `vllm_qwen36_mtp_pin` 8 文件（qwen3_5_mtp.py、qwen3_next_mtp.py、
+  config/speculative.py、eagle/utils.py、mtp 与 target_dependent_ar
+  speculator.py、2 个 config 测试 + e2e 测试；逐文件 SHA256+blob sha1 对
+  GitHub contents API 校验）+ SGLang @`1b2870d` 1 文件对照
+  （sglang_qwen36_mtp_pin）。查明：checkpoint `mtp.*` 张量（fc/
+  pre_fc_norm_*/norm/layers.{i}.*，无独立 embed/lm_head）与加载行为
+  （is_unused_checkpoint_weight 只留 mtp.*/embed_tokens/lm_head + mtp.→
+  model. 重映射）；combine=双预归一+cat+fc(2h→h, ColumnParallel gather,
+  无激活/无残差直加)；层=**full_attention**（gated GQA+MoE，几何=目标
+  full 层，非目标首层 GDN）；每轮 K 均匀步、步 j 层 j%n_predict 循环
+  （K>n 合法，e2e K=3×MTP1 在册）；colocated 经 load_eagle_model 物理共享
+  目标 embed/lm_head（零字节）；DT 分离无实现（显式拒绝）。落地：
+  ModelIR extras["mtp"]、count/draft.mtp_step_rows（逐步）、methods/
+  plans.plan_mtp（撤销 K≤n 旧限制）、pipeline 逐步阶段+草稿通信+
+  mtp_serving_integration、lowering/memory MTP 常驻/草稿 KV/临时对象；
+  专属 embedding config 域拒绝。fixture 级独立数学对照
+  （ev-qwen36-mtp-cpu-numeric：torch 复刻 vs 纯 Python 标量参考，
+  7 张量×3 步 max diff 4.97e-13；30 项 GEMM 账本对账全对）；测试
+  tests/test_qwen36_mtp_r23.py 25 项 + 门禁/旧断言更新；前后 replay
+  （docs/evidence/mtp-map；target/verify 冻结，M01 64.55→66.96ms、
+  steady +141MB 逐 op 归因）。证据 ev-vllm-qwen36-mtp（source-checked）/
+  ev-sglang-qwen36-mtp/ev-qwen36-mtp-cpu-numeric；source_map
+  sm-qwen36-mtp；[报告](../validation/qwen36-mtp-forward-20261113.md)。
+- **仍缺（登记不冒充）**：vLLM/SGLang 模块 kernel/CPU/GPU 未执行；真实
+  checkpoint mtp.* 未本机加载（名单由官方 e2e+loader 证明）；n_predict>1
+  多模块（MultiModuleMTPSpeculator/index_share）、draft_lm_head_
+  quantization、local_argmax_reduction、probabilistic 采样档
+  （DraftLogitsCache）、CUDA-graph 桶 padding、SGLang NPU/量化分支未建模；
+  草稿 prefill KV 同步未入稳态 TPOT（一次性成本，cache_policy 登记）；
+  接受率仍假设输入（R07b）。
+- **当前降级**：无结构降级（MTP 头主干 mapped+source-checked；mrope 仍
+  阻断 structure_complete）；method_status["mtp"]=source-checked 但
+  method_recipe_ready 保持 approximated（接受假设+未执行）→ M02 不参与
+  实际部署排名。
+- **优先级**：P0（必需模型场景）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
 

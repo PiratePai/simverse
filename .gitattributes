@@ -17,5 +17,12 @@ docs/evidence/moe-route/*.json binary
 # R22 原始 replay 快照（同 R05/R20/R21 先例）：保留捕获字节防行尾转换破坏 SHA256。
 docs/evidence/quant-map/*.json binary
 
+# R23 Qwen3.6 原生 MTP pin/fixture：manifest SHA256 锚定 LF 字节（同
+# hf_transformers 先例）；replay 快照保留捕获字节（同 R05-R24 先例）。
+assets/identity/vllm_qwen36_mtp_pin/* text eol=lf
+assets/identity/sglang_qwen36_mtp_pin/* text eol=lf
+tests/fixtures/qwen36_mtp_r23_numeric.json text eol=lf
+docs/evidence/mtp-map/*.json binary
+
 # R24 原始 replay 快照（同 R05/R20/R21/R22 先例）：保留捕获字节防行尾转换破坏 SHA256。
 docs/evidence/swiglu-tail/*.json binary

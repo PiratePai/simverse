@@ -335,7 +335,13 @@ def test_g10_evidence_levels_separated_and_not_overclaimed():
     assert q.evidence.forward_source == "partial-source"
     assert q.evidence.cpu_forward == "not-run"
     assert q.evidence.gpu_measurement == "none"
-    assert q.evidence.method_status["mtp"] == "unverified"
+    # R23（2026-11-13）：原生 MTP 头双栈 source-checked（vllm @10a854ed
+    # qwen3_5_mtp pin 8 文件 + SGLang 对照）；mrope 仍 unverified →
+    # forward_source 仍 partial-source，结构完备不因此解除。
+    assert q.evidence.method_status["mtp"] == "source-checked"
+    assert "sm-qwen36-mtp" in q.evidence.checked_paths
+    assert all("mtp_head" not in p for p in q.evidence.unverified_paths)
+    assert any("mrope" in p for p in q.evidence.unverified_paths)
     assert "sm-qwen35-gdn-decode-branch" in q.evidence.checked_paths
     # R24：V4.1 config 覆盖已完备（最后一个 unsupported 叶键 swiglu_limit
     # 与尾部缺口解除）；forward 证据仍缺核本体 → 结构资格仍 False。
@@ -427,28 +433,30 @@ def test_g13_draft_batch_counts_scale_once_not_weights():
         a = next(r for r in r1 if r.op == op)
         b = next(r for r in r2 if r.op == op)
         assert b.flops == 2 * a.flops, op
-    # MTP 同样：batch 乘一次，权重不变
-    u1 = mtp_step_rows("s", m, 1, 512, Q8, 1, batch=1)
-    u2 = mtp_step_rows("s", m, 1, 512, Q8, 1, batch=2)
+    # MTP 同样：batch 乘一次，权重不变（R23 新签名：逐步、pinned 结构）
+    u1 = mtp_step_rows("s", m, 0, 512, Q8, batch=1)
+    u2 = mtp_step_rows("s", m, 0, 512, Q8, batch=2)
     v1, v2 = totals(u1), totals(u2)
     assert v2["flops"] == 2 * v1["flops"]
     assert v2["weight_read"] == v1["weight_read"]
-    # 通信消息同样只乘一次 B（DFlash/MTP）
+    assert sum(r.weight_capacity for r in u1) == \
+        sum(r.weight_capacity for r in u2)
+    # 通信消息只乘一次 B（DFlash；MTP 无 DT 实现已改拒绝，链路字节检查
+    # 不再覆盖 mtp——R23）
     from simverse.pipeline import run_v2
     from simverse.scenario import ScenarioV2
-    for method, draft_id in (("dflash_v1", "dflash_qwen36_35b_a3b"),
-                             ("mtp", None)):
-        def bundle(batch):
-            return run_v2(ScenarioV2(
-                method_id=method, draft_id=draft_id, k=1,
-                deployment={"mode": "dt_serial", "target_tp": 8,
-                            "draft_tp": 1},
-                workload={"batch": batch, "ctx_tokens": 512})).to_json()
-        a, b = bundle(1), bundle(2)
-        assert b["cost"]["link"]["bytes"]["d2t"] == \
-            2 * a["cost"]["link"]["bytes"]["d2t"], method
-        assert b["cost"]["link"]["bytes"]["t2d"] == \
-            2 * a["cost"]["link"]["bytes"]["t2d"], method
+
+    def bundle(batch):
+        return run_v2(ScenarioV2(
+            method_id="dflash_v1", draft_id="dflash_qwen36_35b_a3b", k=1,
+            deployment={"mode": "dt_serial", "target_tp": 8,
+                        "draft_tp": 1},
+            workload={"batch": batch, "ctx_tokens": 512})).to_json()
+    a, b = bundle(1), bundle(2)
+    assert b["cost"]["link"]["bytes"]["d2t"] == \
+        2 * a["cost"]["link"]["bytes"]["d2t"]
+    assert b["cost"]["link"]["bytes"]["t2d"] == \
+        2 * a["cost"]["link"]["bytes"]["t2d"]
 
 
 # ---------------------------------------------------------------------------
@@ -531,9 +539,15 @@ def test_g16_source_map_line_and_status_corrections():
     shared = sm["sm-qwen35-moe-shared-gate"]
     assert shared["both_sides_covered"] is True
     assert "shared_gate=True" in shared["note"] or "修复" in shared["note"]
-    mtp = sm["sm-qwen36-mtp-unverified"]
-    assert mtp["both_sides_covered"] is False and mtp["uncovered_domain"]
-    assert "Unverified" in mtp["entry_id"] or "unverified" in mtp["entry_id"]
+    mtp = sm["sm-qwen36-mtp"]
+    # R23（2026-11-13）：MTP 头已 source-checked（双栈 pin）；两侧覆盖，
+    # 未执行/未实测与部署变体仍在 uncovered_domain（不冒充）
+    assert mtp["both_sides_covered"] is True and mtp["uncovered_domain"]
+    assert "spec_step_idx" in mtp["semantic"] and "full_attention" \
+        in mtp["semantic"]
+    assert any("GPU 未执行" in u or "CPU forward" in u
+               for u in mtp["uncovered_domain"])
+    assert "sm-qwen36-mtp-unverified" not in sm
     v41 = sm["sm-v41-csa2-moe-unverified"]
     # R21：MoE 路由已另立条目解除，本条目只剩注意力核本体/量化缺口
     assert "MoE scoring" not in " ".join(v41["uncovered_domain"])

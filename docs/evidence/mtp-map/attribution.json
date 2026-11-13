@@ -1,0 +1,252 @@
+{
+ "scenario": "method=mtp k=1 B1 ctx32768 TP8/EP1 W8A8+FP4E（与 before 同场景）",
+ "changed_stages": {
+  "draft_step_0": {
+   "-1:draft_lm_head": {
+    "status": "added",
+    "flops": 127139840,
+    "weight_read": 63569920,
+    "act_read": 2048,
+    "act_write": 31040,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "-1:mtp_embed_share": {
+    "status": "changed",
+    "delta": {}
+   },
+   "-1:mtp_fc": {
+    "status": "added",
+    "flops": 2097152,
+    "weight_read": 1048576,
+    "act_read": 4096,
+    "act_write": 256,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "-1:mtp_final_norm": {
+    "status": "added",
+    "flops": 8194,
+    "weight_read": 4096,
+    "act_read": 2048,
+    "act_write": 2048,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "-1:mtp_kv_rewind_waste": {
+    "status": "added",
+    "flops": 0,
+    "weight_read": 0,
+    "act_read": 0,
+    "act_write": 0,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "-1:mtp_pre_fc_norm_embedding": {
+    "status": "added",
+    "flops": 8194,
+    "weight_read": 4096,
+    "act_read": 2048,
+    "act_write": 2048,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "-1:mtp_pre_fc_norm_hidden": {
+    "status": "added",
+    "flops": 8194,
+    "weight_read": 4096,
+    "act_read": 2048,
+    "act_write": 2048,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:attention_core": {
+    "status": "added",
+    "flops": 67438602,
+    "weight_read": 0,
+    "act_read": 512,
+    "act_write": 512,
+    "kv_read": 33554432,
+    "kv_write": 1024,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:attn_output_gate": {
+    "status": "added",
+    "flops": 1024,
+    "weight_read": 0,
+    "act_read": 1024,
+    "act_write": 512,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:causal_conv1d": {
+    "status": "removed"
+   },
+   "0:embed_lookup": {
+    "status": "removed"
+   },
+   "0:final_norm": {
+    "status": "removed"
+   },
+   "0:gdn_recurrence": {
+    "status": "removed"
+   },
+   "0:in_proj_ba": {
+    "status": "removed"
+   },
+   "0:in_proj_qkv": {
+    "status": "removed"
+   },
+   "0:in_proj_z": {
+    "status": "removed"
+   },
+   "0:k_norm": {
+    "status": "added",
+    "flops": 2052,
+    "weight_read": 512,
+    "act_read": 512,
+    "act_write": 512,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:k_proj": {
+    "status": "added",
+    "flops": 2097152,
+    "weight_read": 1048576,
+    "act_read": 2048,
+    "act_write": 512,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:lm_head": {
+    "status": "removed"
+   },
+   "0:moe_routed": {
+    "status": "changed",
+    "delta": {
+     "flops": [
+      50331648,
+      6291456,
+      -44040192
+     ],
+     "act_read": [
+      40960,
+      19456,
+      -21504
+     ]
+    }
+   },
+   "0:moe_shared": {
+    "status": "changed",
+    "delta": {
+     "flops": [
+      6291456,
+      786432,
+      -5505024
+     ],
+     "weight_read": [
+      3145728,
+      393216,
+      -2752512
+     ],
+     "act_read": [
+      5120,
+      2432,
+      -2688
+     ]
+    }
+   },
+   "0:o_proj": {
+    "status": "added",
+    "flops": 2097152,
+    "weight_read": 1048576,
+    "act_read": 512,
+    "act_write": 2048,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:out_proj": {
+    "status": "removed"
+   },
+   "0:q_norm": {
+    "status": "added",
+    "flops": 2052,
+    "weight_read": 512,
+    "act_read": 512,
+    "act_write": 512,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:q_proj": {
+    "status": "added",
+    "flops": 4194304,
+    "weight_read": 2097152,
+    "act_read": 2048,
+    "act_write": 1024,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:rope": {
+    "status": "added",
+    "flops": 384,
+    "weight_read": 0,
+    "act_read": 576,
+    "act_write": 512,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   },
+   "0:v_norm_gated": {
+    "status": "removed"
+   },
+   "0:v_proj": {
+    "status": "added",
+    "flops": 2097152,
+    "weight_read": 1048576,
+    "act_read": 2048,
+    "act_write": 512,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0
+   }
+  }
+ },
+ "frozen_stages": {
+  "target_decode": true,
+  "verify": true
+ },
+ "metrics": {
+  "M01_before": 64.55097434642568,
+  "M01_after": 66.96182490475316,
+  "steady_before": 2699569088,
+  "steady_after": 2841006528
+ },
+ "k_domain_change": "main 上 K≤mtp_layers=1（其余拒绝）；R23 起 K≥1 循环复用（pinned spec_step_idx % n；e2e K=3×MTP1 在册）"
+}

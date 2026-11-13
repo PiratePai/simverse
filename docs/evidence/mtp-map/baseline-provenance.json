@@ -1,0 +1,7 @@
+{
+  "head": "b8585a1bd2733cc3e282dfd31bc92f546e48c1ee",
+  "tree": "D:/Github/new-viewer (main)",
+  "captured_before_edits": true,
+  "scenario": "method=mtp k=1（main 上 K≤mtp_layers=1 是唯一合法域；K>1 被 plan_chain 拒绝）",
+  "note": "R23 基线：main 未改动工作区；旧 MTP 建模=目标首层(GDN)模板×mtp_layers + mtp_embed_share"
+}

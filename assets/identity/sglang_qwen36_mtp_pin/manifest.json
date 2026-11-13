@@ -1,0 +1,14 @@
+{
+ "repo": "sgl-project/sglang",
+ "head_sha": "1b2870d33de7b5f31844fd74e97eea6d7896c53a",
+ "captured": "2026-11-13",
+ "note": "R23 cross-stack MTP forward confirmation (SGLang Qwen3_5ForCausalLMMTP); blob sha1 cross-checked",
+ "files": {
+  "qwen3_5_mtp.py": {
+   "remote_path": "python/sglang/srt/models/qwen3_5_mtp.py",
+   "blob_sha1": "9e5ce848559b4ef85302dcd0429887135b240dfc",
+   "sha256": "add592ddd443fac90ae0b7f5a69fdc6b2993c330b42af5c39a00df6fe87596b4",
+   "bytes": 20508
+  }
+ }
+}

@@ -184,6 +184,24 @@ _SWIGLU_KEY_NOTES = {
         "（clamp 3+sigmoid 1+乘 2）",
 }
 
+# R23（2026-11-13）：Qwen3.6 原生 MTP 两键的 mapped 注记（证据
+# vllm_qwen36_mtp_pin 8 文件 + sglang_qwen36_mtp_pin 1 文件，vllm
+# @10a854ed / sglang @1b2870d；消费者 count/draft.mtp_step_rows、
+# methods/plans.plan_mtp、lowering/memory MTP 对象）。
+_MTP_KEY_NOTES = {
+    "mtp_num_hidden_layers":
+        "mapped：原生 MTP 微头层数（Qwen3.6=1）→ ModelIR.extras['mtp'] + "
+        "count/draft.mtp_step_rows（fc/预归一/full-attn MoE 层/final norm/共享 "
+        "lm_head）+ memory MTP 对象；vLLM n_predict 同源（speculative.py "
+        "L1147-1167 override：mtp_num_hidden_layers → n_predict、architectures "
+        "→ Qwen3_5MoeMTP；qwen3_5_mtp.py L81-82 num_mtp_layers）",
+    "mtp_use_dedicated_embeddings":
+        "mapped：false=共享目标 embed_tokens/lm_head（vLLM is_unused_checkpoint_"
+        "weight 只保留 mtp.*+embed_tokens+lm_head，qwen3_5_mtp.py L303-320；"
+        "colocated 运行时物理共享，eagle_utils.py L82-112/L44-71）；true 无实现"
+        "路径（loader 不消费 mtp.embed_tokens/lm_head），config 域直接拒绝",
+}
+
 # R21（2026-11-12）：V4.1 MoE 路由键的 mapped 注记（证据 moe-pin.json
 # 14 文件 + ev-vllm-v41-moe；消费者 count/moe.v41_moe_route_rows、
 # lowering/memory 路由偏置对象）。
@@ -609,18 +627,70 @@ def _parse_hybrid(config: Dict[str, Any], source: SourceIdentity, model_id: str,
             dense_inter=None if use_moe else moe.intermediate))
     coverage, gaps = _coverage(family, config, full_config=full_config,
                                 text_prefix=text_prefix)
+    # R23（2026-11-13）：原生 MTP 微头结构 spec（qwen3_5_moe 家族；
+    # qwen3_next 家族无 mtp_num_hidden_layers 键，n=0 不建 spec）。
+    # 证据 vllm_qwen36_mtp_pin @10a854ed + sglang_qwen36_mtp_pin @1b2870d：
+    #   * 层模板固定 full_attention（qwen3_5_mtp.py L120-127 layer_type=
+    #     "full_attention"；SGLang L143-144 full_attention_interval=1）——
+    #     不是目标首层（Qwen3.6 首层是 GDN linear）；
+    #   * combine：pre_fc_norm_embedding/hidden 两个 RMSNorm 分别归一后
+    #     cat → fc(2h→h, bias=False, ColumnParallel gather_output=True)
+    #     （L99-104/L137-142/L159-162；SGLang L136-141/L238-252），无激活、
+    #     无残差直加（区别于 DeepSeek V3 式 comb+residual）；
+    #   * 每步一层 + final norm（L165-175），层选择 spec_step_idx %
+    #     num_mtp_layers（L165；speculative.py num_mtp_modules/use_multi_
+    #     module_mtp L1948-1967：n=1 或 K=1 时单模块复用，K>n 时循环）；
+    #   * 加载：is_unused_checkpoint_weight 只留 mtp.*+embed_tokens+lm_head
+    #     （L303-320）；colocated 运行时经 load_eagle_model 物理共享目标
+    #     embed/lm_head（mtp_speculator.py L20 → eagle_utils.py L82-112/
+    #     L44-71；SGLang set_embed_and_head L174-186 同义）；
+    #   * checkpoint 张量在 mtp. 前缀（fc/pre_fc_norm_*/norm/layers.{i}.*
+    #     完整 decoder 层；e2e 测试按 mtp.layers.0.* 复制出 module 1，
+    #     test_mtp_e2e.py L28-51）。
+    mtp_spec: Dict[str, Any] = {}
+    mtp_n = int(config.get("mtp_num_hidden_layers", 0) or 0)
+    if family == "qwen3_5_moe" and mtp_n > 0:
+        if bool(config.get("mtp_use_dedicated_embeddings", False)):
+            raise ValueError(
+                "mtp_use_dedicated_embeddings=true 不在 pinned 实现域：vLLM "
+                "Qwen3_5MTP 的 loader 不消费 mtp.embed_tokens/mtp.lm_head"
+                "（qwen3_5_mtp.py L303-320 只保留目标 embed_tokens/lm_head），"
+                "专属 embedding 路径无实现证据，按 config 域拒绝")
+        mtp_spec = {
+            "n_layers": mtp_n,
+            "n_predict": mtp_n,          # vLLM n_predict 同源（speculative.py L1158-1165）
+            "use_dedicated_embeddings": False,
+            "layer_kind": "full_attention",
+            "layer_template": "目标 full_attention 层几何（gated GQA + MoE）",
+            "fc": {"in": 2 * h, "out": h, "bias": False,
+                   "sharded": "column_gather"},     # ColumnParallelLinear gather_output=True
+            "pre_fc_norms": ("embedding", "hidden"),
+            "final_norm": True,
+            "shared_objects": ("embed_tokens", "lm_head"),
+            "checkpoint_prefix": "mtp.",
+            "step_selection": "spec_step_idx % n_layers",
+            "source_pin": "vllm@10a854ed6b3bbd7411c65ccbf87594e71c4d322c",
+        }
+    # 两键的 mapped 注记逐键替换为行号证据（同 Engram/CSA2 模式）
+    for key, note in _MTP_KEY_NOTES.items():
+        path = f"{text_prefix}.{key}" if text_prefix else key
+        if path in coverage and coverage[path]["status"] == "mapped":
+            coverage[path] = {"status": "mapped",
+                              "consumer": "model_ir+count+methods+memory",
+                              "note": note}
     return ModelIR(id=model_id, label=label, family=family, hidden=h, vocab=v,
                    layers=layers, source=source,
                    max_position=config.get("max_position_embeddings", 0),
                    tie_embeddings=bool(config.get("tie_word_embeddings", False)),
                    dtype_hint=str(config.get("dtype", "")),
                    coverage=coverage, gaps=gaps,
-                   mtp_layers=int(config.get("mtp_num_hidden_layers", 0) or 0),
+                   mtp_layers=mtp_n,
                    extras={
                        "attn_output_gate": gated,
                        "mtp_use_dedicated_embeddings":
                            bool(config.get("mtp_use_dedicated_embeddings", False)),
                        "mamba_ssm_dtype": config.get("mamba_ssm_dtype", ""),
+                       **({"mtp": mtp_spec} if mtp_spec else {}),
                    })
 
 

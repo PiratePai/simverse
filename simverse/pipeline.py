@@ -44,6 +44,10 @@ def _run_evidence_refs(model, draft, method_id: str,
         # R07a：两套服务栈逐行核对证据（colocated supported/dt unsupported）
         refs.append("ev-vllm-dflash-serving")
         refs.append("ev-sglang-dflash-serving")
+    if method_id == "mtp":
+        # R23：Qwen3.6 原生 MTP 头双栈 pin（vLLM 主 + SGLang 对照）
+        refs.append("ev-vllm-qwen36-mtp")
+        refs.append("ev-sglang-qwen36-mtp")
     if profile_set:
         ev = _PROFILE_EVIDENCE.get(profile_set)
         if ev:
@@ -177,8 +181,10 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                              "该 DFlash checkpoint 仅核对 Qwen3.6-35B-A3B 配对；不能用于其他主模型")
     if scenario.method_id == "mtp" and model.id != "qwen36_35b_a3b":
         return _bundle_error(scenario, cap, "unsupported_combo",
-                             "MTP 当前仅有 Qwen3.6 首层模板研究估计；"
-                             "其他模型缺原生微头 forward 身份，不能套用模板")
+                             "MTP 原生微头仅对 Qwen3.6-35B-A3B（qwen3_5_moe "
+                             "MTP1）pinned 双栈源码（vllm @10a854ed "
+                             "Qwen3_5MoeMTP）；其他模型缺原生微头 forward "
+                             "身份，不能套用")
     if draft is not None and scenario.method_id == "dflash_v1":
         dstatus = {"source-checked": "approximated",
                    "partial-source": "approximated"}.get(
@@ -194,8 +200,10 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 affected_metrics=["M01 TPOT", "M02 加速比", "M06 显存"])
     elif scenario.method_id == "mtp":
         cap.add("method_recipe_ready", "approximated",
-                "MTP 微头按目标首层模板估算；缺原生微头的完整计数、"
-                "TP 配方及驻留账本",
+                "MTP 微头结构/加载/colocated 共享/TP-EP 配方已 source-checked"
+                "（R23：vllm @10a854ed qwen3_5_mtp pin 8 文件 + SGLang 对照；"
+                "fc+双预归一+full-attn MoE 层+final norm+共享 embed/lm_head）；"
+                "接受率仍是显式假设输入，kernel/CPU/GPU 未执行、未实测",
                 affected_metrics=["M01 TPOT", "M02 加速比", "M06 显存"])
     acc = acceptance_summary(plan)
 
@@ -234,6 +242,14 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                         and scenario.method_id == "dflash_v1"
                                         and dep.mode == "colocated")
                               else None)
+    if scenario.method_id == "mtp" and dep.mode in ("dt_serial",
+                                                    "dt_pipeline_sim"):
+        return _bundle_error(
+            scenario, cap, "unsupported_combo",
+            "MTP 草稿经 load_eagle_model 在 target 进程内加载并物理共享 "
+            "embed/lm_head（mtp_speculator.py L20；eagle_utils.py L82-112/"
+            "L44-71），无 DT 分离实现；dt 模式是建模假设，不对应已实现"
+            "服务栈")
     if not pplan.valid:
         cap.add("parallel_valid", "invalid", "; ".join(pplan.errors[:2]),
                 affected_metrics=["全部"])
@@ -270,6 +286,20 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                     "SINGLE_GROUP，disagg 为 target 侧 PD（非 DT）。"
                     "dt 模式是建模假设，不对应已实现服务栈",
                     affected_metrics=["部署矩阵 served 标记"])
+    if scenario.method_id == "mtp":
+        # R23（2026-11-13）：Qwen3.6 原生 MTP 双栈源码核对——colocated
+        # supported（source-checked）：vLLM MTPSpeculator → load_eagle_model
+        # in-process 加载并物理共享 embed/lm_head（mtp_speculator.py L20、
+        # eagle_utils.py L82-112/L44-71）+ e2e 测试在册（K=1/3×MTP1、
+        # 逐步模块选择）；SGLang Qwen3_5ForCausalLMMTP set_embed_and_head
+        # 同义。dt 分离无栈实现（上方显式拒绝）。source-checked ≠ 已部署
+        # 实测：served 标记仍需真实 trace（R07b 同法）。
+        cap.add("mtp_serving_integration", "supported",
+                "源码核对双栈：vLLM mtp @10a854ed（colocated，embed/lm_head"
+                "物理共享；e2e GSM8K/接受长度门槛在册）+ SGLang mtp "
+                "@1b2870d 对照；dt 无实现（拒绝）。source-checked ≠ 已部署"
+                "实测",
+                affected_metrics=["部署矩阵 served 标记"])
 
     # ---- 计数与计价 ----
     quant, dquant = scenario.quant, scenario.draft_quant
@@ -320,8 +350,11 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             cap.add("acceptance_known", "unsupported",
                     f"E[N] 未知：{acc['reason']}",
                     affected_metrics=["M01 TPOT", "M02 加速比", "M03 E[N]", "M04 轮分解"])
-            memory = _memory_block(model, None, quant, dquant, dep, B, ctx,
-                                   cap, plan=pplan)
+            memory = _memory_block(
+                model, None, quant, dquant, dep, B, ctx, cap, plan=pplan,
+                mtp_model=(_mtp_mem_model(model)
+                           if scenario.method_id == "mtp"
+                           and (model.extras or {}).get("mtp") else None))
             from .execute.serial import SerialRound
             empty = SerialRound("r0", [], 0.0, None, None, acc["reason"])
             metrics = _build_metrics_null_acceptance(acc, t_base, memory, cap, model)
@@ -425,10 +458,47 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             cost["verify_block"] = {"t_ms": t_verify,
                                     "collectives": col_v["detail"]}
         elif scenario.method_id == "mtp":
-            draft_rows = mtp_step_rows("draft_step_0", model, 1, ctx, quant,
-                                       model.mtp_layers or 1, batch=B)
-            d_prices = price_rows(draft_rows, target_dev, gemm_dt, ew_dt)
-            t_draft = stage_total(d_prices)
+            # R23（2026-11-13）：按 pinned vLLM MTPSpeculator/tdar 循环重写
+            # ——每轮 K 个均匀草稿步（步 1 token/请求；步 j 层 j%n_predict，
+            # n=1 同层复用），每步独立阶段计价；步内结构 = 共享 embedding
+            # 查表 + 双预归一 + fc(2h→h) + full-attn MoE 层 + final norm +
+            # 共享 lm_head（count/draft.mtp_step_rows）。
+            from .count.draft import mtp_kv_rewind_row, mtp_layer_model
+            from .lowering.sharding import engram_gather
+            mtp_model = mtp_layer_model(model)
+            mtp_plan = validate_parallel(mtp_model, dep.target_tp,
+                                         dep.target_ep)
+            if not mtp_plan.valid:
+                return _bundle_error(scenario, cap, "unsupported_combo",
+                                     f"MTP 微头并行组合非法：{mtp_plan.errors[0]}")
+            for j in range(plan.k_effective):
+                stage = f"draft_step_{j}"
+                rows_j = mtp_step_rows(
+                    stage, model, j, ctx, quant, tp=dep.target_tp,
+                    ep=dep.target_ep, batch=B, plan=pplan)
+                if j == plan.k_effective - 1:
+                    rows_j.append(mtp_kv_rewind_row(stage, plan.k_effective,
+                                                    e_n, model, quant,
+                                                    dep.target_tp))
+                p_j = price_rows(rows_j, target_dev, gemm_dt, ew_dt)
+                t_j = stage_total(p_j)
+                # 草稿步通信：MTP 层 attn/mlp allreduce（EP 开为 all2all）+
+                # fc gather_output=True all-gather + lm_head logits gather
+                #（每步 B 行候选；TP1 全零）
+                col_j = _collectives_cost(mtp_model, mtp_plan, B, quant,
+                                          tp_link, lm_head_tokens=B)
+                fc_gather = engram_gather(
+                    B, model.hidden, dep.target_tp, quant["act"] / 8,
+                    tp_link, "mtp_fc_allgather",
+                    "MTP fc ColumnParallelLinear gather_output=True → "
+                    "[B,h/tp] all-gather 为 [B,h]（qwen3_5_mtp.py L99-104）")
+                col_j["t_ms"] += fc_gather.t_ms
+                col_j["detail"]["counts_by_kind"]["mtp_fc_allgather"] = (
+                    col_j["detail"]["counts_by_kind"].get("mtp_fc_allgather", 0) + 1)
+                t_j += col_j["t_ms"]
+                stage_costs[stage] = t_j
+                cost[stage] = {"t_ms": t_j, "collectives": col_j["detail"]}
+                work[stage] = _rows_json(rows_j)
             verify_rows = build_model_work(model, "verify", B, ctx,
                                            plan.k_effective + 1, quant,
                                            dep.target_tp, role="target",
@@ -445,13 +515,17 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                     "verify", verify_rows, v_prices_m, B, ctx,
                     plan.k_effective + 1)
                 calibration["stages"]["verify"]["collectives_ms"] = col_v["t_ms"]
+                for j in range(plan.k_effective):
+                    calibration["stages"][f"draft_step_{j}"] = {
+                        "stage": f"draft_step_{j}", "domain_ok": False,
+                        "reasons": ["草稿阶段（MTP 微头）无匹配 profile 域"],
+                        "selected_ms": None}
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
                          "t2d": int(B * e_n * model.hidden
                                     * (quant["act"] / 8))}
-            stage_costs = {"draft_step_0": t_draft, "verify": t_verify}
+            stage_costs["verify"] = t_verify
             cost["verify"] = {"t_ms": t_verify,
                               "collectives": col_v["detail"]}
-            work["draft_step_0"] = _rows_json(draft_rows)
             work["verify"] = _rows_json(verify_rows)
         else:  # chain_draft / chain_moe_proxy：草稿用 tiny_gqa 结构演示闭环
             draft_model = cat["models"]["tiny_gqa"]
@@ -567,13 +641,16 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                     calibrated_baseline = cal0["selected_ms"] + col_base["t_ms"]
 
     # ---- 容量（R02a/b：per-rank 对象账本 + 生命周期峰值；R03：预算判定）----
+    mtp_mem_model = (_mtp_mem_model(model) if scenario.method_id == "mtp"
+                     and (model.extras or {}).get("mtp") else None)
     memory = _memory_block(
         model, draft if scenario.method_id == "dflash_v1" else None,
         quant, dquant, dep, B, ctx, cap, plan=pplan,
         block_size=(plan.block_size
                     if scenario.method_id == "dflash_v1" and e_n is not None else 0),
         e_produced=(e_n if e_n is not None else 0.0),
-        draft_ctx_kv_path=scenario.draft_ctx_kv_path)
+        draft_ctx_kv_path=scenario.draft_ctx_kv_path,
+        mtp_model=mtp_mem_model)
 
     cost["memory"] = memory       # R02a：per-rank 对象清单与判定入册（导出/UI 共用）
 
@@ -742,7 +819,7 @@ def _rows_json(rows):
 
 def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                   plan=None, block_size: int = 0, e_produced: float = 0.0,
-                  draft_ctx_kv_path: str = "unknown"):
+                  draft_ctx_kv_path: str = "unknown", mtp_model=None):
     """容量块（R02a/b：per-rank 对象身份 + 生命周期峰值；R03a/b：预算判定）。
 
     colocated：草稿与 target 同 TP 组，全部 rank 各建一份账本（EP 余数
@@ -771,7 +848,7 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
                 ep=ep, rank=r, block_size=block_size, e_produced=e_produced,
                 draft_ctx_kv_path=draft_ctx_kv_path,
                 engram_table_placement=e_place, engram_tokens=e_tokens,
-                v41_kv_record=v41_rec)
+                v41_kv_record=v41_rec, mtp_model=mtp_model)
             rep = rank_mem.peak_vs_budget()
             rep["inventory"] = rank_mem.inventory()
             ranks.append(rep)
@@ -858,6 +935,12 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
 def _draft_as_model(draft_ir):
     from .lowering.memory import _as_model
     return _as_model(draft_ir)
+
+
+def _mtp_mem_model(model):
+    """MTP 头伪模型（memory/collectives 共用；无 spec 时 None）。"""
+    from .count.draft import mtp_layer_model
+    return mtp_layer_model(model)
 
 
 def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,

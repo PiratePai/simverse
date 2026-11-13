@@ -1,0 +1,626 @@
+{
+ "schema": "qwen36-mtp-r23-numeric-v1",
+ "environment": {
+  "python": "3.12.10",
+  "torch": "2.15.0+cpu",
+  "date": "2026-11-13",
+  "impl_a_dtype": "float64",
+  "impl_a_dtype_note": "双实现同精度对照：随机 softmax router 近平手在 f32/f64 间会翻转第 2 名选择（观测 4e-4 假差异），结构对照须同精度；近平手翻转属运行时数值行为，不在断言面",
+  "note": "结构复刻自 assets/identity/vllm_qwen36_mtp_pin @10a854ed（qwen3_5_mtp.py）；vLLM 模块未执行"
+ },
+ "dims": {
+  "H": 32,
+  "V": 97,
+  "heads": 4,
+  "kvh": 2,
+  "d": 16,
+  "rotary": 4,
+  "E": 4,
+  "topk": 2,
+  "inter": 8,
+  "shared": 8,
+  "ctx": 6,
+  "k_steps": 3,
+  "n_mtp": 1,
+  "seed": 20261113,
+  "atol": 1e-09
+ },
+ "fixture_config": {
+  "hidden_size": 32,
+  "num_hidden_layers": 1,
+  "layer_types": [
+   "full_attention"
+  ],
+  "num_attention_heads": 4,
+  "num_key_value_heads": 2,
+  "head_dim": 16,
+  "vocab_size": 97,
+  "num_experts": 4,
+  "num_experts_per_tok": 2,
+  "moe_intermediate_size": 8,
+  "intermediate_size": 8,
+  "shared_expert_intermediate_size": 8,
+  "linear_num_key_heads": 2,
+  "linear_num_value_heads": 4,
+  "linear_key_head_dim": 8,
+  "linear_value_head_dim": 8,
+  "linear_conv_kernel_dim": 4,
+  "partial_rotary_factor": 0.25,
+  "mtp_num_hidden_layers": 1,
+  "mtp_use_dedicated_embeddings": false,
+  "tie_word_embeddings": false,
+  "rms_norm_eps": 1e-06
+ },
+ "structure_facts": {
+  "layer_selection": "spec_step_idx % n_layers",
+  "steps_layer_idx": [
+   0,
+   0,
+   0
+  ],
+  "fc": "2h(64) → h(32)，bias=False，无激活无残差直加",
+  "pre_fc_norms": [
+   "pre_fc_norm_embedding",
+   "pre_fc_norm_hidden"
+  ],
+  "final_norm": "mtp.norm(residual)",
+  "shared": [
+   "embed_tokens",
+   "lm_head"
+  ]
+ },
+ "steps": [
+  {
+   "step": 0,
+   "layer_idx": 0,
+   "sampled_token": 66,
+   "kv_len_after": 7,
+   "keys_per_head": 7,
+   "kv_read_rows": 6,
+   "step_macs": {
+    "mtp_fc": 2048,
+    "q_proj": 4096,
+    "k_proj": 1024,
+    "v_proj": 1024,
+    "o_proj": 2048,
+    "moe_router": 128,
+    "moe_routed": 1536,
+    "moe_shared": 768,
+    "shared_gate": 32,
+    "draft_lm_head": 3104
+   },
+   "final_hidden": [
+    -1.899034,
+    -0.60942,
+    0.926283,
+    1.141622,
+    3.367395,
+    -0.392938,
+    -0.496059,
+    -0.01198,
+    -0.513749,
+    -0.614009,
+    -0.178705,
+    -1.377835,
+    -0.093915,
+    -0.074912,
+    -0.123008,
+    0.021851,
+    0.929053,
+    0.360953,
+    -0.969061,
+    -0.996738,
+    0.977041,
+    0.020671,
+    1.040628,
+    -0.065363,
+    1.524215,
+    -0.292702,
+    0.009095,
+    0.939817,
+    0.685297,
+    -0.206512,
+    -0.879943,
+    -0.394628
+   ],
+   "logits_head3": [
+    -0.438391,
+    7.600659,
+    -0.348505
+   ]
+  },
+  {
+   "step": 1,
+   "layer_idx": 0,
+   "sampled_token": 85,
+   "kv_len_after": 8,
+   "keys_per_head": 8,
+   "kv_read_rows": 7,
+   "step_macs": {
+    "mtp_fc": 2048,
+    "q_proj": 4096,
+    "k_proj": 1024,
+    "v_proj": 1024,
+    "o_proj": 2048,
+    "moe_router": 128,
+    "moe_routed": 1536,
+    "moe_shared": 768,
+    "shared_gate": 32,
+    "draft_lm_head": 3104
+   },
+   "final_hidden": [
+    -0.464794,
+    0.959769,
+    -0.013986,
+    -0.229668,
+    1.845774,
+    0.431603,
+    -0.740887,
+    -0.425054,
+    1.443651,
+    -0.037432,
+    -1.481275,
+    1.873558,
+    0.212215,
+    -0.612245,
+    2.588335,
+    0.021426,
+    -0.060166,
+    -0.005249,
+    -1.167563,
+    1.776692,
+    0.132728,
+    -0.811627,
+    0.558529,
+    0.05069,
+    0.480448,
+    3.653324,
+    -0.026733,
+    -1.395679,
+    -0.948045,
+    0.362836,
+    0.251259,
+    -1.631314
+   ],
+   "logits_head3": [
+    -8.52207,
+    3.519581,
+    -3.555527
+   ]
+  },
+  {
+   "step": 2,
+   "layer_idx": 0,
+   "sampled_token": 72,
+   "kv_len_after": 9,
+   "keys_per_head": 9,
+   "kv_read_rows": 8,
+   "step_macs": {
+    "mtp_fc": 2048,
+    "q_proj": 4096,
+    "k_proj": 1024,
+    "v_proj": 1024,
+    "o_proj": 2048,
+    "moe_router": 128,
+    "moe_routed": 1536,
+    "moe_shared": 768,
+    "shared_gate": 32,
+    "draft_lm_head": 3104
+   },
+   "final_hidden": [
+    -1.875347,
+    -0.230484,
+    1.404603,
+    0.893252,
+    2.316252,
+    -0.29238,
+    -0.38315,
+    -0.043242,
+    -0.332654,
+    -1.354099,
+    -3.774219,
+    -1.744765,
+    -0.367546,
+    0.475881,
+    -1.398606,
+    -0.003751,
+    1.811313,
+    0.304874,
+    -0.196928,
+    -1.391747,
+    -0.374725,
+    -0.407735,
+    0.602023,
+    -0.089982,
+    1.285411,
+    -1.345279,
+    0.001579,
+    0.593915,
+    0.500522,
+    -0.418664,
+    -0.236447,
+    -0.496774
+   ],
+   "logits_head3": [
+    -1.123415,
+    4.086221,
+    -0.413279
+   ]
+  }
+ ],
+ "numeric_check": {
+  "atol": 1e-09,
+  "tensors": [
+   {
+    "step": 0,
+    "tensor": "pre_fc_norm_embedding",
+    "max_abs_diff": 0.0
+   },
+   {
+    "step": 0,
+    "tensor": "pre_fc_norm_hidden",
+    "max_abs_diff": 8.881784197001252e-16
+   },
+   {
+    "step": 0,
+    "tensor": "fc_out",
+    "max_abs_diff": 1.199040866595169e-14
+   },
+   {
+    "step": 0,
+    "tensor": "attn_out_gated",
+    "max_abs_diff": 3.552713678800501e-15
+   },
+   {
+    "step": 0,
+    "tensor": "moe_out",
+    "max_abs_diff": 4.973799150320701e-13
+   },
+   {
+    "step": 0,
+    "tensor": "final_hidden",
+    "max_abs_diff": 6.050715484207103e-15
+   },
+   {
+    "step": 0,
+    "tensor": "logits",
+    "max_abs_diff": 2.7533531010703882e-14
+   },
+   {
+    "step": 1,
+    "tensor": "pre_fc_norm_embedding",
+    "max_abs_diff": 4.440892098500626e-16
+   },
+   {
+    "step": 1,
+    "tensor": "pre_fc_norm_hidden",
+    "max_abs_diff": 7.716050021144838e-15
+   },
+   {
+    "step": 1,
+    "tensor": "fc_out",
+    "max_abs_diff": 2.842170943040401e-14
+   },
+   {
+    "step": 1,
+    "tensor": "attn_out_gated",
+    "max_abs_diff": 1.6431300764452317e-14
+   },
+   {
+    "step": 1,
+    "tensor": "moe_out",
+    "max_abs_diff": 1.9895196601282805e-13
+   },
+   {
+    "step": 1,
+    "tensor": "final_hidden",
+    "max_abs_diff": 2.7200464103316335e-15
+   },
+   {
+    "step": 1,
+    "tensor": "logits",
+    "max_abs_diff": 1.0658141036401503e-14
+   },
+   {
+    "step": 2,
+    "tensor": "pre_fc_norm_embedding",
+    "max_abs_diff": 0.0
+   },
+   {
+    "step": 2,
+    "tensor": "pre_fc_norm_hidden",
+    "max_abs_diff": 2.6645352591003757e-15
+   },
+   {
+    "step": 2,
+    "tensor": "fc_out",
+    "max_abs_diff": 8.881784197001252e-15
+   },
+   {
+    "step": 2,
+    "tensor": "attn_out_gated",
+    "max_abs_diff": 5.329070518200751e-15
+   },
+   {
+    "step": 2,
+    "tensor": "moe_out",
+    "max_abs_diff": 4.831690603168681e-13
+   },
+   {
+    "step": 2,
+    "tensor": "final_hidden",
+    "max_abs_diff": 1.021405182655144e-14
+   },
+   {
+    "step": 2,
+    "tensor": "logits",
+    "max_abs_diff": 2.842170943040401e-14
+   }
+  ],
+  "all_within_atol": true,
+  "sampled_tokens_match": true
+ },
+ "gemm_checks": [
+  {
+   "step": 0,
+   "op": "mtp_fc",
+   "ledger_flops": 4096,
+   "probe_2x_macs": 4096,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "q_proj",
+   "ledger_flops": 8192,
+   "probe_2x_macs": 8192,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "k_proj",
+   "ledger_flops": 2048,
+   "probe_2x_macs": 2048,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "v_proj",
+   "ledger_flops": 2048,
+   "probe_2x_macs": 2048,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "o_proj",
+   "ledger_flops": 4096,
+   "probe_2x_macs": 4096,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "moe_router",
+   "ledger_flops": 256,
+   "probe_2x_macs": 256,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "moe_routed",
+   "ledger_flops": 3072,
+   "probe_2x_macs": 3072,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "moe_shared",
+   "ledger_flops": 1536,
+   "probe_2x_macs": 1536,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "shared_gate",
+   "ledger_flops": 64,
+   "probe_2x_macs": 64,
+   "match": true
+  },
+  {
+   "step": 0,
+   "op": "draft_lm_head",
+   "ledger_flops": 6208,
+   "probe_2x_macs": 6208,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "mtp_fc",
+   "ledger_flops": 4096,
+   "probe_2x_macs": 4096,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "q_proj",
+   "ledger_flops": 8192,
+   "probe_2x_macs": 8192,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "k_proj",
+   "ledger_flops": 2048,
+   "probe_2x_macs": 2048,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "v_proj",
+   "ledger_flops": 2048,
+   "probe_2x_macs": 2048,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "o_proj",
+   "ledger_flops": 4096,
+   "probe_2x_macs": 4096,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "moe_router",
+   "ledger_flops": 256,
+   "probe_2x_macs": 256,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "moe_routed",
+   "ledger_flops": 3072,
+   "probe_2x_macs": 3072,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "moe_shared",
+   "ledger_flops": 1536,
+   "probe_2x_macs": 1536,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "shared_gate",
+   "ledger_flops": 64,
+   "probe_2x_macs": 64,
+   "match": true
+  },
+  {
+   "step": 1,
+   "op": "draft_lm_head",
+   "ledger_flops": 6208,
+   "probe_2x_macs": 6208,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "mtp_fc",
+   "ledger_flops": 4096,
+   "probe_2x_macs": 4096,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "q_proj",
+   "ledger_flops": 8192,
+   "probe_2x_macs": 8192,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "k_proj",
+   "ledger_flops": 2048,
+   "probe_2x_macs": 2048,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "v_proj",
+   "ledger_flops": 2048,
+   "probe_2x_macs": 2048,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "o_proj",
+   "ledger_flops": 4096,
+   "probe_2x_macs": 4096,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "moe_router",
+   "ledger_flops": 256,
+   "probe_2x_macs": 256,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "moe_routed",
+   "ledger_flops": 3072,
+   "probe_2x_macs": 3072,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "moe_shared",
+   "ledger_flops": 1536,
+   "probe_2x_macs": 1536,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "shared_gate",
+   "ledger_flops": 64,
+   "probe_2x_macs": 64,
+   "match": true
+  },
+  {
+   "step": 2,
+   "op": "draft_lm_head",
+   "ledger_flops": 6208,
+   "probe_2x_macs": 6208,
+   "match": true
+  }
+ ],
+ "all_gemm_match": true,
+ "attention_checks": [
+  {
+   "step": 0,
+   "keys_per_head": 7,
+   "ledger_pairs": 7,
+   "pairs_match": true,
+   "kv_read_rows": 6,
+   "kv_read_rows_ledger": 6,
+   "kv_rows_match": true,
+   "kv_write_rows_ledger": 1
+  },
+  {
+   "step": 1,
+   "keys_per_head": 8,
+   "ledger_pairs": 8,
+   "pairs_match": true,
+   "kv_read_rows": 7,
+   "kv_read_rows_ledger": 7,
+   "kv_rows_match": true,
+   "kv_write_rows_ledger": 1
+  },
+  {
+   "step": 2,
+   "keys_per_head": 9,
+   "ledger_pairs": 9,
+   "pairs_match": true,
+   "kv_read_rows": 8,
+   "kv_read_rows_ledger": 8,
+   "kv_rows_match": true,
+   "kv_write_rows_ledger": 1
+  }
+ ],
+ "all_attention_match": true,
+ "hand_anchor": {
+  "name": "gemma_rmsnorm([3,4], w=[1,1])",
+  "got": [
+   1.697056206965467,
+   2.2627416092872896
+  ],
+  "expected": [
+   1.697056206965467,
+   2.2627416092872896
+  ],
+  "match": true
+ },
+ "limits": [
+  "随机权重小尺寸 fixture，不覆盖真实 35B checkpoint 权重/融合 kernel/部署性能",
+  "vLLM 模块本身未在 CPU 执行（结构手工复刻，逐行对 pinned 源）",
+  "fixture 级证据：模型级 cpu_forward 保持 not-run，不升格"
+ ]
+}

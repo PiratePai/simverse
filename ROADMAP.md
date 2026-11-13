@@ -7,6 +7,8 @@
 - [x] 重点模型产品目录、DFlash 配对门禁、具体资格失败原因。
 - [x] ModelIR、计数/成本/执行分层，CLI/Web/导出共用结果。
 - [x] Qwen3.6+DFlash 解析实验、DT 串行及初步微批流水。
+- [x] Qwen3.6 原生 MTP 头已双栈 source-checked 建模（R23，2026-11-13；
+  kernel/CPU/GPU 未执行与部署变体见 G-C15）。
 - [x] V4.1 部分结构及 mHC 边界计数；Engram 单副本路径已 source-checked 建模
   （R04，2026-11-11；DP 分片交换/cpu_offload 运行时行为未覆盖，见 B 组表）；
   CSA2 索引打分/top-k/candidate block 已 source-checked 建模
@@ -96,6 +98,7 @@ P0/P1/P2 表示优先级，不是要求整阶段完成后才能启动下一阶�
 |---|---|---|
 | R06 | 按模型/模块拆分的小尺寸 forward 对照；独立 oracle；区分源码阅读与 CPU 执行。**部分完成（2026-11-12，Qwen3.6）**：GDN+MoE+full-attn fixture 的几何/算量对账（shape-checked）及独立张量数值 oracle（numeric-checked）已做；prefill/缓存 decode 各 12 张量逐元素核对，最大差 2.98e−7；修正 attn_output_gate 漏计；tests/test_qwen36_forward_r06.py 12 项；[报告](docs/validation/qwen36-gdn-moe-cpu-fixture-r06.md)。**未做**：mrope 位置生成、V4.1 侧（MLA/CSA2/Engram 执行对照）、其他模块、真实 checkpoint、模型级完整 forward | 对应模块源码；现有完整模块可立即验证，不等待 R04/R05 全部完成 |
 | R07a | **已完成 2026-11-12**：vLLM @dc74b8cb（13 文件）+ SGLang @74cb973d（12 文件）双栈逐行核对（SHA256 pin+测试在册）；调度/hidden/KV 回退/拒绝采样/通信字节/计时边界逐项对账；修正 ctx 投影跨度基、草稿生效块与 full 层非因果（独立 oracle+负例）；colocated=supported(source-checked)、dt 模式=unsupported（无栈对应）。残留（DraftLogitsCache 账本/SGLang 采样可用性/GDN 态回退成本/served 实测）转 G-C3 残留与 R07b。[报告](docs/validation/dflash-serving-audit-20261112.md) | 固定服务栈源码；独立于新设备接入 |
+| R23 | **已完成 2026-11-13**：Qwen3.6 原生 MTP forward 证据与仿真映射——vLLM @10a854ed `qwen3_5_mtp` 等 8 文件 + SGLang @1b2870d 1 文件双栈逐行核对（SHA256/blob sha1 pin）；查明 mtp.* checkpoint 张量/加载重映射/colocated embed-lm_head 物理共享/每轮 K 均匀步+层 j%n 循环；count（fc+双预归一+full-attn MoE 层+final norm+共享 lm_head+草稿 KV+回退行）/methods（撤销 K≤n 旧限制）/pipeline（逐步阶段+草稿通信+dt 拒绝）/memory（MTP 常驻+草稿 KV+临时）落地；fixture 级独立数学对照（双实现互核 4.97e-13 + 30 项账本对账）；25 项测试 + 前后 replay（M01 64.55→66.96ms、steady +141MB，target/verify 冻结）。剩余：kernel/CPU/GPU 未执行、多模块/量化草稿头/采样档变体、草稿 prefill KV 同步、接受率假设（见 G-C15）。[报告](docs/validation/qwen36-mtp-forward-20261113.md) | 双栈源码独立于 V4.1 工作；不依赖 R07b |
 | R07b | 接受分布、draft/verify trace 的采集 schema、导入器与真实样本验收 | schema/导入器可先做；真实数据准入需 R07a 与匹配环境 |
 | R08 | 重点模型 GDN/MoE/attention 按算子/设备/精度/TP 扩展覆盖，独立留出与域外回退 | 对应算子语义及设备身份；MoE 分片域依赖 R01，无需等待其他算子 |
 | R09 | 按固定场景做 E2E 对照，披露误差与未校准部分 | 匹配实测记录与已实现的场景语义；无需等待全部算子校准，残差可反向指导 R08 |

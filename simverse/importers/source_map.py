@@ -19,6 +19,11 @@ DFLASH_PIN = "z-lab/dflash@07ebd93db9f472af339b644bb70221ad8428328a"
 # R07a（2026-11-12）服务栈 pin：逐文件 SHA256 见 assets/identity/
 # vllm_dflash_serving_pin/manifest.json 与 sglang_dflash_pin/manifest.json
 SGLANG_DFLASH_PIN = "sgl-project/sglang@74cb973d78dfa4af85a90d2841891fec27e78db2"
+# R23（2026-11-13）Qwen3.6 原生 MTP pin：逐文件 SHA256/blob sha1 见
+# assets/identity/vllm_qwen36_mtp_pin/manifest.json（8 文件）与
+# assets/identity/sglang_qwen36_mtp_pin/manifest.json（1 文件）
+VLLM_MTP_PIN = "vllm@10a854ed6b3bbd7411c65ccbf87594e71c4d322c"
+SGLANG_MTP_PIN = "sgl-project/sglang@1b2870d33de7b5f31844fd74e97eea6d7896c53a"
 
 
 @dataclass
@@ -96,20 +101,103 @@ ENTRIES: List[SourceMapEntry] = [
         note="2026-11-10 修复：shared_gate=True 由 shared_intermediate>0 推导；"
              "moe_rows 每 MoE 层计 gate 行，memory 计 h 权重"),
     SourceMapEntry(
-        entry_id="sm-qwen36-mtp-unverified",
-        model_or_method="qwen3_5_moe MTP",
-        semantic="config 声明 mtp_num_hidden_layers=1；原生 MTP 微头 forward 未 pin",
-        source_pin=HF_TF_PIN,
-        source_location="modeling_qwen3_5_moe.py:994/1807 "
-                        "(_keys_to_ignore_on_load_unexpected=[^mtp.*])；"
-                        "vllm_qwen35_pin/qwen3_next.py:847-848、qwen3_5.py:326/476 "
-                        "（主模型丢弃 mtp.）",
-        branch_predicate="MTP 权重不在主模型加载路径；仅 config 字段存在",
-        input_domain="Qwen3.6-35B-A3B MTP1",
-        both_sides_covered=False,
-        uncovered_domain=["原生 MTP 微头 forward 无 pin",
-                          "MTP 仅按目标首层模板估算，未执行、未实测"],
-        note="2026-11-10 审查：MTP 路径必须标 unverified，不能进入部署排名"),
+        entry_id="sm-qwen36-mtp",
+        model_or_method="qwen3_5_moe MTP（Qwen3.6 原生微头）",
+        semantic="原生 MTP 头（R23，2026-11-13 source-checked）：combine = "
+                 "共享目标 embedding 查表 → pre_fc_norm_embedding/"
+                 "pre_fc_norm_hidden 两个 RMSNorm 分别归一 → cat[B,2h] → "
+                 "fc(2h→h, bias=False, ColumnParallel gather_output=True)"
+                 "（无激活、无残差直加，区别于 DeepSeek V3 式 comb）→ 层 "
+                 "spec_step_idx%n_predict 的 **full_attention** decoder 层"
+                 "（gated GQA + MoE，几何=目标 full 层；非目标首层 GDN）→ "
+                 "final norm → 共享目标 lm_head 读出 1 候选/步（greedy 默认）。"
+                 "加载：is_unused_checkpoint_weight 只保留 mtp.*+embed_tokens+"
+                 "lm_head（mtp.→model. 重映射）；colocated 运行时经 "
+                 "load_eagle_model 物理共享目标 embed/lm_head（零字节副本）。"
+                 "每轮 K=num_speculative_steps 均匀步（无 catch-up 加权），"
+                 "步 j 层 j%n_predict 循环复用（n=1 时 K=1..3 官方 e2e 在册）。"
+                 "HF transformers 侧无 MTP forward（主模型 "
+                 "_keys_to_ignore_on_load_unexpected=[^mtp.*] 丢弃 mtp.*），"
+                 "推理实现只有 vLLM/SGLang 双栈",
+        source_pin=VLLM_MTP_PIN,
+        source_location=(
+            "vllm/model_executor/models/qwen3_5_mtp.py:81-82（num_mtp_layers←"
+            "mtp_num_hidden_layers；mtp_start_layer_idx=num_hidden_layers）、"
+            "85-88（embed_tokens）、90-104（fc 2h→h ColumnParallel "
+            "gather_output=True bias=False；NVFP4 checkpoint fc BF16 workaround）、"
+            "120-127（layers ModuleList layer_type='full_attention'）、"
+            "136-142（norm + pre_fc_norm_hidden/embedding）、155-175（forward："
+            "双预归一 L159-160 → cat L161 → fc L162 → 层选择 spec_step_idx % "
+            "num_mtp_layers L165-166 → mtp_layer L170-174 → final norm L175）、"
+            "183-193（maybe_fuse_shared_experts n_shared_experts=1）、"
+            "207-235（Qwen3_5MTP + ParallelLMHead/tie）、303-320"
+            "（is_unused_checkpoint_weight 与 mtp.→model. 重映射）、323-326"
+            "（Qwen3_5MoeMTP）；"
+            "qwen3_next_mtp.py:44-51（should_torch_compile_mtp_drafter：按 "
+            "spec_step_idx 选模块）+70-71/87-95/97-104/144-145（同构 lineage）；"
+            "vllm/config/speculative.py:1147-1167（qwen3_5/qwen3_5_moe* → "
+            "model_type qwen3_5_mtp、n_predict←mtp_num_hidden_layers、"
+            "architectures Qwen3_5MoeMTP/Qwen3_5MTP）、1948-1951"
+            "（num_mtp_modules）、1953-1967（use_multi_module_mtp：n=1 或 K=1 "
+            "单模块复用，K>n 循环）；"
+            "vllm/v1/worker/gpu/spec_decode/mtp/speculator.py:12-20"
+            "（MTPSpeculator.load_draft_model → load_eagle_model）；"
+            "eagle/utils.py:19-41（_should_share：无 has_own_* 标志即共享）、"
+            "44-71（share_target_lm_head：del 草稿副本装目标对象）、82-112"
+            "（maybe_share_target_embed：in_single_pp_stage 仅多 rank 单段"
+            "模式；colocated 常规路径物理共享）、115-168（load_eagle_model）；"
+            "target_dependent_ar/speculator.py:103-193（propose：K 步循环，"
+            "步 0 输入=目标 last hidden+last_sampled）、391-439（_decode："
+            "B 行/步 forward → sample_draft → update_draft_inputs）、339-387"
+            "（_prefill：草稿全量同步 KV，skip_sample 时只保 KV）、"
+            "525-561（prepare_prefill_inputs：rejected 行移位+bonus 注入）；"
+            "tests/models/test_qwen3_5_mtp_config.py:19-22/112-128（真实 "
+            "Qwen/Qwen3.6-35B-A3B config → Qwen3_5MoeMTP、n_predict=1）、"
+            "131-184（(mtp_layers,K)→multi_module 矩阵：1×2=False 单模块复用、"
+            "2×2=True）；"
+            "tests/v1/e2e/spec_decode/mtp/qwen3_5/test_mtp.py:28-51（checkpoint "
+            "键 mtp.layers.0.*；复制出 module 1）、54-90（K=2 双模块逐步选择："
+            "module 1 随机权重 → 步 2 接受率<0.05 证明未复用 module 0）、"
+            "123-149/209-249（MTP1 模型 K=1/K=3 e2e + draft_lm_head 量化变体）；"
+            "SGLang @1b2870d python/sglang/srt/models/qwen3_5_mtp.py:98/136-141"
+            "（fc nn.Linear(2h→h) + 双预归一）、143-144（mtp_config."
+            "full_attention_interval=1、num_hidden_layers=1）、153-160（lm_head/"
+            "tie）、174-186（set_embed_and_head/set_lm_head_from_target 权重"
+            "物理共享）、238-252（forward cat/fc 同构）——跨栈对照确认主干语义"),
+        branch_predicate="method='mtp'（或由 draft config model_type∈qwen3_5* "
+                         "解析）→ hf_config_override 改写 model_type="
+                         "qwen3_5_mtp + architectures=[Qwen3_5MoeMTP]（MoE）/["
+                         "Qwen3_5MTP]（dense）；层选择 layers[spec_step_idx % "
+                         "num_mtp_layers]；加载只消费 mtp.*/embed_tokens/"
+                         "lm_head 三类 checkpoint 键",
+        thresholds="n_predict=mtp_num_hidden_layers（Qwen3.6=1）；K="
+                   "num_speculative_tokens 不受 n_predict 截断（循环复用；"
+                   "官方 e2e 覆盖 K∈{1,2,3}）；use_multi_module_mtp 仅 "
+                   "min(n,K)>1 且非 index_share 时启用",
+        input_domain="Qwen3.6-35B-A3B（qwen3_5_moe，MTP1，mtp_use_dedicated_"
+                     "embeddings=false）；colocated 同 TP/EP 组；greedy 采样默认",
+        both_sides_covered=True,
+        uncovered_domain=[
+            "kernel/CPU forward/GPU 未执行（op 为解析算术口径；结构由双栈源码"
+            "逐行核对）",
+            "真实 checkpoint mtp.* 权重未加载执行（张量名单由 e2e 测试的 "
+            "weight_map 复制逻辑与 loader 重映射证明，非本机加载）",
+            "n_predict>1 多模块 MTP（Qwen3.6 为 1）只按层选择语义建模，"
+            "MultiModuleMTPSpeculator 的 index_share/graph 差异未建模",
+            "draft_lm_head_quantization（fp8/nvfp4 量化草稿头副本）与 "
+            "use_local_argmax_reduction（不物化全量 logits）变体未建模",
+            "草稿 prefill 的 KV 同步前向（tdar _prefill 全量执行）未入稳态 "
+            "TPOT 账本——一次性成本，单列 cache_policy.draft_prefill",
+            "probabilistic 采样档（DraftLogitsCache）与 CUDA-graph 桶取整 "
+            "padding 未入账",
+            "SGLang 侧 NPU/量化分支（ascend unquant override 等）未建模"],
+        note="R23（2026-11-13）替换 sm-qwen36-mtp-unverified：count/draft."
+             "mtp_step_rows（逐步 fc+双预归一+full-attn MoE 层+final norm+"
+             "共享 lm_head+草稿 KV 回退行）、methods/plans.plan_mtp（K 均匀"
+             "步+层循环，撤销 K≤n_predict 旧限制）、lowering/memory MTP "
+             "常驻/草稿 KV/临时对象、pipeline 逐步阶段+草稿通信+dt 拒绝。"
+             "HF 主模型仍丢弃 mtp.*（qwen3_5.py:326/476 hf_to_vllm_mapper "
+             "与 HF _keys_to_ignore 保持原状，两栏分立）"),
     SourceMapEntry(
         entry_id="sm-v41-index-short-branch",
         model_or_method="deepseek_v41_flash CSA2",
@@ -867,5 +955,7 @@ def source_map_json() -> dict:
     return {"schema_version": "0.2",
             "pins": {"vllm": VLLM_PIN, "vllm_parallel": VLLM_PARALLEL_PIN,
                      "hf_transformers": HF_TF_PIN, "dflash": DFLASH_PIN,
-                     "sglang_dflash": SGLANG_DFLASH_PIN},
+                     "sglang_dflash": SGLANG_DFLASH_PIN,
+                     "vllm_qwen36_mtp": VLLM_MTP_PIN,
+                     "sglang_qwen36_mtp": SGLANG_MTP_PIN},
             "entries": [e.to_json() for e in ENTRIES]}
