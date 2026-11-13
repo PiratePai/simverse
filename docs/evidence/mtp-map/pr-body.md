@@ -42,7 +42,7 @@ colocated 经 load_eagle_model 物理共享目标 embed/lm_head（零字节）�
 - colocated steady：2,699,569,088 → **2,841,004,480 B**（+141,435,392 =
   MTP 层常驻 ~108MB/卡@TP8（W8 draft 档）+ fc/norms 1.05MB + 草稿 KV
   32MB + 临时下界；旧模型完全没有 MTP 驻留对象）
-- draft_step_0（K=1）：19 行 GDN 模板 → 23 行 pinned 结构（+fc/双预归一/
+- draft_step_0（K=1）：19 行 GDN 模板 → 24 行 pinned 结构（含 KV 回退浪费注记；+fc/双预归一/
   final norm/draft_lm_head/attention KV，−GDN 递推/卷积 state）
 - target_decode / verify：逐字段冻结（attribution.json）
 

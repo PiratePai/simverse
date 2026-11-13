@@ -155,7 +155,7 @@ L339-387，skip_sample 时只保 KV）；decode 每步写 1 行/请求、被拒�
 
 同场景（method=mtp k=1——main 上唯一合法 K）before（main b8585a1 未改
 工作区）/after 逐 op 归因：`target_decode`/`verify` 逐字段冻结；draft_step_0
-整段替换（旧 GDN 模板 19 行 → 新 pinned 结构 23 行：+fc/双预归一/final
+整段替换（旧 GDN 模板 19 行 → 新 pinned 结构 24 行，含 1 行 KV 回退浪费注记：+fc/双预归一/final
 norm/draft_lm_head/attention KV，−GDN 递推/卷积 state，+draft KV 读写）。
 **M01 64.55→66.96 ms**（草稿步真实成本上升：共享 lm_head 63.5MB 读/步 +
 draft KV 读入账；旧模板两个方向都错）；**steady 2,699,569,088→2,841,006,528 B
