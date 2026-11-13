@@ -186,10 +186,11 @@ class ScenarioV2:
         # R22：部分覆盖 quant/draft_quant 时按默认档补齐缺键（V41_QUANT
         # 只钉 dense_w/expert_w/act 三键，便于显式书写；缺键取默认档后再
         # 走 validate 的域校验）。
-        for field_name in ("quant", "draft_quant"):
+        for field_name, defaults in (("quant", _DEFAULT_QUANT),
+                                     ("draft_quant", _DEFAULT_DRAFT_QUANT)):
             given = getattr(self, field_name)
-            if given and len(given) < len(_DEFAULT_QUANT):
-                merged = dict(_DEFAULT_QUANT)
+            if given and len(given) < len(defaults):
+                merged = dict(defaults)
                 merged.update(given)
                 setattr(self, field_name, merged)
 

@@ -444,6 +444,22 @@ def test_parse_rejects_missing_quantization_config():
         _parse(full)
 
 
+def test_unknown_quantization_leaf_remains_an_explicit_gap():
+    full = _official_full()
+    full["quantization_config"]["future_kernel_mode"] = "unknown"
+    model = _parse(full)
+    path = "quantization_config.future_kernel_mode"
+    assert model.coverage[path]["status"] == "unsupported-semantic"
+    assert any(g.startswith(f"{path}:") for g in model.gaps)
+    assert not model.structure_complete
+
+
+def test_partial_draft_quant_uses_draft_defaults():
+    scenario = ScenarioV2(draft_quant={"act": 16})
+    assert scenario.draft_quant == {"dense_w": 8, "expert_w": 8,
+                                    "act": 16, "kv": 8, "state": 32}
+
+
 def test_scenario_quant_frozen_for_v41():
     """V4.1 场景位宽与冻结配方冲突 → 拒绝（dense_w/expert_w/act 逐键）。"""
     def sc(quant):
