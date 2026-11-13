@@ -304,6 +304,7 @@ class TestPipelineMtp:
         for alloc in ("draft-w-moe-L0", "draft-w-mtp-fc-norms", "draft-kv",
                       "t-mtp-draft-buffers", "t-mtp-last-hidden"):
             assert alloc in inv, alloc
+        assert "draft-w-final-norm" not in inv  # mtp.norm 已计入 fc-norms
         # embed/lm_head 零字节共享：引用行按物理身份并入 target 对象
         # （RankMemory._dedup：reference 并入 consumer，不产生独立行/字节）
         assert not any(a.startswith("draft-ref-") for a in inv)
@@ -317,6 +318,36 @@ class TestPipelineMtp:
             int(2048 * 1.0) + int(256 * 3 * 2048 * 64 * 1.0)
         # 草稿 KV：1 个 full-attn 层，kvh=2<tp 复制全量
         assert inv["draft-kv"]["bytes"] == 1 * 32768 * 2 * 2 * 256 * 1
+
+    def test_draft_expert_precision_matches_count_and_residency(self):
+        """目标 FP4、草稿 W8：草稿 MoE 的 count 与 memory 必须同档。"""
+        from simverse.pipeline import run_v2
+        from simverse.scenario import ScenarioV2
+        b = run_v2(ScenarioV2(method_id="mtp", k=1)).to_json()
+        rows = {r["op"]: r for r in b["work"]["draft_step_0"]["rows"]}
+        inv = {a["alloc_id"]: a for a in
+               b["cost"]["memory"]["colocated_r0"]["inventory"]}
+        routed = 256 * 3 * 2048 * (512 // 8) * (8 // 8)
+        assert rows["moe_routed"]["weight_capacity"] == routed
+        assert inv["draft-w-moe-L0"]["bytes"] == (
+            routed + rows["moe_router"]["weight_capacity"]
+            + rows["moe_shared"]["weight_capacity"]
+            + rows["shared_gate"]["weight_capacity"])
+        assert rows["draft_lm_head"]["weight_read"] == (
+            inv["target-w-lm_head"]["bytes"])
+        # 私有 dense 档可与目标不同；共享 head 仍须沿目标物理对象计。
+        variant = ScenarioV2(method_id="mtp", k=1, draft_quant={
+            "dense_w": 16, "expert_w": 8, "act": 8, "kv": 8, "state": 32})
+        varied = run_v2(variant).to_json()
+        varied_rows = {r["op"]: r for r in
+                       varied["work"]["draft_step_0"]["rows"]}
+        varied_inv = {a["alloc_id"]: a for a in
+                      varied["cost"]["memory"]["colocated_r0"]["inventory"]}
+        assert varied_rows["mtp_fc"]["weight_read"] == 2 * rows["mtp_fc"]["weight_read"]
+        assert varied_rows["draft_lm_head"]["weight_read"] == \
+            varied_inv["target-w-lm_head"]["bytes"]
+        assert varied_inv["draft-w-mtp-fc-norms"]["bytes"] == \
+            varied_rows["mtp_fc"]["weight_capacity"] + 3 * 2048
 
     def test_dt_modes_rejected_no_stack_implementation(self):
         from simverse.pipeline import run_v2
@@ -371,9 +402,10 @@ FROZEN = {
                        "e1954cea0fa3461b61ddf1fe",
     "step0_flops": 215_342_492,
     "step0_weight_read": 70_802_432,
+    "step0_weight_read_expected": 3_145_728.0,
     "step0_kv_read": 33_554_432,
     "step2_kv_read": 33_556_480,
-    "steady_bytes": 2_841_006_528,
+    "steady_bytes": 2_841_004_480,
 }
 
 
@@ -390,6 +422,7 @@ class TestReplayFrozen:
         t2 = b["work"]["draft_step_2"]["totals"]
         assert t0["flops"] == FROZEN["step0_flops"]
         assert t0["weight_read"] == FROZEN["step0_weight_read"]
+        assert t0["weight_read_expected"] == FROZEN["step0_weight_read_expected"]
         assert t0["kv_read"] == FROZEN["step0_kv_read"]
         assert t2["kv_read"] == FROZEN["step2_kv_read"]
         mem = b["cost"]["memory"]["colocated_r0"]

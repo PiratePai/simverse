@@ -25,8 +25,9 @@ norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fm
 矛盾拒绝；场景 V41_QUANT 冻结；known_peak +14.36 GB（Marlin 对齐主导）；Humming/SM100/emulation
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #14（R24）已合入 main；R23 分支 `codex/qwen36-native-mtp-r23`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：本次 R23 rebase 到 R24 后在 ZCode 会话执行 `py -3.12 -m pytest tests -q`：**424 passed，exit 0**（计数见下）；`tools/replay_qwen36_mtp.py --check`、`tools/replay_v41_quant.py --check` 与 `node --check simverse/static/workbench.js` 均 exit 0；`py -3.12 -m simverse.cli run-v2` exit 0。历史回执（非本次执行）：R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）；R07a+R20 集成 311 passed，R07a 280、R20 单分支 295、R06 264/262、R05 252、R04 236、PR #3 合入时 234。
-**pytest 收集数：424**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-14 R23 rebase 到 R24；399→424 = R23 原生 MTP 25 项（tests/test_qwen36_mtp_r23.py），test_pipeline_v02 旧 K≤n 拒绝测试改写为循环放行+无头拒绝（净 0）；367→399 = R24 SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；365→367 = 量化未知叶键缺口传播与草稿位宽默认值回归 2 项；334→365 = R22 量化映射 31 项；此前 311→334 = R21 21 项 + gate BF16 1 项 + dtype 域负例 1 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
+运行：本次 R23 验收修复在 Codex 宿主执行 `py -3.12 -m pytest tests -q`：**425 passed，exit 0**；`tools/replay_qwen36_mtp.py --check`、`tools/replay_v41_swiglu.py --check`、`tools/replay_v41_quant.py --check`、`node --check simverse/static/workbench.js` 均 exit 0；`py -3.12 -m simverse.cli run-v2` status=completed。历史回执（非本次执行）：R23 原提交在 ZCode 会话 424 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
+**pytest 收集数：425**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-14 R23 验收修复；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项（tests/test_qwen36_mtp_r23.py）；367→399 = R24 SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
+R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
@@ -61,8 +62,8 @@ tests/fixtures/qwen36_mtp_r23_numeric.json）——**不升格**：模型级
 cpu_forward 保持 not-run。测试 tests/test_qwen36_mtp_r23.py 25 项 +
 G10/G13/G16/model_ir/product_scope/pipeline_v02 随事实更新。前后 replay
 （docs/evidence/mtp-map，k=1 同场景）：target_decode/verify 逐字段冻结；
-draft_step_0 整段替换；M01 64.55→66.96 ms、steady 2,699,569,088→
-2,841,006,528 B。仍缺（G-C15）：kernel/CPU/GPU 未执行、真实 checkpoint
+draft_step_0 整段替换；M01 64.55→66.96209320 ms、steady 2,699,569,088→
+2,841,004,480 B（含本次验收修复）。仍缺（G-C15）：kernel/CPU/GPU 未执行、真实 checkpoint
 未加载、多模块 MTP/量化草稿头/采样档变体、草稿 prefill KV 同步、接受率
 假设——部署排名资格不变（mrope 亦仍未核）。
 

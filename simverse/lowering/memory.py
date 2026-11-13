@@ -955,7 +955,8 @@ def mtp_extra_allocations(mtp_model: ModelIR, quant: dict, tp: int,
     b_w = quant["dense_w"] / 8
     h = mtp_model.hidden
     fc_b = int(2 * h * (h // tp) * b_w)
-    norms_b = int(3 * h * b_w)
+    # 与 count/draft 的 _norm_row 同口径：norm 权重按激活 dtype 计。
+    norms_b = int(3 * h * (quant["act"] / 8))
     return [Allocation(
         f"{role}-w-mtp-fc-norms", "weights", role, fc_b + norms_b,
         live_note=f"MTP 微头常驻：fc[2h→h/tp]（列切，TP{tp}）+ "
@@ -1089,6 +1090,10 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
         draft_q.update(draft_quant or {})
         for a in target_weight_allocations(mtp_model, draft_q, tp,
                                            role="draft", ep=ep, rank=rank):
+            if a.alloc_id == "draft-w-final-norm":
+                # mtp.norm 已归 mtp_extra_allocations 的 3 个 norm，避免
+                # 伪模型通用 final norm 再记一份。
+                continue
             if "embed" in a.alloc_id or "lm_head" in a.alloc_id:
                 ident = (f"{model.id}:embed@tp{tp}" if "embed" in a.alloc_id
                          else f"{model.id}:lm_head@tp{tp}")

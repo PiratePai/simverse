@@ -183,3 +183,18 @@ draft KV 32MB + 临时）。K 域变化单列（K≤1 → K≥1 循环）。
    仍属 G-C2。
 5. fc all-gather 延迟按单向环 (tp−1) 段近似（与 engram_gather 同已登记
    近似）；草稿步 logits 缓冲按 fp32 下界计。
+
+## 6. 2026-11-14 合入前验收修复
+
+R23 原提交的 MTP 私有层 count/cost 用目标 `quant`（默认专家 FP4），
+memory 却用 `draft_quant`（默认专家 W8），使同一草稿专家的读取期望与
+驻留容量相差 2 倍。现统一私有层的 count/cost/通信与 memory 精度档；
+共享目标 `lm_head` 的读取/成本仍按目标对象档。微头 final norm 已在
+`mtp_extra_allocations` 的三件 norm 中，移除伪模型通用 final norm 的
+重复驻留 2,048 B。新增 count↔memory 回归测试。
+
+固定 K=1/TP8 同场景 replay：草稿专家 `weight_read_expected`
+1,572,864→3,145,728 B；M01 66.9618249048→66.9620931971 ms；
+steady 2,841,006,528→2,841,004,480 B；target_decode/verify 不变。
+`--check` 扩为校验 work totals、阶段成本、指标和逐行归因，防止成本
+漂移被遗漏。此修复只纠正本仓的口径，不构成新的模型执行或实测证据。

@@ -39,7 +39,7 @@ colocated 经 load_eagle_model 物理共享目标 embed/lm_head（零字节）�
 
 - M01（B1/ctx32768/TP8/W8A8+FP4E 假设接受率 0.75^k）：64.55 → **66.96 ms**
   （旧 GDN 模板漏 lm_head/KV、误计 GDN state，两个方向都错）
-- colocated steady：2,699,569,088 → **2,841,006,528 B**（+141,437,440 =
+- colocated steady：2,699,569,088 → **2,841,004,480 B**（+141,435,392 =
   MTP 层常驻 ~108MB/卡@TP8（W8 draft 档）+ fc/norms 1.05MB + 草稿 KV
   32MB + 临时下界；旧模型完全没有 MTP 驻留对象）
 - draft_step_0（K=1）：19 行 GDN 模板 → 23 行 pinned 结构（+fc/双预归一/
@@ -48,7 +48,7 @@ colocated 经 load_eagle_model 物理共享目标 embed/lm_head（零字节）�
 
 ## Testing
 
-- `py -3.12 -m pytest tests -q`：**392 passed**（367→392 = R23 25 项）
+- `py -3.12 -m pytest tests -q`：**425 passed**（R24 合入后 399→424 = R23 25 项；验收守恒回归 +1）
 - `py -3.12 tools/replay_qwen36_mtp.py --check`：OK（无漂移）
 - `py -3.12 tools/replay_v41_quant.py --check` / `replay_v41_moe.py --check`：
   OK（V4.1 证据不受本 PR 影响）
@@ -70,3 +70,12 @@ colocated 经 load_eagle_model 物理共享目标 embed/lm_head（零字节）�
 - 未建模变体登记在 G-C15（多模块 MTP、量化草稿头、local_argmax、
   probabilistic 采样档、CUDA-graph padding、SGLang NPU 分支）；草稿
   prefill KV 同步为一次性成本，不在稳态 TPOT（cache_policy 登记）
+
+## 合入前验收修复（2026-11-14）
+
+草稿私有层原先在 count/cost 中误用目标专家 FP4 档，memory 则使用草稿 W8 档。
+现统一私有层的 count/cost/通信与 memory 档，目标共享 lm_head 仍沿目标档；
+移除 MTP final norm 的重复驻留 2,048 B。固定 K=1 replay 的草稿专家
+weight_read_expected 1,572,864→3,145,728 B，M01 66.96182490→
+66.96209320 ms；target_decode/verify 不变。`--check` 现同时核验成本、
+指标与逐行归因。新增一项守恒回归；测试总数 425。

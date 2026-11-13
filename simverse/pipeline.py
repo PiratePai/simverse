@@ -15,7 +15,7 @@ from .count import build_model_work, totals
 from .count.draft import chain_step_rows, dflash_round_rows, mtp_step_rows
 from .devices import DEVICES, LINKS  # v0.1 设备注册表（v0.2 沿用数值+分层预算）
 from .draft_quant import MXFP8_CONTEXT_PROJ
-from .cost.t0 import dtype_route, price_rows, stage_total
+from .cost.t0 import dtype_route, price_row, price_rows, stage_total
 from .cost.calibrated import CalibratedPricer
 from .cost.profile_store import load_profile_set, profile_model_id
 from .execute.serial import build_serial_round
@@ -471,24 +471,32 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             if not mtp_plan.valid:
                 return _bundle_error(scenario, cap, "unsupported_combo",
                                      f"MTP 微头并行组合非法：{mtp_plan.errors[0]}")
+            # 草稿私有权重/KV/激活必须与 colocated_rank_memory 的 draft_q
+            # 同档；共享 lm_head 仍读目标物理对象，按目标位宽计价。
+            mtp_quant = {**quant, **dquant}
+            mtp_gemm_dt, mtp_ew_dt = dtype_route(mtp_quant)
             for j in range(plan.k_effective):
                 stage = f"draft_step_{j}"
                 rows_j = mtp_step_rows(
-                    stage, model, j, ctx, quant, tp=dep.target_tp,
-                    ep=dep.target_ep, batch=B, plan=pplan)
+                    stage, model, j, ctx, mtp_quant, tp=dep.target_tp,
+                    ep=dep.target_ep, batch=B, plan=pplan,
+                    shared_quant=quant)
                 if j == plan.k_effective - 1:
                     rows_j.append(mtp_kv_rewind_row(stage, plan.k_effective,
-                                                    e_n, model, quant,
+                                                    e_n, model, mtp_quant,
                                                     dep.target_tp))
-                p_j = price_rows(rows_j, target_dev, gemm_dt, ew_dt)
+                p_j = [price_row(r, target_dev,
+                                 gemm_dt if r.op == "draft_lm_head" else mtp_gemm_dt,
+                                 ew_dt if r.op == "draft_lm_head" else mtp_ew_dt)
+                       for r in rows_j]
                 t_j = stage_total(p_j)
                 # 草稿步通信：MTP 层 attn/mlp allreduce（EP 开为 all2all）+
                 # fc gather_output=True all-gather + lm_head logits gather
                 #（每步 B 行候选；TP1 全零）
-                col_j = _collectives_cost(mtp_model, mtp_plan, B, quant,
+                col_j = _collectives_cost(mtp_model, mtp_plan, B, mtp_quant,
                                           tp_link, lm_head_tokens=B)
                 fc_gather = engram_gather(
-                    B, model.hidden, dep.target_tp, quant["act"] / 8,
+                    B, model.hidden, dep.target_tp, mtp_quant["act"] / 8,
                     tp_link, "mtp_fc_allgather",
                     "MTP fc ColumnParallelLinear gather_output=True → "
                     "[B,h/tp] all-gather 为 [B,h]（qwen3_5_mtp.py L99-104）")

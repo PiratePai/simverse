@@ -1,7 +1,7 @@
 {
  "schema_version": "0.2",
  "manifest": {
-  "run_id": "sha256:f75c650a2a38f0473dc635a9cf555be9f383e06bc1095e591a3fdc4b9634e21b",
+  "run_id": "sha256:51e50a86e8cd0f9a0d89b5d3c5046d082d9ae9ca8e79bd109633ede0e1a10f29",
   "status": "completed",
   "input_digest": "sha256:2366214ce7e8957ec4460e70faed3aab5d54bfd63d8013e258ab7d3881e879a4",
   "model_ir_digest": "sha256:05778797a8ca415799f20c92a46fb89bf1ed4106c572bef962837f937f0cdf03",
@@ -9,7 +9,7 @@
   "lowering_digest": "",
   "cost_digest": "sha256:88dd8e1cfa72f4798537a815bbc71708639ae57c03c3436c570972cc5268ad74",
   "device_snapshot_digest": "sha256:ad4b44a3f2ce32dcbe660392989d9a2fb7501aaa0046279e76ba8a95cbc68abc",
-  "code_revision": "b8585a1bd2733cc3e282dfd31bc92f546e48c1ee",
+  "code_revision": "5c30ba9eaf297750da1a51a365448f28d7cecc69",
   "parent_run_id": null,
   "created_at": "",
   "progress": 0.0,
@@ -13639,7 +13639,7 @@
    "totals": {
     "flops": 215342492,
     "weight_read": 70802432,
-    "weight_read_expected": 1572864.0,
+    "weight_read_expected": 3145728.0,
     "act_read": 62400,
     "act_write": 73025,
     "kv_read": 33554432,
@@ -13949,14 +13949,14 @@
      "op": "moe_routed",
      "flops": 6291456,
      "weight_read": 0,
-     "weight_read_expected": 1572864.0,
+     "weight_read_expected": 3145728.0,
      "act_read": 19456,
      "act_write": 16384,
      "kv_read": 0,
      "kv_write": 0,
      "state_read": 0,
      "state_write": 0,
-     "weight_capacity": 50331648,
+     "weight_capacity": 100663296,
      "state_capacity": 0,
      "formula": "v2.moe_union",
      "statistic": "expectation",
@@ -27696,7 +27696,7 @@
    }
   ],
   "draft_step_0": {
-   "t_ms": 4.235218308131295,
+   "t_ms": 4.235687819773086,
    "collectives": {
     "per_layer": [
      {
@@ -27778,9 +27778,9 @@
    "colocated_ranks": [
     {
      "rank_id": "colocated-r0",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -28930,19 +28930,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -28997,9 +28984,9 @@
     },
     {
      "rank_id": "colocated-r1",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -30149,19 +30136,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -30216,9 +30190,9 @@
     },
     {
      "rank_id": "colocated-r2",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -31368,19 +31342,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -31435,9 +31396,9 @@
     },
     {
      "rank_id": "colocated-r3",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -32587,19 +32548,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -32654,9 +32602,9 @@
     },
     {
      "rank_id": "colocated-r4",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -33806,19 +33754,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -33873,9 +33808,9 @@
     },
     {
      "rank_id": "colocated-r5",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -35025,19 +34960,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -35092,9 +35014,9 @@
     },
     {
      "rank_id": "colocated-r6",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -36244,19 +36166,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -36311,9 +36220,9 @@
     },
     {
      "rank_id": "colocated-r7",
-     "steady_bytes": 2841006528,
+     "steady_bytes": 2841004480,
      "transient_peak_bytes": 126208,
-     "known_peak_bytes": 2841132736,
+     "known_peak_bytes": 2841130688,
      "host_resident_bytes": 0,
      "nominal_bytes": 80000000000,
      "allocatable_bytes": null,
@@ -37463,19 +37372,6 @@
         "draft"
        ],
        "live_note": "常驻（router 场景 dense_w/shared_gate 复制；EP off inter/tp=64（每 rank 全 E））",
-       "placement": "gpu"
-      },
-      {
-       "alloc_id": "draft-w-final-norm",
-       "kind": "weights",
-       "role": "draft",
-       "bytes": 2048,
-       "shared_identity": null,
-       "lifecycle": "resident",
-       "consumers": [
-        "draft"
-       ],
-       "live_note": "常驻（final RMSNorm，每 rank 复制）",
        "placement": "gpu"
       },
       {
@@ -37531,9 +37427,9 @@
    ],
    "colocated_r0": {
     "rank_id": "colocated-r0",
-    "steady_bytes": 2841006528,
+    "steady_bytes": 2841004480,
     "transient_peak_bytes": 126208,
-    "known_peak_bytes": 2841132736,
+    "known_peak_bytes": 2841130688,
     "host_resident_bytes": 0,
     "nominal_bytes": 80000000000,
     "allocatable_bytes": null,
@@ -38686,19 +38582,6 @@
       "placement": "gpu"
      },
      {
-      "alloc_id": "draft-w-final-norm",
-      "kind": "weights",
-      "role": "draft",
-      "bytes": 2048,
-      "shared_identity": null,
-      "lifecycle": "resident",
-      "consumers": [
-       "draft"
-      ],
-      "live_note": "常驻（final RMSNorm，每 rank 复制）",
-      "placement": "gpu"
-     },
-     {
       "alloc_id": "draft-w-mtp-fc-norms",
       "kind": "weights",
       "role": "draft",
@@ -38750,7 +38633,7 @@
    },
    "colocated_worst": {
     "rank_id": "colocated-r0",
-    "known_peak_bytes": 2841132736
+    "known_peak_bytes": 2841130688
    }
   }
  },
@@ -38765,7 +38648,7 @@
       "role": "draft",
       "stage": "draft_step_0",
       "label": "MTP 草稿步 0（层 0；fc combine + full-attn MoE 层 + 共享 lm_head）",
-      "t_ms": 4.235218308131295,
+      "t_ms": 4.235687819773086,
       "depends_on": [],
       "start_ms": 0.0,
       "detail": {
@@ -38782,7 +38665,7 @@
       "depends_on": [
        "r0.draft_step_0"
       ],
-      "start_ms": 4.235218308131295,
+      "start_ms": 4.235687819773086,
       "detail": {
        "tokens": "K+1 token"
       }
@@ -38797,7 +38680,7 @@
       "depends_on": [
        "r0.d2t"
       ],
-      "start_ms": 4.235218308131295,
+      "start_ms": 4.235687819773086,
       "detail": {
        "tokens": "M=K+1=2"
       }
@@ -38812,15 +38695,15 @@
       "depends_on": [
        "r0.verify"
       ],
-      "start_ms": 117.18319358331803,
+      "start_ms": 117.18366309495983,
       "detail": {
        "tokens": "E[N] token"
       }
      }
     ],
-    "t_round_ms": 117.18319358331803,
+    "t_round_ms": 117.18366309495983,
     "E_N": 1.75,
-    "tpot_ms": 66.96182490475316,
+    "tpot_ms": 66.9620931971199,
     "reason": null
    }
   ],
@@ -38829,7 +38712,7 @@
  },
  "metrics": {
   "M01_tpot_analytical": {
-   "value": 66.96182490475316,
+   "value": 66.9620931971199,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -38879,7 +38762,7 @@
    "sample": null
   },
   "M02_speedup_vs_baseline": {
-   "value": 1.6862753010167981,
+   "value": 1.6862685447347003,
    "unit": "ratio",
    "scope": {
     "phase": "steady-decode",
@@ -38895,7 +38778,7 @@
    "formula_ref": "v2.roofline",
    "input_refs": [],
    "assumption_refs": [],
-   "reason": "不参与排名：配置覆盖/forward 源码证据未同时完备（详见 model_config_coverage 与 model_forward_evidence）; forward 仅部分源码核过；未核路径：text_mrope_position_ids: Qwen3.6 文本 RoPE 读 mrope_section；本仓未执行位置 id 选择，算量不受影响但语义未实测; 当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; MTP 微头结构/加载/colocated 共享/TP-EP 配方已 source-checked（R23：vllm @10a854ed qwen3_5_mtp pin 8 文件 + SGLang 对照；fc+双预归一+full-attn MoE 层+final norm+共享 embed/lm_head）；接受率仍是显式假设输入，kernel/CPU/GPU 未执行、未实测; colocated_r0 known_peak=2841132736B（steady=2841006528）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
+   "reason": "不参与排名：配置覆盖/forward 源码证据未同时完备（详见 model_config_coverage 与 model_forward_evidence）; forward 仅部分源码核过；未核路径：text_mrope_position_ids: Qwen3.6 文本 RoPE 读 mrope_section；本仓未执行位置 id 选择，算量不受影响但语义未实测; 当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; MTP 微头结构/加载/colocated 共享/TP-EP 配方已 source-checked（R23：vllm @10a854ed qwen3_5_mtp pin 8 文件 + SGLang 对照；fc+双预归一+full-attn MoE 层+final norm+共享 embed/lm_head）；接受率仍是显式假设输入，kernel/CPU/GPU 未执行、未实测; colocated_r0 known_peak=2841130688B（steady=2841004480）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
    "interval": null,
    "sample": null
   },
@@ -38971,7 +38854,7 @@
    "sample": null
   },
   "M04_round_ms": {
-   "value": 117.18319358331803,
+   "value": 117.18366309495983,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -38995,7 +38878,7 @@
   },
   "M04_stage_breakdown_ms": {
    "draft_step_0": {
-    "value": 4.235218308131295,
+    "value": 4.235687819773086,
     "unit": "ms",
     "scope": {
      "phase": "steady-decode",
@@ -39113,7 +38996,7 @@
    "sample": null
   },
   "M06_memory_colocated_r0": {
-   "value": 2841132736,
+   "value": 2841130688,
    "unit": "B",
    "scope": {
     "phase": "steady-decode",
@@ -39143,7 +39026,7 @@
    "sample": null
   },
   "M06_memory_colocated_r0_detail": {
-   "steady_bytes": 2841006528,
+   "steady_bytes": 2841004480,
    "transient_peak_bytes": 126208,
    "peak_complete": false,
    "unknown_components": [
@@ -39508,7 +39391,7 @@
    },
    "memory_colocated_r0": {
     "status": "unknown",
-    "reason": "colocated_r0 known_peak=2841132736B（steady=2841006528）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
+    "reason": "colocated_r0 known_peak=2841130688B（steady=2841004480）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
     "affected_metrics": [
      "M02 加速比",
      "M06 显存"
@@ -39837,6 +39720,12 @@
    "expr": "DFlash 块验收 E[N] = 1 + Σ_{i=1..K_blk} Π_{j≤i} β_j（块内逐位同链式）",
    "source": "z-lab/dflash _rejection_sample：逐位拒绝+残差 bonus",
    "applies": "块草稿验收",
+   "version": "0.2"
+  },
+  "v2.swiglu_clamp_act": {
+   "expr": "ops = rows·inter_rank·6——SwiGLU clamp 激活逐元素 6 算术 op（gate clamp-max 1 + up clamp-min 1 + up clamp-max 1 + sigmoid 1 + 乘 2）；out = gate·sigmoid(alpha·gate)·(up+beta)，V4.1 alpha=1.0/beta=0.0 → silu(clamp(gate))·clamp(up)；字节流量已归 moe_routed/moe_shared 行",
+   "source": "activation.py L208-250（SiluAndMulWithClamp.forward_native L241-243：gate=clamp(x[:d],max=limit) 单侧、up=clamp(x[d:],min=-limit,max=limit) 双侧）；fused MoE：FusedMoEConfig.swiglu_limit（config.py L1365）→ ApplyMoEActivationConfig.from_configs（fused_moe/activation.py L182-185，clamp_limit=gemm1_clamp_limit or moe_config.swiglu_limit）→ 注册执行域 Marlin gemm1/gemm2 之间 apply_moe_activation（marlin_moe.py L140-158；silu_and_mul_with_clamp 同语义 L293-312、swiglu_limit_func utils.py L819-835，HAS_LIMIT=swiglu_limit>0 L812）；共享专家 MLP.act_fn=SiluAndMulWithClamp（deepseek_v4/nvidia/model.py L176-183 经 L331 接线；CPU 变体同构 cpu/model.py L101-102）；swiglu-tail-pin.json 13 文件",
+   "applies": "V4.1 moe_act/moe_shared_act 行（R24）；其他家族无 extras.swiglu 不适用",
    "version": "0.2"
   },
   "v2.dflash_msg": {

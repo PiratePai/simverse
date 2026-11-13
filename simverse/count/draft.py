@@ -294,7 +294,8 @@ def chain_step_rows(stage: str, draft_model: ModelIR, tokens: int, ctx: int,
 
 def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
                   quant: dict, tp: int = 1, ep: int = 1, batch: int = 1,
-                  plan=None, rank: int = 0) -> List[OpRow]:
+                  plan=None, rank: int = 0,
+                  shared_quant: Optional[dict] = None) -> List[OpRow]:
     """MTP 微头**单步**账本（R23，2026-11-13；per-rank、整批口径）。
 
     结构按 pinned vLLM Qwen3_5MoeMTP（vllm_qwen36_mtp_pin @10a854ed，
@@ -315,6 +316,8 @@ def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
     可见行 = ctx + step_idx（本步之前已提交 + 本轮先前步）。K>n_predict 时
     同层循环复用（use_multi_module_mtp L1953-1967：n=1 单模块复用路径）。
     batch>1 时 token 维乘 B 一次（G13）；权重读/容量不随 B 变化。
+    quant 是草稿私有层的精度档；共享 lm_head 的权重读取沿目标对象
+    shared_quant（缺省与 quant 相同，供独立 oracle 使用）。
     """
     spec = (target.extras or {}).get("mtp")
     if not spec:
@@ -327,7 +330,7 @@ def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
     h = target.hidden
     b_w = quant["dense_w"] / 8
     b_a = quant["act"] / 8
-    b_kv = quant["kv"] / 8
+    shared_w = (shared_quant or quant)["dense_w"] / 8
     B = batch
     layer = _mtp_template_layer(target)
     li = step_idx % n_layers
@@ -373,7 +376,7 @@ def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
     rows.append(OpRow(
         stage, -1, "draft_lm_head",
         flops=2 * B * h * (target.vocab // tp),
-        weight_read=int(h * (target.vocab // tp) * b_w),
+        weight_read=int(h * (target.vocab // tp) * shared_w),
         act_read=int(B * h * b_a),
         act_write=int(B * (target.vocab // tp) * b_a),
         formula=FR.F_LM_HEAD,

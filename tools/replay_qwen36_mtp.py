@@ -30,6 +30,9 @@ FOLDER = ROOT / "docs/evidence/mtp-map"
 
 # 审计面内的阶段（旧实现整段被替换）；target_decode/verify 必须逐字段冻结
 DRAFT_STAGES = ("draft_step_0",)
+ROW_FIELDS = ("flops", "weight_read", "weight_read_expected",
+              "weight_capacity", "act_read", "act_write", "kv_read",
+              "kv_write", "state_read", "state_write")
 
 
 def _load_scenario() -> ScenarioV2:
@@ -54,18 +57,16 @@ def _diff_stage(before: dict, after: dict, stage: str) -> dict:
         b, a = rb.get(key), ra.get(key)
         if b is None:
             row = {"status": "added"}
-            row.update({f: a[f] for f in ("flops", "weight_read", "act_read",
-                                          "act_write", "kv_read", "kv_write",
-                                          "state_read", "state_write")})
+            row.update({f: a.get(f) for f in ROW_FIELDS})
             by_op[f"{key[0]}:{key[1]}"] = row
         elif a is None:
             by_op[f"{key[0]}:{key[1]}"] = {"status": "removed"}
         else:
             delta = {}
-            for f in ("flops", "weight_read", "act_read", "act_write",
-                      "kv_read", "kv_write", "state_read", "state_write"):
+            for f in ROW_FIELDS:
                 if (b.get(f) or 0) != (a.get(f) or 0):
-                    delta[f] = (b.get(f) or 0, a.get(f) or 0, a.get(f) - b.get(f))
+                    delta[f] = (b.get(f) or 0, a.get(f) or 0,
+                                (a.get(f) or 0) - (b.get(f) or 0))
             if delta or b.get("shape") != a.get("shape"):
                 by_op[f"{key[0]}:{key[1]}"] = {"status": "changed", "delta": delta}
     return by_op
@@ -110,6 +111,18 @@ def run(check: bool = False) -> None:
                     committed_after["work"][stage]["totals"]:
                 ok = False
                 print(f"DRIFT in {stage}")
+        for stage in ("draft_step_0", "verify"):
+            if after["cost"][stage]["t_ms"] != \
+                    committed_after["cost"][stage]["t_ms"]:
+                ok = False
+                print(f"COST DRIFT in {stage}")
+        if attribution["metrics"] != committed_attr["metrics"]:
+            ok = False
+            print("METRIC DRIFT")
+        if json.dumps(attribution["changed_stages"], sort_keys=True) != \
+                json.dumps(committed_attr["changed_stages"], sort_keys=True):
+            ok = False
+            print("ATTRIBUTION DRIFT")
         ok = ok and all(committed_attr["frozen_stages"].values())
         print("check:", "OK" if ok else "DRIFT")
         sys.exit(0 if ok else 1)
