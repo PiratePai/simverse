@@ -152,12 +152,16 @@ def test_qwen36_required_scenario(cat):
     assert m.mtp_layers == 1
     assert m.source.repo_id == "Qwen/Qwen3.6-35B-A3B"
     assert m.source.revision.startswith("345d467b")
-    # config 全覆盖；但 MTP forward 未 pin → 不得宣称结构/forward 完备
+    # config 全覆盖；MTP 头已 R23 双栈 source-checked（extras['mtp'] 结构
+    # spec 在册）；mrope 仍未核 → 不得宣称结构/forward 完备
     assert m.config_coverage_complete
     assert not m.forward_evidence_complete and not m.structure_complete
     assert m.evidence.forward_source == "partial-source"
-    assert any("mtp_head" in p for p in m.evidence.unverified_paths)
-    assert m.evidence.method_status["mtp"] == "unverified"
+    assert any("mrope" in p for p in m.evidence.unverified_paths)
+    assert all("mtp_head" not in p for p in m.evidence.unverified_paths)
+    assert m.evidence.method_status["mtp"] == "source-checked"
+    assert m.extras["mtp"]["n_layers"] == 1
+    assert m.extras["mtp"]["layer_kind"] == "full_attention"
     # 已核分支保持 source-checked，不降格为 config-only
     assert "sm-qwen35-gdn-decode-branch" in m.evidence.checked_paths
     assert m.evidence.method_status["baseline"] == "source-checked"

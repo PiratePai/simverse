@@ -3,9 +3,12 @@
 注册方法（身份诚实原则）：
   baseline        无投机普通 decode
   chain_draft     链式自回归草稿（custom；S=K 步、M=1、catch-up 1+P_full）
-  mtp             config 原生 MTP 微头链式（mtp_layers≤K；target hidden 依赖）
+  mtp             Qwen3.5/3.6 原生 MTP 微头（R23：fc combine + full-attn MoE
+                  层 + 共享 embed/lm_head；步 j 层 j%n_predict 循环，K 不受
+                  n_predict 截断；vLLM/SGLang 双栈 pin）
   dflash_v1       DFlash（z-lab/dflash pin）：并行块草稿、单次前向提案、
                   逐位拒绝+残差 bonus、KV crop 回退、target_hidden 8 层拼接
+                  （与 MTP 是两种不同方法：DFlash 不是原生 MTP）
   chain_moe_proxy 「链式 MoE 代理」（原 v0.1 假想方法，改名保留；不得称 DSpark）
   dspark          原生 DSpark：unsupported（块 backbone/Markov/confidence 程序
                   待按 DeepSpec/vLLM pin 实现；V4.1 原生 dspark_* 字段在册）
@@ -88,7 +91,7 @@ def plan_baseline(acceptance: dict | None = None) -> MethodPlan:
 
 
 # ---------------------------------------------------------------------------
-# 链式草稿（custom / MTP）
+# 链式草稿（custom）与 MTP（R23 拆分：两协议不同，不共用程序图）
 # ---------------------------------------------------------------------------
 
 
@@ -107,19 +110,11 @@ def plan_chain(method_id: str, label: str, draft_note: str, k: int,
     msgs = [MessageSpec("D->T", "token ids + 采样概率",
                         "B·(K+1)·(4+2) B", FR.F_DFLASH_MSG)]
     if t2d_hidden:
-        msgs.append(MessageSpec("T->D", "accepted hidden（MTP 分离）",
+        msgs.append(MessageSpec("T->D", "accepted hidden（链式草稿分离）",
                                 "B·E[N]·h·B_act", FR.F_DFLASH_MSG))
-    approx = [draft_note]
-    if method_id == "mtp":
-        if k > mtp_layers:
-            raise ValueError(
-                f"K={k} 超出 MTP 原生层数 {mtp_layers}（config num_nextn/"
-                "mtp_num_hidden_layers）")
-        approx.append(f"微头按 config {mtp_layers} 层结构与主干共享驻留")
     return MethodPlan(
         method_id=method_id, version="0.2", label=label,
-        source_pin=("config:num_nextn_predict_layers/mtp_num_hidden_layers"
-                    if method_id == "mtp" else f"internal:{method_id}"),
+        source_pin=f"internal:{method_id}",
         steps=steps, messages=msgs,
         en_formula=FR.F_EN_CHAIN, k_effective=k,
         cache_policy={
@@ -131,7 +126,74 @@ def plan_chain(method_id: str, label: str, draft_note: str, k: int,
                         "非通则 principles §7）",
             "bonus": "每轮 +1 目标采样 token",
         },
-        status="approximated", approximations=approx)
+        status="approximated", approximations=[draft_note])
+
+
+VLLM_MTP_PIN = "vllm@10a854ed6b3bbd7411c65ccbf87594e71c4d322c"
+SGLANG_MTP_PIN = "sgl-project/sglang@1b2870d33de7b5f31844fd74e97eea6d7896c53a"
+
+
+def plan_mtp(mtp_layers: int, k: int) -> MethodPlan:
+    """Qwen3.5/3.6 原生 MTP 方法程序图（R23，2026-11-13）。
+
+    语义按 pinned vLLM（qwen3_5_mtp.py + mtp_speculator.py + tdar_
+    speculator.py @10a854ed；SGLang qwen3_5_mtp.py @1b2870d 同构）：
+      * 每轮 K=num_speculative_steps 个均匀草稿步（步 1 token/请求；步 0
+        输入=目标上轮最后 hidden+bonus token，非旧式 catch-up M0=1+P_full）；
+      * 步 j 执行层 j%n_predict（n=1 单模块复用；K>n 循环——
+        use_multi_module_mtp L1953-1967，e2e K=3×MTP1 在册）；
+      * 每步经共享 lm_head 读出 1 候选（greedy 默认）；
+      * verify M=K+1；接受 E[N]，被拒步 draft KV 回退（下轮重写），
+        bonus 行由下轮步 0 写入。
+    """
+    if mtp_layers <= 0:
+        raise ValueError(
+            f"mtp 方法需要原生 MTP 头（mtp_num_hidden_layers>0），得到 "
+            f"{mtp_layers}：无 pinned 微头结构，不得用模板冒充")
+    steps = [
+        MethodStep(f"draft_step_{j}", "draft",
+                   f"MTP 草稿步 {j}（层 {j % mtp_layers}"
+                   f"{'，同层循环复用' if k > mtp_layers else ''}；"
+                   "fc combine + full-attn MoE 层 + 共享 lm_head）",
+                   "M=1")
+        for j in range(k)]
+    steps.append(MethodStep("d2t", "link", "候选 token(+概率) D→T",
+                            "K+1 token"))
+    steps.append(MethodStep("verify", "target", "目标验证前向", f"M=K+1={k + 1}"))
+    steps.append(MethodStep("t2d", "link", "验收结果(+hidden) T→D", "E[N] token"))
+    msgs = [
+        MessageSpec("D->T", "token ids + 采样概率", "B·(K+1)·(4+2) B",
+                    FR.F_DFLASH_MSG),
+        MessageSpec("T->D", "accepted hidden（MTP 分离）",
+                    "B·E[N]·h·B_act", FR.F_DFLASH_MSG),
+    ]
+    return MethodPlan(
+        method_id="mtp", version="0.3",
+        label=f"MTP（Qwen3.5/3.6 原生微头，n_predict={mtp_layers}，"
+              f"K={k}{' 步同层复用' if k > mtp_layers else ''}）",
+        source_pin=VLLM_MTP_PIN,
+        steps=steps, messages=msgs,
+        en_formula=FR.F_EN_CHAIN, k_effective=k,
+        cache_policy={
+            "target_kv": "全接受追加 K+1，否则回退至接受前缀（bonus 1 行）",
+            "draft_kv": "K 步各写 1 行/请求（MTP full-attn 层自有缓存）；"
+                        "被拒步回退，下轮重写；bonus 行由下轮步 0 写入",
+            "draft_prefill": "草稿 prefill 全量同步 KV（tdar _prefill）——"
+                             "一次性成本，不在稳态 TPOT 账本内（登记）",
+        },
+        transitions={
+            "step_layer": "步 j → 层 j%n_predict（spec_step_idx % num_mtp_"
+                          "layers，qwen3_5_mtp.py L165；n=1 时单模块复用）",
+            "bonus": "每轮 +1 目标采样 token（步 0 下一轮输入）",
+        },
+        status="approximated",
+        approximations=[
+            "接受率为显式假设输入（Q8 hypothesis）；真实接受分布未采（R07b）",
+            "结构/加载/共享已 source-checked（vLLM+SGLang 双栈 pin），"
+            "kernel/CPU/GPU 未执行、未实测",
+            "草稿 prefill 的 KV 同步前向未入稳态 TPOT（一次性成本单列）",
+            "采样按 greedy 默认档（probabilistic/local_argmax 变体未建模）",
+        ])
 
 
 # ---------------------------------------------------------------------------
@@ -244,8 +306,7 @@ def build_method_plan(method_id: str, scenario_acceptance: dict, k_limit: int,
                           "链式 MoE 代理（假想方法，非 DSpark；演示结构同 tiny_gqa）",
                           "假想方法保留作对照；原生 DSpark 另列 unsupported", k_limit)
     elif method_id == "mtp":
-        plan = plan_chain("mtp", "MTP（config 原生微头链式）", "",
-                          k_limit, mtp_layers=mtp_layers, t2d_hidden=True)
+        plan = plan_mtp(mtp_layers, k_limit)
     elif method_id == "dflash_v1":
         if draft_ir is None:
             raise ValueError("dflash_v1 需要 DraftIR（catalog.drafts）")

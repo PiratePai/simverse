@@ -77,11 +77,16 @@ def test_position_alphas_non_geometric():
     assert s["E_N"] == pytest.approx(1 + 0.5 + 0.5 * 0.9)
 
 
-def test_mtp_k_over_config_rejected():
-    cat = build_catalog()
-    with pytest.raises(ValueError, match="MTP"):
-        build_method_plan("mtp", {"kind": "geometric", "alpha": 0.7}, 4,
-                          mtp_layers=1)
+def test_mtp_k_cycling_and_no_head_rejected():
+    """R23：K>n_predict 循环复用（pinned spec_step_idx % n；e2e K=3×MTP1
+    在册）；无原生 MTP 头的模型拒绝（不得模板冒充）。"""
+    plan = build_method_plan("mtp", {"kind": "geometric", "alpha": 0.7}, 4,
+                             mtp_layers=1)
+    assert plan.k_effective == 4
+    assert "同层循环复用" in plan.steps[1].desc
+    with pytest.raises(ValueError, match="原生 MTP 头"):
+        build_method_plan("mtp", {"kind": "geometric", "alpha": 0.7}, 2,
+                          mtp_layers=0)
 
 
 # ---------------------------------------------------------------------------

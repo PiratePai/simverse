@@ -61,7 +61,14 @@ source_map 行号；建立 G8–G17 门禁与 PR/push/merge_group 工作流。�
 
 早前投机耗时复核（MTP/chain verify 通信、DFlash 草稿通信）保留为历史记录：
 [投机耗时与排名复核](validation/speculative-ranking-audit-20261110.md)。
-MTP 首层模板、chain 合成草稿仍是研究估计；MTP 现标 unverified。
+**R23（2026-11-13）更新**：Qwen3.6 原生 MTP 头已按双栈官方实现
+（vLLM @10a854ed qwen3_5_mtp pin 8 文件 + SGLang 对照）source-checked
+建模——fc+双预归一+full-attn MoE 层+final norm+共享 embed/lm_head；K≥1
+同层循环复用；colocated supported（source-checked）、DT 拒绝；fixture 级
+独立数学对照在册（[报告](validation/qwen36-mtp-forward-20261113.md)）。
+MTP 不再是"首层模板研究估计"；但 kernel/CPU/GPU 未执行未实测、接受率仍
+假设输入，不参与实际部署排名。chain 合成草稿仍是内部研究 fixture；
+DFlash 与 MTP 为分立方法，不可互替。
 
 2026-11-10 A 组轮（R01–R03b）：TP/EP per-rank 统一配方 + 同卡对象身份
 账本 + 生命周期峰值 + 预算契约与四态判定全部落地（详见
@@ -79,7 +86,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 
 | 能力 | 范围与限制 |
 |---|---|
-| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 source-checked；V4.1 Engram 单副本路径 + hc（R04）与 CSA2 索引打分/top-k/candidate（R20）、MoE 路由（R21）、量化映射（R22）已 source-checked 建模（Engram DP 交换/cpu_offload 运行时、注意力核本体/swiglu 仍缺口）；四栏证据见 JSON |
+| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 + 原生 MTP 头（R23，双栈 pin）source-checked；V4.1 Engram 单副本路径 + hc（R04）与 CSA2 索引打分/top-k/candidate（R20）、MoE 路由（R21）、量化映射（R22）已 source-checked 建模（Engram DP 交换/cpu_offload 运行时、注意力核本体/swiglu、Qwen3.6 mrope 仍缺口）；四栏证据见 JSON |
 | Qwen3.6+DFlash | pinned 草稿、接受律、draft/verify 解析成本、同卡与 DT 串行；非实测收益；CPU 仅 R06 fixture 级对照（模型级未执行），GPU 未执行 |
 | **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
 | **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |

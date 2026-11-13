@@ -33,22 +33,25 @@ _QWEN36_EVIDENCE = ModelEvidence(
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-qwen35-gdn-decode-branch", "sm-qwen35-attn-output-gate",
                    "sm-qwen35-moe-shared-gate", "sm-qwen35-moe-router",
-                   "sm-vllm-attn-gdn-shard", "sm-vllm-moe-tp-ep-recipe"),
+                   "sm-vllm-attn-gdn-shard", "sm-vllm-moe-tp-ep-recipe",
+                   "sm-qwen36-mtp"),
     unverified_paths=(
-        "mtp_head: config 声明 mtp_num_hidden_layers=1；HF _keys_to_ignore_on_load"
-        "_unexpected=[^mtp.*]，vLLM 主模型丢弃 mtp.；无原生 MTP forward pin",
         "text_mrope_position_ids: Qwen3.6 文本 RoPE 读 mrope_section；本仓未执行"
         "位置 id 选择，算量不受影响但语义未实测",
     ),
     method_status={"baseline": "source-checked", "dflash_v1": "source-checked",
-                   "mtp": "unverified"},
+                   "mtp": "source-checked"},
     note="GDN/full-attn output gate/MoE router+shared gate/MoE TP-EP 分片已逐行"
-         "核过；MTP 仅 config+目标首层模板，未执行、未实测。"
+         "核过；原生 MTP 微头（fc+双预归一+full-attn MoE 层+共享 embed/lm_head）"
+         "已 R23 双栈 source-checked（vllm @10a854ed qwen3_5_mtp pin 8 文件 + "
+         "SGLang @1b2870d 对照；count/memory/method 已按 pinned 结构建模），"
+         "未执行、未实测；DFlash 与 MTP 为两种不同方法（不可互替）。"
          "R06（2026-11-12）已补 fixture 级小尺寸 CPU forward 对照"
          "（ev-qwen36-cpu-fixture-r06：随机权重 2 层缩比，逐 GEMM/conv/router "
          "计数与 shape 精确对账）；独立张量参考已对两相位输出/缓存逐元素"
          "核验（ev-qwen36-cpu-numeric-r06，随机权重 fixture 范围）；"
-         "模型级 cpu_forward 仍 not-run。")
+         "R23 另有 MTP 头小尺寸独立数学对照（ev-qwen36-mtp-cpu-numeric，"
+         "fixture 级，非模型级执行）；模型级 cpu_forward 仍 not-run。")
 
 _V41_EVIDENCE = ModelEvidence(
     forward_source="partial-source",
@@ -257,7 +260,9 @@ def _qwen36() -> ModelIR:
                    evidence_refs=("ev-qwen36-main-config", "ev-hf-qwen35-modeling",
                                   "ev-hf-qwen35-config",
                                   "ev-qwen36-cpu-fixture-r06",
-                                  "ev-qwen36-cpu-numeric-r06"))
+                                  "ev-qwen36-cpu-numeric-r06",
+                                  "ev-vllm-qwen36-mtp", "ev-sglang-qwen36-mtp",
+                                  "ev-qwen36-mtp-cpu-numeric"))
 
 
 def _dflash_draft() -> DraftIR:

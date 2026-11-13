@@ -1,6 +1,15 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-13（R24：V4.1 SwiGLU clamp 与 compress_ratios 尾部按 13 文件
+更新：2026-11-13（R23：Qwen3.6 原生 MTP forward 证据与仿真映射——vLLM @10a854ed
+`qwen3_5_mtp` 等 8 文件 + SGLang @1b2870d 1 文件双栈逐行核对（SHA256/blob sha1 pin）；
+查明 mtp.* checkpoint 张量/加载重映射/colocated embed-lm_head 物理共享/每轮 K 均匀步+
+层 j%n 循环；count/methods/pipeline/memory 按 pinned 结构建模，撤销 K≤n_predict 旧限制与
+"目标首层 GDN 模板"研究近似；fixture 级独立数学对照（双实现互核 4.97e-13+30 项账本对账）；
+25 项新测试+门禁更新；前后 replay M01 64.55→66.96ms、steady +141MB（target/verify 冻结）；
+DT 分离/专属 embedding/无头模型显式拒绝；kernel/CPU/GPU 未执行未实测，部署排名仍阻断，
+见 G-C15 与
+[报告](validation/qwen36-mtp-forward-20261113.md)。早前 R22：V4.1 量化映射按 20 文件 pin（quant-pin.json）source-checked 建模——
+早前同日 R24：V4.1 SwiGLU clamp 与 compress_ratios 尾部按 13 文件
 pin（swiglu-tail-pin.json）source-checked 解除——clamp 语义 gate 单侧/up
 双侧、alpha=1/beta=0、触发 is-not-None vs >0（0 值分叉域外拒绝）；消费两路
 （共享专家 MLP.act_fn + 路由专家 gemm1→激活→gemm2，注册执行域 Marlin 经
@@ -15,16 +24,48 @@ quantization_config 5 叶键 mapped：MXFP8 线性（e4m3 1B+ue8m0 (1,32) scale�
 norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fmt 键 loader 不消费、按声明
 矛盾拒绝；场景 V41_QUANT 冻结；known_peak +14.36 GB（Marlin 对齐主导）；Humming/SM100/emulation
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #13 已合入 main；R24 在分支 `codex/v41-swiglu-tail-r24`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：本次 R24 在 ZCode 宿主（D:/Github/new-viewer-r24 工作树）执行
-`py -3.12 -m pytest tests -q`：**399 passed，exit 0**（见 §R24）；
-`py -3.12 tools/replay_v41_swiglu.py --check` 与 `node --check
-simverse/static/workbench.js` 均 exit 0。历史回执（非本次执行）：
-R22 验收修复 367 passed；`tools/replay_v41_quant.py --check` 与 `node --check simverse/static/workbench.js` 均 exit 0。历史回执（非本次执行）：dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）；R07a+R20 集成 311 passed，R07a 280、R20 单分支 295、R06 264/262、R05 252、R04 236、PR #3 合入时 234。
-**pytest 收集数：399**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-13 R24；367→399 = SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；334→365 = R22 量化映射 31 项（tests/test_v41_quant.py），365→367 = 量化未知叶键缺口传播与草稿位宽默认值回归 2 项；此前 311→334 = R21 21 项 + gate BF16 1 项 + dtype 域负例 1 项；此前 264→280 为 R07a 16 项、280→311 为 R20 31 项、236→252 为 R05 16 项、252→262 为 R06 10 项、262→264 为 R06 oracle 两项）。
+代码身份：本仓 git（PR #14（R24）已合入 main；R23 分支 `codex/qwen36-native-mtp-r23`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：本次 R23 验收修复在 Codex 宿主执行 `py -3.12 -m pytest tests -q`：**425 passed，exit 0**；`tools/replay_qwen36_mtp.py --check`、`tools/replay_v41_swiglu.py --check`、`tools/replay_v41_quant.py --check`、`node --check simverse/static/workbench.js` 均 exit 0；`py -3.12 -m simverse.cli run-v2` status=completed。历史回执（非本次执行）：R23 原提交在 ZCode 会话 424 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
+**pytest 收集数：425**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-14 R23 验收修复；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项（tests/test_qwen36_mtp_r23.py）；367→399 = R24 SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
+R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-13 R23：Qwen3.6 原生 MTP forward 证据与仿真映射**
+（分支 `codex/qwen36-native-mtp-r23`）：vllm_qwen36_mtp_pin 8 文件
+（@10a854ed：qwen3_5_mtp.py、qwen3_next_mtp.py、config/speculative.py、
+eagle/utils.py、mtp 与 target_dependent_ar speculator.py、2 个 config
+测试 + e2e 测试；逐文件 SHA256+blob sha1 对 GitHub contents API 校验）
++ sglang_qwen36_mtp_pin 1 文件（@1b2870d 对照）source-checked 入册
+（ev-vllm-qwen36-mtp / ev-sglang-qwen36-mtp，executed=False；
+sm-qwen36-mtp 替换 sm-qwen36-mtp-unverified）。语义核对结论：
+checkpoint mtp.* 张量（fc/pre_fc_norm_*/norm/layers.{i}.*，无独立
+embed/lm_head——官方 e2e 按 mtp.layers.0.* 复制模块证明）；加载
+is_unused_checkpoint_weight 只留 mtp.*/embed_tokens/lm_head + mtp.→model.
+重映射；colocated 经 load_eagle_model 物理共享目标 embed/lm_head（零字节，
+与 DFlash R02a 同配方）；combine=双预归一+cat+fc(2h→h, ColumnParallel
+gather_output=True, 无激活/无残差直加——区别于 DeepSeek V3 式 comb)；
+层=full_attention decoder 层（gated GQA+MoE，几何=目标 full 层，非目标
+首层 GDN）；每轮 K 均匀步（无 catch-up 加权）、步 j 层 j%n_predict 循环
+（K>n 合法，e2e K=3×MTP1 在册；撤销 K≤n_predict 旧拒绝）；草稿自有
+per-token KV，被拒步回退。落地：ModelIR extras["mtp"]+两键 mapped 注记
++专属 embedding 拒绝；count/draft.mtp_step_rows 逐步重写（撤销 GDN 模板）
++mtp_kv_rewind_row+mtp_layer_model；methods/plans.plan_mtp v0.3；pipeline
+逐步阶段+草稿通信（allreduce/EP all2all/fc all-gather/logits gather）+
+mtp_serving_integration（colocated=supported source-checked）+dt 双模式
+拒绝；lowering/memory MTP 常驻（fc+3 norms+单层权重同 TP/EP 配方）+草稿
+KV+临时下界+embed/lm_head 零字节引用。fixture 级独立数学对照
+（ev-qwen36-mtp-cpu-numeric，executed=True：torch 复刻 vs 纯 Python 标量
+参考，7 张量×3 步 max diff 4.97e-13；30 项 GEMM 账本对账全对；手算锚点；
+tests/fixtures/qwen36_mtp_r23_numeric.json）——**不升格**：模型级
+cpu_forward 保持 not-run。测试 tests/test_qwen36_mtp_r23.py 25 项 +
+G10/G13/G16/model_ir/product_scope/pipeline_v02 随事实更新。前后 replay
+（docs/evidence/mtp-map，k=1 同场景）：target_decode/verify 逐字段冻结；
+draft_step_0 整段替换；M01 64.55→66.96209320 ms、steady 2,699,569,088→
+2,841,004,480 B（含本次验收修复）。仍缺（G-C15）：kernel/CPU/GPU 未执行、真实 checkpoint
+未加载、多模块 MTP/量化草稿头/采样档变体、草稿 prefill KV 同步、接受率
+假设——部署排名资格不变（mrope 亦仍未核）。
 
 **2026-11-13 R24：V4.1 SwiGLU clamp + compress_ratios 尾部**（分支
 `codex/v41-swiglu-tail-r24`）：swiglu-tail-pin.json 13 文件（vllm
@@ -348,7 +389,8 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   - Qwen3.6：config 覆盖完整；GDN/full-attn gate/MoE router+shared gate/TP-EP
     分片 source-checked；R06（2026-11-12）fixture 级小尺寸 CPU forward
     形状与算量对照已执行（ev-qwen36-cpu-fixture-r06，GDN+MoE+full-attn 载体逐
-    算子精确对账）；MTP 只有 config+目标首层模板 → **unverified**；
+    算子精确对账）；MTP 只有 config+目标首层模板 → **unverified**
+    （**R23 已解除**：2026-11-13 双栈 pin source-checked，见文首 R23 段）；
     forward 仍不完整、模型级 cpu_forward 仍 not-run，不能参与部署排名。
   - V4.1：Engram 单副本路径已 source-checked 建模（R04，2026-11-11；
     DP 分片交换/cpu_offload 运行时行为/amd 变体未覆盖）；CSA2 索引打分/
@@ -394,7 +436,8 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
   main branch protection 要求经 PR 合入及 `pytest (Windows, Python 3.12)`
   必需检查（strict），审批数为 0，且 `enforce_admins=true`。
 - **未完成**：V4.1 稀疏 MLA 注意力核本体、swiglu clamp、
-  Engram DP 分片交换路径、Qwen3.6 MTP 原生 forward、
+  Engram DP 分片交换路径、Qwen3.6 MTP 原生 forward（R23 已解除主干，
+  剩余执行/变体缺口见 G-C15）、
   两款主模型 CPU/GPU 实测、DFlash served 实测与运行时池尺寸、真实可分配预算。
   （量化映射主干 R22 已 source-checked；Humming/SM100/emulation 执行变体
   仍缺（G-C14）。MoE 路由主干 R21 已 source-checked；MegaMoE/DSpark 草稿

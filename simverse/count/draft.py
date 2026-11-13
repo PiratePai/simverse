@@ -3,7 +3,9 @@
   * DFlash v1 块前向：fc + 6 层草稿（GQA/SLIDING）+ 目标 lm_head + 噪声查表
     （z-lab/dflash pin 语义；块行写入后 crop 的浪费单列）；
   * 链式草稿：draft ModelIR（tiny/自定义）逐 token 前向 × M；
-  * MTP：按目标层模板 × mtp_layers（approximated，结构按 config 声明）。
+  * MTP：原生微头单步（R23，2026-11-13）——共享 embedding 查表 + 双预归一 +
+    fc(2h→h) combine + full_attention 层（gated GQA+MoE）+ final norm +
+    共享 lm_head；层选择 step % n_layers（pinned qwen3_5_mtp.py @10a854ed）。
 """
 from __future__ import annotations
 
@@ -12,9 +14,9 @@ from typing import Dict, List, Optional
 from .. import formula_registry as FR
 from ..draft_quant import (MXFP8_CONTEXT_PROJ, PER_LAYER_FALLBACK,
                            path_note, require_ctx_kv_path)
-from ..model_ir.schema import DraftIR, ModelIR
+from ..model_ir.schema import DraftIR, FULL, LayerIR, ModelIR
 from .work import (OpRow, _norm_row, _rope_row, build_model_work, causal_pairs,
-                   totals)
+                   ffn_or_moe_rows, gqa_layer_rows, norm_add_rows, totals)
 
 
 def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
@@ -290,38 +292,158 @@ def chain_step_rows(stage: str, draft_model: ModelIR, tokens: int, ctx: int,
                             role="draft")
 
 
-def mtp_step_rows(stage: str, target: ModelIR, tokens: int, ctx: int,
-                  quant: dict, mtp_layers: int, batch: int = 1) -> List[OpRow]:
-    """MTP 微头一步：按目标层模板 × mtp_layers（approximated：结构按 config）。
+def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
+                  quant: dict, tp: int = 1, ep: int = 1, batch: int = 1,
+                  plan=None, rank: int = 0,
+                  shared_quant: Optional[dict] = None) -> List[OpRow]:
+    """MTP 微头**单步**账本（R23，2026-11-13；per-rank、整批口径）。
 
-    共享主干 embedding/lm_head（读流量在此计，容量与主干去重）。
-    batch>1 时 template 的全部 token 维乘 B。微头模板固定 TP1；原生 TP
-    配方仍缺证据，method recipe 保持 unverified，不据此进入排名。
+    结构按 pinned vLLM Qwen3_5MoeMTP（vllm_qwen36_mtp_pin @10a854ed，
+    qwen3_5_mtp.py；source-checked，未执行）：
+      1. 共享目标 embedding 查表（读流量；容量归目标对象）；
+      2. pre_fc_norm_embedding / pre_fc_norm_hidden 两个 RMSNorm 分别归一
+         （L137-142/L159-160）；
+      3. cat → fc(2h→h, bias=False, ColumnParallel gather_output=True；
+         L99-104/L161-162；TP>1 的 all-gather 在通信行）——无激活、无残差
+         直加（区别于 DeepSeek V3 式 comb）；
+      4. 层 spec_step_idx % n_layers 的 **full_attention** decoder 层
+         （L120-127/L165-166；gated GQA + MoE，几何=目标 full 层）；
+      5. final norm（L136/L175）；
+      6. 共享目标 lm_head 读出 1 个候选/请求（L228-235 + compute_logits；
+         容量归目标，读流量计每步一次）。
+
+    step_idx：草稿步序号（0..K−1）；步内 Q=1 token/请求，draft 自有 KV
+    可见行 = ctx + step_idx（本步之前已提交 + 本轮先前步）。K>n_predict 时
+    同层循环复用（use_multi_module_mtp L1953-1967：n=1 单模块复用路径）。
+    batch>1 时 token 维乘 B 一次（G13）；权重读/容量不随 B 变化。
+    quant 是草稿私有层的精度档；共享 lm_head 的权重读取沿目标对象
+    shared_quant（缺省与 quant 相同，供独立 oracle 使用）。
     """
-    rows: List[OpRow] = []
+    spec = (target.extras or {}).get("mtp")
+    if not spec:
+        raise ValueError(
+            f"模型 {target.id} 无原生 MTP 结构 spec（extras['mtp']）："
+            "mtp_step_rows 只服务 pinned qwen3_5_moe MTP1 头，不得套用模板")
+    n_layers = int(spec["n_layers"])
+    if not 0 <= step_idx:
+        raise ValueError(f"step_idx 非负，得到 {step_idx}")
     h = target.hidden
+    b_w = quant["dense_w"] / 8
     b_a = quant["act"] / 8
-    template = target.layers[0]
-    for j in range(mtp_layers):
-        sub = build_model_work(
-            _single_layer_model(target, template), stage, batch, ctx, tokens,
-            quant, tp=1, role="draft")
-        for r in sub:
-            r.layer = j
-            rows.append(r)
-    total_tokens = batch * tokens
+    shared_w = (shared_quant or quant)["dense_w"] / 8
+    B = batch
+    layer = _mtp_template_layer(target)
+    li = step_idx % n_layers
+    rows: List[OpRow] = []
+    # 1) 共享 embedding 查表（B 行）
     rows.append(OpRow(stage, -1, "mtp_embed_share",
-                      act_read=int(total_tokens * h * b_a),
-                      act_write=int(total_tokens * h * b_a), formula=FR.F_EMBED,
-                      shape=f"B={batch}×tokens={tokens}；共享主干 embedding/"
-                            "lm_head（容量去重，读流量计；微头 TP 配方未验证）"))
+                      act_read=int(B * h * b_a), act_write=int(B * h * b_a),
+                      formula=FR.F_EMBED,
+                      shape=f"B={B} 行查表（目标 embedding 共享，词表行切；"
+                            "容量归目标对象，读流量计）"))
+    # 2) 双预归一（embedding/hidden 两支各自 RMSNorm）
+    for name in ("mtp_pre_fc_norm_embedding", "mtp_pre_fc_norm_hidden"):
+        ops, w, ar, aw = _norm_row(B, h, b_a)
+        rows.append(OpRow(stage, -1, name, flops=ops, weight_read=w,
+                          weight_capacity=w, act_read=ar, act_write=aw,
+                          formula=FR.F_RMSNORM, shape=f"width={h}（replicated）"))
+    # 3) fc combine：cat[B,2h] → [B,h/tp]（ColumnParallel gather_output=True）
+    fc_out = h // tp
+    rows.append(OpRow(
+        stage, -1, "mtp_fc", flops=2 * B * (2 * h) * fc_out,
+        weight_read=int(2 * h * fc_out * b_w),
+        weight_capacity=int(2 * h * fc_out * b_w),
+        act_read=int(B * 2 * h * b_a), act_write=int(B * fc_out * b_a),
+        formula=FR.F_GEMM,
+        shape=f"[{B},{2 * h}]@[{2 * h},{fc_out}]（列切 h/tp，gather_output="
+              f"True → TP>1 all-gather 见通信行；无激活/无残差直加）"))
+    # 4) full_attention 层（几何=目标 full 层；draft 自有 KV：S=ctx+step_idx）
+    layer_rows = gqa_layer_rows(stage, li, layer, B, ctx + step_idx, 1, h,
+                                quant, tp)
+    rows += layer_rows
+    T = B
+    rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
+                            local_experts=_mtp_local_experts(layer, plan, ep,
+                                                             rank))
+    rows += norm_add_rows(stage, li, T, h, quant)
+    # 5) final norm（mtp.norm，replicated）
+    ops, w, ar, aw = _norm_row(B, h, b_a)
+    rows.append(OpRow(stage, -1, "mtp_final_norm", flops=ops, weight_read=w,
+                      weight_capacity=w, act_read=ar, act_write=aw,
+                      formula=FR.F_RMSNORM,
+                      shape=f"width={h}（mtp.norm，replicated）"))
+    # 6) 共享 lm_head：每步读出 B 个候选（读流量；容量归目标对象）
+    rows.append(OpRow(
+        stage, -1, "draft_lm_head",
+        flops=2 * B * h * (target.vocab // tp),
+        weight_read=int(h * (target.vocab // tp) * shared_w),
+        act_read=int(B * h * b_a),
+        act_write=int(B * (target.vocab // tp) * b_a),
+        formula=FR.F_LM_HEAD,
+        shape=f"B={B}×{h}×{target.vocab}/tp{tp}（目标 lm_head 分片共享，"
+              "读流量入草稿；容量归目标；logits 聚合通信在 lowering 计）"))
+    for r in rows:
+        r.role = "draft"
     return rows
 
 
-def _single_layer_model(target: ModelIR, layer) -> ModelIR:
+def mtp_kv_rewind_row(stage: str, k: int, e_produced: float, target: ModelIR,
+                      quant: dict, tp: int) -> OpRow:
+    """每轮草稿 KV 回退浪费期望（K 步行写入 vs E[N] 提交；DFlash 同式）。"""
+    attn = _mtp_template_layer(target).attn
+    kvh = attn.kv_heads // tp if attn.kv_heads >= tp else attn.kv_heads
+    kv_elems = 2 * kvh * attn.head_dim
+    wasted = max(0.0, k - e_produced)
+    return OpRow(
+        stage, -1, "mtp_kv_rewind_waste", kv_write=0, statistic="expectation",
+        formula=FR.F_KV_RW,
+        shape=f"草稿 KV 回退浪费期望 {wasted:.2f} 行/轮（K={k}，E[N]="
+              f"{e_produced:.2f}；每行 {kv_elems} elem/层 × MTP1；"
+              "被拒步不落 committed 缓存，下轮重写）")
+
+
+def _mtp_template_layer(target: ModelIR) -> LayerIR:
+    """MTP 层几何模板：目标 full_attention 层（qwen3_5_mtp.py L120-127
+    layer_type="full_attention"；非目标首层——Qwen3.6 首层是 GDN linear）。"""
+    for layer in target.layers:
+        if layer.kind == FULL and layer.attn is not None:
+            return layer
+    raise ValueError(
+        f"模型 {target.id} 无 full_attention 层可作 MTP 模板（pinned MTP 头"
+        "固定 full_attention 层型，无对应层即结构失配）")
+
+
+def _mtp_local_experts(layer: LayerIR, plan, ep: int, rank: int):
+    """MTP 层 MoE 的本 rank 专家数（与目标同 ParallelPlan 配方；EP 开时
+    余数 rank +1——vLLM 草稿同 TP/EP 组，QwenNextMixtureOfExperts 同构）。"""
+    if plan is not None:
+        return plan.moe_local_experts(layer, rank) or None
+    if layer.moe is None or not layer.moe.experts:
+        return None
+    if ep == 1:
+        return layer.moe.experts
+    base, rem = divmod(layer.moe.experts, ep)
+    return base + (1 if rank < rem else 0)
+
+
+def mtp_layer_model(target: ModelIR) -> ModelIR:
+    """MTP 头的单层伪模型（count 之外的消费者：memory/collectives 共用）。
+
+    vocab/tie 沿目标（embed/lm_head 由 colocated 共享引用替身，容量归
+    目标对象）；layers=[full 模板层]，index 归 0。
+    """
     from ..model_ir.schema import SourceIdentity
-    return ModelIR(id=f"{target.id}-layer{layer.index}", label="mtp-template",
-                   family=target.family, hidden=target.hidden,
-                   vocab=1,  # lm_head/embed 由共享行单独计
-                   layers=[layer], source=SourceIdentity(
-                       "derived", "layer-template", "", note="MTP 模板层"))
+    layer = _mtp_template_layer(target)
+    return ModelIR(
+        id=f"{target.id}-mtp1", label=f"{target.label} native MTP head",
+        family=target.family, hidden=target.hidden, vocab=target.vocab,
+        layers=[LayerIR(0, FULL, attn=layer.attn, moe=layer.moe,
+                        dense_inter=layer.dense_inter)],
+        source=SourceIdentity(
+            "derived", "vllm@10a854ed6b3bbd7411c65ccbf87594e71c4d322c",
+            "", note="qwen3_5_moe 原生 MTP 单层（pinned qwen3_5_mtp.py）"),
+        tie_embeddings=False,
+        coverage={"*": {"status": "mapped", "consumer": "model_ir",
+                        "note": "MTP 单层伪模型（结构派生自目标 full 层）"}},
+        mtp_layers=int((target.extras or {}).get("mtp", {}).get("n_layers", 0)),
+        extras={"mtp": dict((target.extras or {}).get("mtp", {}))})

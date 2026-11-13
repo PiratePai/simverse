@@ -1,0 +1,56 @@
+{
+ "repo": "vllm-project/vllm",
+ "head_sha": "10a854ed6b3bbd7411c65ccbf87594e71c4d322c",
+ "captured": "2026-11-13",
+ "note": "R23 Qwen3.6 native MTP forward pin (qwen3_5_moe family); raw.githubusercontent bytes at fixed commit; blob sha1 cross-checked vs GitHub contents API",
+ "files": {
+  "qwen3_5_mtp.py": {
+   "remote_path": "vllm/model_executor/models/qwen3_5_mtp.py",
+   "blob_sha1": "af2e5b05cf920c09725fd727f24f4bf223d36e6a",
+   "sha256": "d78955d0116c5628b2aeea2911175fc55dfdd07b4455d09f75c71c296a4893a9",
+   "bytes": 11590
+  },
+  "qwen3_next_mtp.py": {
+   "remote_path": "vllm/model_executor/models/qwen3_next_mtp.py",
+   "blob_sha1": "42008547f813e69414aaf8c230b194e9719c5a0f",
+   "sha256": "c82c9ecc5ef7f03c612d49e9c5c2fe65567f299183f8b66fe5dffd99fbc7868a",
+   "bytes": 8805
+  },
+  "speculative.py": {
+   "remote_path": "vllm/config/speculative.py",
+   "blob_sha1": "d46926925d1291cab23cffdc262baba582191060",
+   "sha256": "ca8901fdc93ba9014d0fd09f395c5af2a22fa858cffc1473772f0f8c9d3932f0",
+   "bytes": 85124
+  },
+  "eagle_utils.py": {
+   "remote_path": "vllm/v1/worker/gpu/spec_decode/eagle/utils.py",
+   "blob_sha1": "594c3b84e1313ee921d6650346e3b60b98a39a0a",
+   "sha256": "68559c69b7ff094ae0d6fd9bbd774d225624281855c3327afbc25be6615ffd4e",
+   "bytes": 6789
+  },
+  "mtp_speculator.py": {
+   "remote_path": "vllm/v1/worker/gpu/spec_decode/mtp/speculator.py",
+   "blob_sha1": "8366abdaa0ebc15bde226b97bb00bbb6a15eeab1",
+   "sha256": "f622a9b19e787065cb16ca91e375c0f7f8187721f33dd0ecf58cd20657f7737c",
+   "bytes": 2792
+  },
+  "tdar_speculator.py": {
+   "remote_path": "vllm/v1/worker/gpu/spec_decode/target_dependent_ar/speculator.py",
+   "blob_sha1": "b409f79a0a11b962e7e0ad2e05857728ce72d0e2",
+   "sha256": "f172b47b9c98a74ecc318dcfaeb855b0dc3941d13ff9aa9b878ed95e2ff88ec8",
+   "bytes": 26901
+  },
+  "test_qwen3_5_mtp_config.py": {
+   "remote_path": "tests/models/test_qwen3_5_mtp_config.py",
+   "blob_sha1": "5b6fe6edfbc6536bb1207ac8c24fa0074f54a011",
+   "sha256": "967ff168324aea7fe8a412e085b9bfd018576b94c431d93c6cad437299368ac2",
+   "bytes": 6003
+  },
+  "test_mtp_e2e.py": {
+   "remote_path": "tests/v1/e2e/spec_decode/mtp/qwen3_5/test_mtp.py",
+   "blob_sha1": "561d96a904b8ab6cb82379b697c29c60b741aaf7",
+   "sha256": "fe41490dffd70bb058af7d672da7a0931eb12a8c4177157719846e0e431f7740",
+   "bytes": 10735
+  }
+ }
+}

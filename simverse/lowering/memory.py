@@ -937,6 +937,63 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
     return allocs
 
 
+def mtp_extra_allocations(mtp_model: ModelIR, quant: dict, tp: int,
+                          role: str = "draft") -> List[Allocation]:
+    """Qwen3.5/3.6 原生 MTP 头的微头专属常驻（层权重另由
+    target_weight_allocations 对 mtp_layer_model 计）。
+
+    R23（2026-11-13；pinned vllm_qwen36_mtp_pin @10a854ed qwen3_5_mtp.py）：
+      * fc：ColumnParallelLinear(2h→h, gather_output=True, bias=False)
+        （L99-104）→ 权重 [h/tp, 2h] 列切；
+      * pre_fc_norm_embedding / pre_fc_norm_hidden / norm 三个 RMSNorm(h)
+        replicated（L136-142）。
+    embed/lm_head 不在此：colocated 经 load_eagle_model（mtp_speculator.py
+    L20 → eagle_utils.py L82-112/L44-71）物理共享目标分片对象 → 由调用方
+    登记零字节引用。层内 input/post layernorm 权重沿目标层惯例不计常驻
+    （与 target_weight_allocations 对目标层同口径）。
+    """
+    b_w = quant["dense_w"] / 8
+    h = mtp_model.hidden
+    fc_b = int(2 * h * (h // tp) * b_w)
+    # 与 count/draft 的 _norm_row 同口径：norm 权重按激活 dtype 计。
+    norms_b = int(3 * h * (quant["act"] / 8))
+    return [Allocation(
+        f"{role}-w-mtp-fc-norms", "weights", role, fc_b + norms_b,
+        live_note=f"MTP 微头常驻：fc[2h→h/tp]（列切，TP{tp}）+ "
+                  f"pre_fc_norm×2/norm 复制（qwen3_5_mtp.py L99-104/L136-142）")]
+
+
+def mtp_transient_allocations(mtp_model: ModelIR, quant: dict, batch: int,
+                              tp: int, role: str = "draft"
+                              ) -> List[Allocation]:
+    """MTP 草稿步已知并存临时缓冲的下界（R02b 同法；非运行时测量）。
+
+    每步（K 步串行，单步并存活组取 max 不求和）：
+      * fc 输入 cat[B,2h] 与 fc 输出 [B,h/tp]（gather 后 [B,h]）；
+      * 草稿 logits B×(V/tp)（fp32；LogitsProcessor → greedy argmax，
+        local_argmax_reduction 变体不物化全量 logits，未建模）。
+    cross-round：目标上轮最后 hidden 输入 B×h（tdar_speculator hidden_states
+    缓冲）。workspace/graph/NCCL 池仍为 unknown_components 缺口。
+    """
+    b_a = quant["act"] / 8
+    h = mtp_model.hidden
+    v_r = mtp_model.vocab // tp if mtp_model.vocab % tp == 0 else mtp_model.vocab
+    step_peak = max(int(batch * 2 * h * b_a),        # fc 输入 cat
+                    int(batch * h * b_a),            # fc 输出（gather 后全宽）
+                    int(batch * v_r * 4))            # 草稿 logits fp32
+    return [
+        Allocation(f"t-mtp-draft-buffers", "transient", role, step_peak,
+                   lifecycle="phase:draft",
+                   live_note=f"单步并存组 max(fc输入 2h={2 * h}, fc输出 h, "
+                             f"logits V/tp={v_r} fp32)×B={batch}；K 步串行"
+                             "不叠加（lower bound）"),
+        Allocation("t-mtp-last-hidden", "transient", "shared",
+                   int(batch * h * b_a), lifecycle="cross-round",
+                   live_note=f"目标上轮最后 hidden B×h（tdar hidden_states "
+                             "缓冲，步 0 输入）"),
+    ]
+
+
 def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                           batch: int, ctx: int, budget: DeviceBudget,
                           draft_batch: Optional[int] = None, ep: int = 1,
@@ -947,7 +1004,8 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                           engram_table_placement: str =
                           ENGRAM_PLACEMENT_CPU_OFFLOAD,
                           engram_tokens: int = 0,
-                          v41_kv_record: str = "fp8_ds_mla_sm90") -> RankMemory:
+                          v41_kv_record: str = "fp8_ds_mla_sm90",
+                          mtp_model: Optional[ModelIR] = None) -> RankMemory:
     """同卡混部 per-rank 账本（R02a/R02b）。
 
     草稿与 target 同 TP 组（vLLM pin）；embed/lm_head 为 target 的物理
@@ -957,6 +1015,9 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
     未知时拒绝，不按 dense_w 猜分支。
     R04：engram_table_placement 显式表位置（默认 cpu_offload 研究假设）；
     engram_tokens>0 时补 staged_rows 下界临时对象（V4.1 主模型）。
+    R23：mtp_model（mtp_layer_model 产物）在场时登记 Qwen3.6 原生 MTP 头
+    常驻/草稿 KV/临时对象——层权重与 embed/lm_head 共享沿用 DFlash 同一
+    配方（load_eagle_model 物理共享，eagle_utils.py L82-112/L44-71）。
     """
     if draft_batch is None:
         draft_batch = batch
@@ -1019,6 +1080,41 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                                            batch, ctx, tp, block_size,
                                            e_produced, vocab_r,
                                            ctx_kv_path=path):
+                rank_mem.add(a)
+    if mtp_model is not None:
+        # R23：原生 MTP 头（Qwen3.6 mtp 方法）——同 TP/EP 组、同
+        # target_weight_allocations 配方；embed/lm_head 物理共享目标分片
+        # （load_eagle_model；qwen3_5_mtp.py L303-320 只消费 mtp.*+
+        # embed_tokens+lm_head，无独立副本）。
+        draft_q = dict(quant)
+        draft_q.update(draft_quant or {})
+        for a in target_weight_allocations(mtp_model, draft_q, tp,
+                                           role="draft", ep=ep, rank=rank):
+            if a.alloc_id == "draft-w-final-norm":
+                # mtp.norm 已归 mtp_extra_allocations 的 3 个 norm，避免
+                # 伪模型通用 final norm 再记一份。
+                continue
+            if "embed" in a.alloc_id or "lm_head" in a.alloc_id:
+                ident = (f"{model.id}:embed@tp{tp}" if "embed" in a.alloc_id
+                         else f"{model.id}:lm_head@tp{tp}")
+                rank_mem.add(Allocation(
+                    f"draft-ref-{a.alloc_id}", "reference", "shared", 0,
+                    shared_identity=ident, consumers=["draft"],
+                    live_note="引用 target 分片对象（load_eagle_model："
+                              "maybe_share_target_embed/share_target_lm_head，"
+                              "零额外驻留）"))
+                continue
+            a.consumers = ["draft"]
+            rank_mem.add(a)
+        for a in mtp_extra_allocations(mtp_model, draft_q, tp):
+            a.consumers = ["draft"]
+            rank_mem.add(a)
+        for a in kv_allocations(mtp_model, draft_q, draft_batch, ctx,
+                                role="draft", tp=tp):
+            a.consumers = ["draft"]
+            rank_mem.add(a)
+        if with_transients:
+            for a in mtp_transient_allocations(mtp_model, draft_q, batch, tp):
                 rank_mem.add(a)
     # R02b：无证据运行时组件 → 峰值不完整（缺口传播，不填 0）
     if with_transients:
