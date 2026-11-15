@@ -82,7 +82,7 @@ def test_hc_rows_non_first_layer_no_expand():
 
 def test_v41_hc_totals_independently_recomputed():
     m = _model()
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1, device_sms=132)
     hc_rows = [r for r in rows if r.op.startswith("hc_")]
     # 独立复算（不 import 生产公式）：
     h, mm, iters, L = 5120, 4, 20, 40
@@ -126,14 +126,14 @@ def test_v41_hc_totals_independently_recomputed():
 def test_v41_no_generic_norm_add_double_counting():
     """v41 层的 norm/残差已融合进 mHC 边界核（F_MHC_POST_PRE）→ 不再另计。"""
     m = _model()
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1, device_sms=132)
     v41_layers = {l.index for l in m.layers}
     for r in rows:
         if r.layer in v41_layers:
             assert r.op not in ("attn_norm", "mlp_norm", "attn_add", "mlp_add"), r.op
     # 对照：GQA 家族仍有通用 norm/add 行（未误删）
     gqa = _CAT["models"]["tiny_gqa"]
-    grows = build_model_work(gqa, "decode", 1, 64, 1, Q16, tp=1)
+    grows = build_model_work(gqa, "decode", 1, 64, 1, Q16, tp=1, device_sms=132)
     assert any(r.op == "attn_norm" for r in grows)
 
 
@@ -144,9 +144,9 @@ def test_v41_no_generic_norm_add_double_counting():
 def test_hc_rows_tp_invariant_full_width_stream():
     """hc 全宽流不随 TP 切分（attention 内部分片；边界算子每卡全宽执行）。"""
     m = _model()
-    r1 = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1)
+    r1 = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1, device_sms=132)
           if r.op.startswith("hc_")]
-    r8 = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp=8)
+    r8 = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp=8, device_sms=132)
           if r.op.startswith("hc_")]
     assert len(r1) == len(r8)
     for a, b in zip(r1, r8):
@@ -186,7 +186,7 @@ def test_v41_oa_proj_group_count_absolute_oracle_tp1_2_4_8():
     T = 1
     for tp in (1, 2, 4, 8):
         ng = groups // tp
-        rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp)
+        rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp, device_sms=132)
                 if r.op == "o_a_proj"]
         assert len(rows) == 40
         w_expect = group_in * orank * ng * 1 + ng * (orank * group_in // 32)
@@ -251,7 +251,7 @@ def test_v41_attention_weight_conservation_count_vs_memory():
     """
     m = _model()
     for tp in (1, 8):
-        rows = build_model_work(m, "decode", 1, 32768, 1, Q16, tp)
+        rows = build_model_work(m, "decode", 1, 32768, 1, Q16, tp, device_sms=132)
         assert any(r.op == "index_q_proj" and r.weight_capacity > 0
                    for r in rows)   # 前提：无旁路层
         allocs = {(a.alloc_id.split("-L")[-1]): a.bytes
@@ -439,7 +439,7 @@ def test_hc_capacity_broadcast_is_derived_replicated_buffer():
         assert buffers[0].alloc_id == "target-w-mhc-broadcast-L0"
         assert buffers[0].bytes == 24*5120*4
         assert "hc_attn_fn" in buffers[0].live_note
-        rows = build_model_work(model, "decode", 1, 32768, 1, Q16, tp)
+        rows = build_model_work(model, "decode", 1, 32768, 1, Q16, tp, device_sms=132)
         for li in range(40):
             cap = sum(r.weight_capacity for r in rows
                       if r.layer == li and r.op.startswith("hc_"))
@@ -461,7 +461,7 @@ def test_replay_preserves_engram_and_non_hc_rows():
     sc_data["quant"]["act"] = 16
     scenario = ScenarioV2.from_json(sc_data)
     current = [r.to_json() for r in build_model_work(
-        _model(), "target_decode", 1, 32768, 1, scenario.quant, tp=8)]
+        _model(), "target_decode", 1, 32768, 1, scenario.quant, tp=8, device_sms=132)]
     # 排除 stage 名差异；冻结 R04 行与非 hc/非 R20 审计行（含 final_norm/
     # head）。R20（2026-11-12）重写的 CSA2 索引/压缩行由
     # tests/test_v41_csa2.py 的 replay 归因单独冻结（docs/evidence/csa2）。
@@ -487,7 +487,14 @@ def test_replay_preserves_engram_and_non_hc_rows():
         # R24（2026-11-13）：SwiGLU clamp 新增 moe_act/moe_shared_act 激活行
         #（+483,840 flops/+80 行；字节 0）。由 tests/test_v41_swiglu.py 的
         # replay 归因单独冻结（docs/evidence/swiglu-tail）。
-        "moe_act", "moe_shared_act"}
+        "moe_act", "moe_shared_act",
+        # R25（2026-11-16）：FlashMLA 注意力核本体——decode 头数改 padded 64
+        #（q_rope 写宽随之 padded）、SM90 恒 split-KV（attn_splitkv）、
+        # decode 索引消费（attn_index_global/attn_swa_index_build/
+        # attn_sched_meta）。由 tests/test_v41_csa2_core.py 的 replay 归因
+        # 单独冻结（docs/evidence/csa2-core）。
+        "attn_splitkv", "attn_index_global", "attn_swa_index_build",
+        "attn_sched_meta", "attn_kv_gather"}
     def non_hc(rows):
         return [{k: v for k, v in r.items() if k != "stage"}
                 for r in rows

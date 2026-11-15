@@ -25,7 +25,10 @@ DEVICES = {
         launch_overhead_ms=0.005,
         mfu_cap=0.75,
         card_count=8,
+        sm_count=132,
         sources={
+            "sm_count": "spec:NVIDIA H100 SXM 132 SM（GH100 全核 144 中 SXM5 "
+                        "启用 132；数据表/架构白皮书 CUDA core 16896/128）",
             "peak_fp16": "spec:NVIDIA H100 SXM 数据表 dense FP16/BF16 Tensor 989.4 TFLOPS"
                          "（sparse 1978.9；旧仓 1979/2 换算一致）",
             "peak_fp8": "spec:NVIDIA H100 SXM dense FP8/INT8 Tensor 1978.9 TFLOPS"
@@ -48,8 +51,11 @@ DEVICES = {
         mem_capacity=141e9,
         launch_overhead_ms=0.005,
         mfu_cap=0.75,
+        sm_count=132,
         card_count=8,
         sources={
+            "sm_count": "spec:NVIDIA H200 SXM 132 SM（与 H100 SXM 同 GH100 "
+                        "die/SM 配置；Hopper 架构白皮书）",
             "peak_fp16": "spec:NVIDIA H200 SXM 数据表 dense FP16/BF16 Tensor ≈989.5 TFLOPS"
                          "（990 dense|1979 sparse；与 H100 SXM 同计算档）",
             "peak_fp8": "spec:NVIDIA H200 SXM dense FP8/INT8 Tensor ≈1979 TFLOPS"
@@ -73,7 +79,10 @@ DEVICES = {
         launch_overhead_ms=0.006,
         mfu_cap=0.75,
         card_count=1,
+        sm_count=142,
         sources={
+            "sm_count": "spec:NVIDIA L40 142 SM（AD102；数据表 CUDA core "
+                        "18176/128）",
             "peak_fp16": "spec:NVIDIA L40 数据表 dense FP16/BF16 Tensor 181.05 TFLOPS"
                          "（sparse 362.1；旧仓表数值恰为 dense，注释口径已修正）",
             "peak_fp8": "spec:NVIDIA L40 数据表 dense FP8 362 TFLOPS（sparse 724）",

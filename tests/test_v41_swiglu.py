@@ -311,15 +311,20 @@ def test_model_ir_swiglu_and_tail_mapped():
 
 def test_model_ir_gaps_updated_legitimately():
     # R24 前缺口（swiglu_limit / compress_ratios[40:43]）按 pin 解除；
-    # structure_complete 仍 False（注意力核本体 unverified_paths 阻断）。
+    # R25 后 structure_complete 仍 False——注意力核本体已 source-checked
+    #（sm-v41-csa2-attn-core），剩余 unverified 均为显式执行变体
+    #（specialized decode/SM100 mega/FlashInfer/PCP 等），非主干语义缺失。
     m = _model()
     gap_keys = {g.split(":")[0] for g in m.gaps}
     assert "text_config.swiglu_limit" not in gap_keys
     assert not any("compress_ratios[" in g for g in m.gaps)
     assert not m.structure_complete
     assert m.config_coverage_complete          # 全部叶键已分类
-    assert not m.forward_evidence_complete     # 核本体未核 → 结构资格仍缺
-    assert any("csa2_attention_core" in u for u in m.evidence.unverified_paths)
+    assert not m.forward_evidence_complete     # 执行变体未核 → 结构资格仍缺
+    assert not any("仍为 v0.1 移植" in u for u in m.evidence.unverified_paths)
+    assert any("csa2_attn_execution_variants" in u
+               for u in m.evidence.unverified_paths)
+    assert "sm-v41-csa2-attn-core" in m.evidence.checked_paths
     # compress_ratios 覆盖注记提到尾部归属
     note = m.coverage["text_config.compress_ratios"]["note"]
     assert "尾部 [40:43]" in note and "DSpark" in note
@@ -344,7 +349,7 @@ def _moe():
 
 def test_act_rows_tp1_hand_computed():
     m = _model()
-    rows = build_model_work(m, "decode", 1, 0, 1, Q8, tp=1)
+    rows = build_model_work(m, "decode", 1, 0, 1, Q8, tp=1, device_sms=132)
     act = [r for r in rows if r.op in ("moe_act", "moe_shared_act")]
     assert len(act) == 2 * L
     routed = next(r for r in act if r.op == "moe_act")
@@ -362,7 +367,7 @@ def test_act_rows_tp1_hand_computed():
 
 def test_act_rows_tp8_hand_computed_and_per_layer_sum():
     m = _model()
-    rows = build_model_work(m, "decode", 1, 32768, 1, Q16, tp=8)
+    rows = build_model_work(m, "decode", 1, 32768, 1, Q16, tp=8, device_sms=132)
     act = [r for r in rows if r.op in ("moe_act", "moe_shared_act")]
     assert len(act) == 2 * L
     # TP8：inter_rank = 2304//8 = 288；routed = 6 行 × 288 × 6 op
@@ -375,7 +380,7 @@ def test_act_rows_tp8_hand_computed_and_per_layer_sum():
 def test_act_rows_ep8_expectation_and_local_share():
     m = _model()
     # EP8（tp=1, ep=8）：E_l = 384/8 = 48，share = 48/384 = 0.125
-    rows = build_model_work(m, "decode", 1, 32768, 1, Q8, tp=1, ep=8, rank=0)
+    rows = build_model_work(m, "decode", 1, 32768, 1, Q8, tp=1, ep=8, rank=0, device_sms=132)
     routed = next(r for r in rows if r.layer == 0 and r.op == "moe_act")
     # act_assign = T·k·share = 6·0.125 = 0.75；inter 整专家 2304；
     # flops = int(0.75 × 2304 × 6 op) = 10,368（与 moe_routed 同 int 截断惯例）
@@ -389,7 +394,7 @@ def test_act_rows_ep8_expectation_and_local_share():
 def test_act_rows_absent_without_recipe():
     # Qwen36 无 extras.swiglu → 不加激活行（R06 冻结口径不变）
     q = build_catalog()["models"]["qwen36_35b_a3b"]
-    rows = build_model_work(q, "decode", 1, 128, 1, Q8, tp=1)
+    rows = build_model_work(q, "decode", 1, 128, 1, Q8, tp=1, device_sms=132)
     assert not [r for r in rows if r.op in ("moe_act", "moe_shared_act")]
     assert "swiglu" not in (q.extras or {})
 

@@ -307,7 +307,7 @@ def test_gate_bytes_follow_loader_and_mhc_dtype_not_scenario_quant():
     def gate_sig(q):
         return [(r.op, r.weight_read, r.weight_capacity, r.act_read,
                  r.act_write)
-                for r in build_model_work(m, "decode", 1, 512, 1, q, tp=8)
+                for r in build_model_work(m, "decode", 1, 512, 1, q, tp=8, device_sms=132)
                 if r.op == "moe_gate"]
 
     sig8, sig4 = gate_sig(Q8), gate_sig(Q4)
@@ -339,7 +339,7 @@ def test_build_model_work_route_rows_and_shared_no_gate():
     from simverse.count import build_model_work
     from simverse.model_ir import build_catalog
     m = build_catalog()["models"]["deepseek_v41_flash"]
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=8)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=8, device_sms=132)
     gate = [r for r in rows if r.op == "moe_gate"]
     score = [r for r in rows if r.op == "moe_score"]
     topk = [r for r in rows if r.op == "moe_topk_renorm"]
@@ -369,7 +369,7 @@ def test_route_rows_replicated_across_tp_and_ep():
     ops = ("moe_gate", "moe_score", "moe_topk_renorm")
     def sig(tp, ep):
         rows = [r for r in build_model_work(m, "decode", 1, 512, 1, Q8,
-                                            tp=tp, ep=ep, rank=0)
+                                            tp=tp, ep=ep, rank=0, device_sms=132)
                 if r.op in ops]
         return [(r.op, r.flops, r.weight_read, r.weight_capacity,
                  r.act_read, r.act_write) for r in rows]
@@ -391,20 +391,20 @@ def test_ep_divisibility_enforced_count_and_memory():
     # 384 % 7 ≠ 0 → 保守域拒绝。mega 路径有 pinned 断言；fused 路径的通用
     # 余数映射未入 pin/未建模，本仓不声明它非法，只是不纳入当前建模域。
     with pytest.raises(ValueError, match="整除"):
-        build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=7)
+        build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=7, device_sms=132)
     with pytest.raises(ValueError, match="整除"):
         target_weight_allocations(m, Q8, 8, ep=7, rank=0)
     # 实际 V4.1 合法 TP/EP 为 {1,2,4,8}（o_groups=8 约束）；全部整除。
     # 3/6 虽整除 E，但被 ParallelPlan 的 o_groups 校验拒绝，故不列为"放行"。
     for ep in (1, 2, 4, 8):
-        build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=ep)
+        build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=ep, device_sms=132)
 
 
 def test_ep8_local_experts_and_routed_share():
     from simverse.count import build_model_work
     from simverse.model_ir import build_catalog
     m = build_catalog()["models"]["deepseek_v41_flash"]
-    rows = build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=8, rank=3)
+    rows = build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=8, rank=3, device_sms=132)
     routed = [r for r in rows if r.op == "moe_routed"]
     assert len(routed) == 40
     for r in routed:
@@ -431,7 +431,7 @@ def test_memory_route_bias_allocations_match_count():
     assert len(all_route) == 40
     assert sum(a.bytes for a in all_route) == 40 * 3072 == 122_880
     # count 侧 weight_capacity（moe_score 行）与 memory 侧逐层相等
-    rows = [r for r in build_model_work(m, "decode", 1, 512, 1, Q8, tp=8)
+    rows = [r for r in build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, device_sms=132)
             if r.op == "moe_score"]
     assert sum(r.weight_capacity for r in rows) == 122_880
 

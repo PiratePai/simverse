@@ -149,7 +149,7 @@ def test_qwen36_shared_expert_gate_counted_every_moe_layer():
     cat = build_catalog()
     m = cat["models"]["qwen36_35b_a3b"]
     assert all(l.moe is not None and l.moe.shared_gate for l in m.layers)
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=1)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=1, device_sms=132)
     gate = [r for r in rows if r.op == "shared_gate"]
     assert len(gate) == 40
     for r in gate:
@@ -196,7 +196,7 @@ def test_moe_rows_ep_on_hand_oracle():
 
 
 def _sharded_op_flops(model, tp, ep, rank, ops):
-    rows = build_model_work(model, "decode", 1, 512, 1, Q8, tp=tp, ep=ep, rank=rank)
+    rows = build_model_work(model, "decode", 1, 512, 1, Q8, tp=tp, ep=ep, rank=rank, device_sms=132)
     return sum(r.flops for r in rows if r.op in ops)
 
 
@@ -253,7 +253,7 @@ def test_kv_replication_rule_qwen36():
     m = _qwen36()
 
     def kv_bytes(tp):
-        rows = build_model_work(m, "decode", 1, 1000, 1, Q8, tp=tp)
+        rows = build_model_work(m, "decode", 1, 1000, 1, Q8, tp=tp, device_sms=132)
         return sum(r.kv_write for r in rows if r.op == "attention_core")
     b1 = kv_bytes(1)
     assert kv_bytes(2) == b1 // 2      # 2 % 2 == 0 → 切分
@@ -264,7 +264,7 @@ def test_kv_replication_rule_qwen36():
 def test_gdn_state_per_rank():
     """GDN 状态：v 头/conv 通道 /tp（30 层 × (4·128·128 + 1024·3) × 4B/8）。"""
     m = _qwen36()
-    rows = build_model_work(m, "decode", 1, 0, 1, Q8, tp=8)
+    rows = build_model_work(m, "decode", 1, 0, 1, Q8, tp=8, device_sms=132)
     st = sum(r.state_capacity for r in rows if r.op == "gdn_recurrence")
     per_layer = (4 * 128 * 128 * 4 + (8192 // 8) * 3 * 1)   # recurrent fp32 + conv act
     assert st == 30 * per_layer
@@ -360,8 +360,8 @@ def test_plan_consistency_count_vs_direct():
     m = _qwen36()
     p = validate_parallel(m, 8, 8)
     via_plan = build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=8, rank=3,
-                                plan=p)
-    direct = build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=8, rank=3)
+                                plan=p, device_sms=132)
+    direct = build_model_work(m, "decode", 1, 512, 1, Q8, tp=8, ep=8, rank=3, device_sms=132)
     assert [r.to_json() for r in via_plan] == [r.to_json() for r in direct]
 
 

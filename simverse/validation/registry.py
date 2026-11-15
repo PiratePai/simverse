@@ -329,6 +329,54 @@ _PINNED_ASSETS = [
       "数）；Qwen36 家族无 extras.swiglu，其 silu 微操作维持 R06 冻结口径"
       "（跨模型计量差异已登记）"],
      False, "2026-11-13"),
+    ("ev-vllm-v41-csa2-core", "source-checked",
+     "R25 V4.1 稀疏 MLA 注意力核本体：14 文件 pin（csa2-core-pin.json；"
+     "vllm @f358f057 5 文件：nvidia/flashmla.py（DeepseekV4FlashMLAAttention "
+     "消费链——decode flash_mla_with_kvcache 一次核联读 SWA 记录+压缩 extra "
+     "记录、prefill dequantize_and_gather 全量压缩前缀+SWA 尾窗 gather → "
+     "combine_topk_swa_indices → flash_mla_sparse_fwd）、v1/attention/ops/"
+     "flashmla.py、cmake GIT_TAG 847ef308、specialized_decode/__init__.py"
+     "（decode_backend=latency_specialized 显式开启，默认 auto=stock）、"
+     "kv_cache_interface.py（同 spec 层共享 builder 组）；FlashMLA "
+     "@847ef308 9 文件：flash_mla_interface.py（V4/V4.1 head_dim=512、"
+     "head_dim_v=512、attn_sink 每头标量、h_q∈{64,128}、SM90 small-heads "
+     "8/16/32/64/128）、sparse_decode.cpp（SM90 恒 split-KV、o_accum/"
+     "lse_accum (b+SM)×s_q×h_q×512×4B、调度器）、get_decoding_sched_meta.cu"
+     "（单 warp 贪心：块 64、固定开销 5、payload=⌈total/SM⌉+5——本仓移植为 "
+     "count/flashmla_sched）、combine.cu（splits==1 早退；逐头 Σ 归并+sink）、"
+     "splitkv_mla.cuh（WGMMA QK 2d/PV 2d_v 结构、is_no_split 直写/否则 "
+     "o_accum、零填充头计入 h_q）、sparse_prefill.cpp、params.h "
+     "（DecodingSchedMeta=32B）、sm90 prefill phase1。修正：decode 头数 "
+     "heads//tp → padded_heads=64（R20 口径在 TP8 少算 8×）；R20 的 decode "
+     "sparse_index_build 归因修正为 prefill 每 chunk 每层（decode 实际每步"
+     "一次 SWA 窗索引 + 每压缩层 compute_global_topk 全局槽位转换 + 每层型"
+     "首层调度器元数据）；q_rope 写 padded 宽 q_padded；prefill kv_read 由"
+     "每对直读改 gather 口径（压缩全前缀+尾窗一次，核读 bf16 工作区）",
+     str(REFS / "vllm" / "csa2-core-pin.json"),
+     "vllm @f358f0578a83f4e1fe6fc49a492d3ae9362de8e5（5 文件 blob 对 "
+     "vllm-tree.json 逐项校验）+ FlashMLA @847ef308bb7a6828c8117301f5a5a8"
+     "4a095a90e8（cmake GIT_TAG 钉定；9 文件 blob SHA1 对该提交 git 对象"
+     "校验）+ SHA256 清单",
+     "V4.1 注意力核本体（count/work.v41_layer_rows 的 sparse_attention/"
+     "attn_* 行 + count/flashmla_sched + lowering/memory 瞬态 + devices."
+     "sm_count + 公式 v2.csa2_attn_*；replay docs/evidence/csa2-core）",
+     ["源码阅读 source-checked；kernel/CPU forward/GPU 均未执行（含 CUDA "
+      "kernel 二进制；FlashMLA 源经 cmake pin 静态阅读）",
+      "specialized decode（FlashInfer TRTLLM-gen sparse_mla / sparse_mla_"
+      "cute CuTe、行分片 all-gather）需 decode_backend=latency_specialized "
+      "显式开启，默认配方不含，未建模；SM100 mega attention（nvfp4 压缩 "
+      "记录 288B + fused norm+rope+attn+rope+cast）域外",
+      "FlashInfer plain-row BF16 KV 后端（FLASHINFER_MLA_SPARSE*）、ROCm "
+      "aiter/XPU、PCP 跨片、SWA bounded replay 回放边界、CuTe DSL "
+      "dequant gather 变体（字节语义同 Triton，kernel 不同）未建模",
+      "softmax +5 op、整数核 ≈5/3 op/项、调度器 ≈10 op/行、dequant 2 op/"
+      "elem 为解析惯例（非 kernel 指令数）；prefill 工作区逐对 bf16 行读"
+      "为逻辑口径，不记跨行 SMEM/L2 复用；o_accum 峰值按 allocator 复用"
+      "一份下界",
+      "decode/prefill 的 MTP 多查询行（Q>1）按逐行窗/topk 公式计（b=N 行"
+      "入调度器）；V4.1 仅 baseline 方法域——DFlash/MTP 草稿路径不消费"
+      "本核行"],
+     False, "2026-11-16"),
     ("ev-vllm-v41-dspark", "source-checked",
      "vLLM V4.1 DSpark speculator：num_reqs 批处理、复用 V4 decoder 的事实",
      str(REFS / "vllm" / "vllm" / "v1" / "worker" / "gpu" / "spec_decode" / "dspark" / "speculator.py"),

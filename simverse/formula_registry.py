@@ -246,15 +246,85 @@ F_CSA2_CANDIDATE_MASK = _f(
     "mask 后接自有 index_topk）")
 F_CSA2_SPARSE_INDEX_BUILD = _f(
     "v2.csa2_sparse_index_build",
-    "ops = T·(topk+win)·3（整数核惯例）；读 = T·topk·4 + T·8；写 = "
-    "T·⌈(topk+win)/128⌉·128·4 + T·4（128 对齐合并索引 + lens；SWA-only "
-    "topk=0）",
+    "prefill 每 chunk 每层：ops = 有效项·3（整数核惯例；有效项 = Σ行 "
+    "(min(t,win) + min(⌊t/r⌋,topk))，topk+窗无去重拼接）；读 = 压缩对·4 + "
+    "T·16；写 = T·⌈(topk+win)/128⌉·128·4（fill −1 整宽）+ 有效项·4 + T·4"
+    "（SWA-only topk=0）",
     "common/ops/cache_utils.py L819/L837-841（combine_topk_swa_indices："
-    "_SPARSE_PREFILL_TOPK_ALIGNMENT=128 对齐；L898-910 SWA-only TOP_K=0）、"
-    "specialized sparse_mla.py L159-250（SparseIndexTables：等键 "
-    "(kv源:索引源:r) 运行首层一次、后继复用；index source 覆写前 join）",
-    "sparse_index_build 行（decode 每 (kv源,索引源,r) 运行首层一次；"
-    "SWA-only 运行首 L0 topk=0）")
+    "_SPARSE_PREFILL_TOPK_ALIGNMENT=128 对齐、out 先整宽 fill_(-1)）、"
+    "L970-1020（topk_len=min((pos+1)//r,TOP_K) + swa 段拼接，无去重）；"
+    "vllm flashmla.py L370-383（_forward_prefill 每 chunk 每层调用）。"
+    "R25 归因修正：decode 默认路径不调用该核（R20 误记为 decode 运行首层；"
+    "specialized sparse_mla.py 的 SparseIndexTables 等键复用属 opt-in 变体）",
+    "sparse_index_build 行（prefill 每层每 chunk；SWA-only 层 topk=0）")
+F_CSA2_ATTN_CORE = _f(
+    "v2.csa2_attn_core",
+    "FLOPs = pairs·H_k·(4d+5)：每 (query,选中位) 每头 QK 2·d + PV 2·d_v"
+    "（V4.1 d=d_qk=512=448 NoPE+64 RoPE、d_v=512，flash_mla_interface.py "
+    "'head_dim should be 512 while head_dim_v should be 512'）+ softmax 5 op"
+    " 文档化惯例（在线 max/sub/exp2/sum，splitkv_mla.cuh scale_softmax）。"
+    "H_k：decode = padded_heads（fp8 kernel h_q∈{64,128}，fused insert 零填充"
+    " Q 到 64，FLOPs 按填充头算）；prefill SM90 = 真实本地头（8/16/32 "
+    "small-heads 切片）。attn_sink 为每头标量（非额外 KV 列）：读 4B/头 + "
+    "输出缩放折入 lse。decode：kv_read = 逐行窗/topk 直读 584B 记录；"
+    "prefill：记录读在 attn_kv_gather，核读 bf16 工作区 1024B/对（逻辑口径）",
+    "csa2-core-pin.json：vllm flashmla.py L263-292（decode flash_mla_with_"
+    "kvcache：indices=swa + extra_k_cache=压缩 + attn_sink）、L326-392"
+    "（prefill gather+combine+flash_mla_sparse_fwd）；FlashMLA "
+    "flash_mla_interface.py L59-137（接口/记录格式/h_q 约束）、sparse_"
+    "decode.cpp（SM90 恒 split-KV、h_q 校验）、splitkv_mla.cuh（WGMMA "
+    "QK/PV 结构）、sparse_prefill.cpp（SM90 small-heads 8/16/32/64/128）",
+    "sparse_attention 行（decode/prefill 两分支；R25 起 padded 头数与 "
+    "gather 口径入账）")
+F_CSA2_ATTN_GATHER = _f(
+    "v2.csa2_attn_gather",
+    "prefill 每层每 chunk：读 = 每请求 (⌊seq/r⌋·comp_rec + gather_len·"
+    "swa_rec)（压缩全前缀 + SWA 尾窗 gather_len = Q + min(S,win−1)）；"
+    "写 = 行数·512·2B bf16 工作区；ops = 行数·2·512（dequant ≈2 op/elem）",
+    "vllm flashmla.py L326-358（dequantize_and_gather_k_cache 两段 gather："
+    "压缩 gather_lens=None 全前缀 + SWA offset=chunk_N）；cache_utils.py "
+    "L412-470（gather_len = seq_len−gather_len 起 gather；ComputePrefill"
+    "MetadataKernel L376-384 gather_len = Q + min(prefix,win−1)）",
+    "attn_kv_gather 行（prefill；R25 新增——旧口径误按每对直读记录）")
+F_CSA2_ATTN_SPLITKV = _f(
+    "v2.csa2_attn_splitkv",
+    "SM90 decode 恒 split-KV：Σsplits(>1 行)·H_pad·(512·4 + 4) B o_accum/"
+    "lse_accum fp32 写 + 同额读（combine）；combine ops = Σsplits·H_pad·"
+    "(2·512+6)；lse 最终每行一次 H_pad·4B。num_splits 由调度器移植"
+    "（count/flashmla_sched，get_decoding_sched_meta.cu 贪心：块 64、"
+    "固定开销 5、payload=⌈total/SM⌉+5）",
+    "csa2-core-pin.json：sparse_decode.cpp L488（must_split_kv=is_sm90a）、"
+    "L632-687（o_accum/lse_accum 分配 (b+SM)×s_q×h_q×512×4B + combine 启动）；"
+    "combine.cu L37-185（my_num_splits==1 早退；逐头 Σ splits 归并 + sink）；"
+    "splitkv_mla.cuh L333-380（is_no_split 直写 out / 否则写 o_accum）",
+    "attn_splitkv 行（decode 每层；R25 新增）")
+F_CSA2_ATTN_INDEX_GLOBAL = _f(
+    "v2.csa2_attn_index_global",
+    "decode 每压缩层每步：ops = T·topk·5（整除/查表/取模/乘加 ≈5 op/项）；"
+    "读 = T·topk·4（共享 topk 缓冲整宽）+ 有效 extra 项·4（块表）；"
+    "写 = T·topk·4 + T·4（全局槽位 + lens）",
+    "vllm flashmla.py L214-228（_forward_decode：compute_global_topk_"
+    "indices_and_lens 每 cr>0 层每步）；cache_utils.py L729-811（topk 整宽"
+    "循环 + 逐有效项块表查找 + 计数）",
+    "attn_index_global 行（decode cr>0 层；R25 新增）")
+F_CSA2_ATTN_SWA_INDEX_BUILD = _f(
+    "v2.csa2_attn_swa_index_build",
+    "每步一次（全体层共享，记第 0 层）：ops = Σ行 min(t,win)·5；"
+    "读/写 = 项·4B + T·4 lens",
+    "sparse_swa.py L663-732（build()：_COMPUTE_SWA_INDICES_AND_LENS_KERNEL "
+    "decode 行宽 window；prefill 行同核 token_offset）+ kv_cache_interface.py"
+    "（同 spec 层共享一个 builder/组，每步 build 一次）",
+    "attn_swa_index_build 行（decode/prefill 各每步一次；R25 新增）")
+F_CSA2_ATTN_SCHED_META = _f(
+    "v2.csa2_attn_sched_meta",
+    "每层型（compress_ratio 去重）每 decode 步一次（记各型首层）：ops ≈ "
+    "T·10（惯例）；写 = SM·32B（DecodingSchedMeta）+ (T+1)·4（num_splits）；"
+    "读 = T·4",
+    "sparse_swa.py L911-945（build_tile_scheduler：每型空 FlashMLASchedMeta，"
+    "首层触发规划）；sparse_decode.cpp L633-656（tile_scheduler_metadata "
+    "缺省时分配 + get_decoding_sched_meta 启动）；params.h L104-113"
+    "（sizeof(DecodingSchedMeta)==32）",
+    "attn_sched_meta 行（decode 各层型首层；R25 新增）")
 
 # ---- V4.1 MoE 路由（DeepSeek-V4.1-Flash；证据 moe-pin.json 14 文件 pin
 #       @f358f057 blob 对 vllm-tree.json，source-checked 2026-11-12 R21；

@@ -83,10 +83,10 @@ def check() -> None:
 
     1. R22 证据内部一致：before→after 的逐字段 delta = Σ by_op delta、
        审计面外行逐字段冻结（全部对已提交文件，历史切片自洽）。
-    2. 当前代码复现**当前**账本：必须与最新一轮证据（R24：
-       docs/evidence/swiglu-tail/after.json，同拓扑场景）逐字段相等——
-       R22 的 after.json 是历史切片（不含 R24 moe_act/moe_shared_act
-       行）。无漂移复算入口是 tools/replay_v41_swiglu.py --check。
+    2. 当前代码复现**当前**账本：必须与最新一轮证据（R25：
+       docs/evidence/csa2-core/after.json，同拓扑场景）逐字段相等——
+       R22 的 after.json 是历史切片（不含其后 R24 moe_act/R25 注意力核
+       行）。无漂移复算入口是 tools/replay_v41_csa2_core.py --check。
     """
     scenario = ScenarioV2.from_json(json.loads(
         (FOLDER / "scenario.json").read_text(encoding="utf-8")))
@@ -104,15 +104,15 @@ def check() -> None:
     AUDITED = set(att["expected_changed_ops"])
     frozen = lambda rows: [r for r in rows if r["op"] not in AUDITED]
     assert frozen(old["rows"]) == frozen(committed["rows"])
-    # ② 当前代码复现当前账本（R24 证据；manifest 身份字段除外）
+    # ② 当前代码复现当前账本（R25 证据；manifest 身份字段除外）
     r24_after = json.loads(
-        (ROOT / "docs/evidence/swiglu-tail" / "after.json")
+        (ROOT / "docs/evidence/csa2-core" / "after.json")
         .read_text(encoding="utf-8"))
     assert fresh["work"] == r24_after["work"], (
-        "当前复算账本与 R24 证据不一致（确定性被破坏；入口 "
-        "tools/replay_v41_swiglu.py --check）")
+        "当前复算账本与 R25 证据不一致（确定性被破坏；入口 "
+        "tools/replay_v41_csa2_core.py --check）")
     print("check OK: R22 attribution internally consistent; current ledger "
-          "reproduces the R24 evidence (docs/evidence/swiglu-tail)")
+          "reproduces the R25 evidence (docs/evidence/csa2-core)")
 
 
 def main() -> None:

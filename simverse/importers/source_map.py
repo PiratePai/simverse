@@ -474,32 +474,74 @@ ENTRIES: List[SourceMapEntry] = [
                           "CUDA-graph 静态 max_model_len 整宽 logits 缓冲与"
                           "候选 mask 整宽 -inf 尾写未入账（workspace 池缺口）",
                           "cooperative 候选 top-k 在值相等边界 bin 为近似选择"
-                          "（≤k/1024 每簇）；选择/整数核 op 为文档化口径",
-                          "稀疏 MLA 注意力核本体（flops 4d+5）仍 v0.1 移植"],
+                          "（≤k/1024 每簇）；选择/整数核 op 为文档化口径"],
         note="R20；21 文件 blob SHA1 对 tree + SHA256（csa2-pin.json；含 "
              "sparse_attn_indexer 直接 import 的 v1 backend）；"
              "count/work.v41_layer_rows + lowering/memory + scenario."
              "v41_kv_record；默认场景前后差异见 docs/evidence/csa2/"
              "attribution.json 与 v41-csa2-indexer-20261112.md"),
     SourceMapEntry(
-        entry_id="sm-v41-csa2-moe-unverified",
-        model_or_method="deepseek_v41_flash 注意力核",
-        semantic="稀疏 MLA 注意力核本体（flops 4d+5、bmm 尺度）仍 v0.1 移植"
-                 "（CSA2 索引管线 R20 已另立 sm-v41-csa2-indexer；MoE 路由 "
-                 "R21 已另立 sm-v41-moe-route；量化 R22 已另立 sm-v41-quant-"
-                 "dispatch；SwiGLU/尾部 R24 已另立 sm-v41-swiglu-tail）",
+        entry_id="sm-v41-csa2-attn-core",
+        model_or_method="deepseek_v41_flash 稀疏 MLA 注意力核本体",
+        semantic="FlashMLA 消费链（R25，csa2-core-pin.json 14 文件）：decode "
+                 "flash_mla_with_kvcache 一次核联读 SWA 记录（indices=窗，"
+                 "584B/行）+ 压缩记录（extra_k_cache+extra_indices=topk）；"
+                 "per-pair FLOPs = (4d+5)，d=d_qk=512（448 NoPE+64 RoPE）="
+                 "d_v——QK 2d + PV 2d_v + softmax 5 op 惯例；decode 头数 "
+                 "padded_heads=64（fp8 kernel h_q∈{64,128}，fused insert "
+                 "零填充 Q；FLOPs/激活按填充头）；prefill SM90 small-heads "
+                 "（8/16/32）真实头切片。SM90 恒 split-KV：o_accum/lse_accum"
+                 "（(b+SM)×64×512×4B fp32）+ combine 归并 + get_decoding_"
+                 "sched_meta 贪心调度（块 64/开销 5，本仓移植 count/"
+                 "flashmla_sched 精确复算 num_splits）。prefill：每请求每 "
+                 "chunk 全量压缩前缀 gather（⌊seq/r⌋ 行）+ SWA 尾窗 gather"
+                 "（Q+min(S,win−1)）→ bf16 工作区（512×2B/行）→ "
+                 "combine_topk_swa_indices（128 对齐、topk+窗无去重拼接、"
+                 "fill −1 整宽）→ flash_mla_sparse_fwd 逐对行读。decode 索引"
+                 "消费：每步一次 SWA 窗索引（全层共享，记 L0）+ 每压缩层 "
+                 "compute_global_topk 全局槽位 + 每层型首层调度器元数据"
+                 "（R20 的 decode sparse_index_build 归因修正为 prefill）",
         source_pin=VLLM_PIN,
-        source_location="vllm/models/deepseek_v41/nvidia/model.py:204-327"
-                        "（sparse-MLA 选择）",
-        branch_predicate="config scoring_func=sqrtsoftplus、topk_method=noaux_tc",
-        input_domain="V4.1-Flash 全 40 层",
-        both_sides_covered=False,
-        uncovered_domain=["稀疏 MLA 注意力核本体未独立逐行核（flops 4d+5 为"
-                          "v0.1 移植口径）"],
-        note="2026-11-10 审查、R20 缩窄（索引/候选）、R21 缩窄（MoE 路由）、"
-             "R22 缩窄（量化映射已解除——旧文本'quantization_config 未映射'"
-             "随事实更新）、R24 缩窄（SwiGLU clamp/compress_ratios 尾部已"
-             "解除）；剩余核本体路径不能因 config 通过而标完整或参与部署排名"),
+        source_location="references/vllm/vllm/models/deepseek_v41/nvidia/"
+                        "flashmla.py:79-100/200-292（decode）/316-392"
+                        "（prefill）；references/flashmla/{flash_mla/"
+                        "flash_mla_interface.py:59-137（接口/记录/h_q）、"
+                        "csrc/api/sparse_decode.cpp:488-692（split-KV/分配）、"
+                        "csrc/cuda_kernels/smxx/decode/get_decoding_sched_"
+                        "meta.cu:42-121（贪心调度）、csrc/cuda_kernels/smxx/"
+                        "decode/combine/combine.cu:37-249、csrc/cuda_kernels/"
+                        "legacy/sm90/decode/sparse/splitkv_mla.cuh:86-380"
+                        "（WGMMA QK/PV + is_no_split 直写）、csrc/api/"
+                        "sparse_prefill.cpp:30-48/133-311（small-heads）}",
+        branch_predicate="backend FLASHMLA_SPARSE_DSV41（默认 auto 链：SM90 → "
+                         "FlashMLA；decode_backend!=latency_specialized）；"
+                         "kv_cache_dtype fp8_ds_mla（V4 record 584B，SM90）",
+        thresholds="head_dim=512、sliding_window=128、index_topk=512、"
+                   "block_size_topk=64、fixed_overhead=5、DecodingSchedMeta="
+                   "32B、PREFILL_CHUNK_SIZE=4、_SPARSE_PREFILL_TOPK_ALIGNMENT"
+                   "=128、padded_heads=64（heads≤64）",
+        input_domain="V4.1 主干 40 层 decode/prefill；H100/H200（SM90，"
+                     "fp8_ds_mla 584B）默认配方；TP1-8（decode 恒 64 填充头，"
+                     "prefill SM90 用 n_local∈{8,16,32}）",
+        both_sides_covered=True,
+        uncovered_domain=["kernel/CPU forward/GPU 均未执行（source-checked，"
+                          "含 FlashMLA CUDA 源静态阅读）",
+                          "specialized decode（FlashInfer TRTLLM-gen/"
+                          "sparse_mla_cute）需 decode_backend="
+                          "latency_specialized 显式开启，未建模；SM100 mega "
+                          "attention（nvfp4 288B 记录 + fused 归一/RoPE/"
+                          "逆RoPE/FP8 cast）、FlashInfer plain-row BF16 KV、"
+                          "ROCm aiter/XPU、PCP、SWA bounded replay、CuTe "
+                          "DSL dequant gather 变体未建模",
+                          "softmax +5/整数核 op/调度器 op/工作区逐对行读为"
+                          "解析口径（非指令数、不记跨行 SMEM 复用）；"
+                          "o_accum 峰值按 allocator 复用一份下界"],
+        note="R25（承接 2026-11-10 审查的核本体缺口条目 sm-v41-csa2-moe-"
+             "unverified——该缺口解除）；vllm @f358f057 5 文件 + FlashMLA "
+             "@847ef308 9 文件（cmake GIT_TAG）；count/work.v41_layer_rows +"
+             " count/flashmla_sched + lowering/memory 瞬态 + devices.sm_"
+             "count；默认场景前后差异见 docs/evidence/csa2-core/"
+             "attribution.json 与 v41-csa2-attn-core-20261116.md"),
     SourceMapEntry(
         entry_id="sm-v41-swiglu-tail",
         model_or_method="deepseek_v41_flash SwiGLU clamp + compress_ratios 尾部",

@@ -26,6 +26,10 @@ _ELEMENTWISE = {
     "compress_pool", "compressed_insert", "index_k_store", "index_q_rope",
     "index_topk", "index_fill", "candidate_select", "candidate_mask",
     "sparse_index_build",
+    # R25：FlashMLA 注意力核本体消费链（split-KV 归并/整数核/gather 按
+    # act 档计价；sparse_attention 原已在表）
+    "attn_splitkv", "attn_index_global", "attn_swa_index_build",
+    "attn_sched_meta", "attn_kv_gather",
 }
 
 

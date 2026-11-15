@@ -1,0 +1,311 @@
+#include "common.h"
+
+#include "params.h"
+
+#include "cuda_kernels/sm100/prefill/sparse/fwd/head128/phase1.h"
+#include "cuda_kernels/sm100/prefill/sparse/fwd/head64/phase1.h"
+#include "cuda_kernels/sm100/prefill/sparse/fwd_for_small_topk/head128/phase1.h"
+
+#include "cuda_kernels/legacy/sm90/prefill/sparse/phase1.h"
+#include "cuda_kernels/legacy/sm100/prefill/sparse/fwd/head128/phase1.h"
+#include "cuda_kernels/legacy/sm100/prefill/sparse/fwd/head64/phase1.h"
+
+enum class FwdFeatures : int {
+    SMALL_HEADS,
+    HEAD_64,
+    HEAD_128,
+
+    HEAD_DIM_576,
+    HEAD_DIM_512,
+
+    ATTN_SINK,
+    TOPK_LENGTH
+};
+
+class FwdImplBase : public ImplBase<
+    SparseAttnFwdParams,
+    FwdFeatures
+> {};
+
+class Fwd_Sm90_Impl : public FwdImplBase {
+    DECLARE_SUPPORTED_FEATURES(
+        FwdFeatures::SMALL_HEADS,
+        FwdFeatures::HEAD_64,
+        FwdFeatures::HEAD_128,
+        FwdFeatures::HEAD_DIM_512,
+        FwdFeatures::HEAD_DIM_576,
+        FwdFeatures::ATTN_SINK,
+        FwdFeatures::TOPK_LENGTH
+    )
+
+protected:
+    void run_(const SparseAttnFwdParams &params, const std::vector<FeatureT> &required_features) override {
+        DISPATCH_HEAD_DIM(params.d_qk, HEAD_DIM_QK, [&]() {
+            DISPATCH_BOOLEAN_FLAG(params.topk_length != nullptr, HAVE_TOPK_LENGTH, [&]() {
+                legacy::sm90::prefill::sparse_fwd::run_fwd_phase1_kernel<HEAD_DIM_QK, HAVE_TOPK_LENGTH>(params);
+            });
+        });
+    }
+};
+
+// =============================================================================
+// d_qk = 512 (DeepSeek V4 / V4.1). The KV of a prefill is bf16, so these kernels
+// do not depend on the quantized KV cache format and serve both models.
+// =============================================================================
+
+class Fwd_Sm100_Head64_Impl : public FwdImplBase {
+    DECLARE_SUPPORTED_FEATURES(
+        FwdFeatures::HEAD_64,
+        FwdFeatures::HEAD_DIM_512,
+        FwdFeatures::ATTN_SINK,
+        FwdFeatures::TOPK_LENGTH
+    )
+
+protected:
+    void run_(const SparseAttnFwdParams &params, const std::vector<FeatureT> &required_features) override {
+        STD_TORCH_CHECK(params.h_q == 64, "Unsupported h_q: ", params.h_q);
+        sm100::prefill::sparse_fwd::head64::run_sparse_fwd_phase1_kernel(params);
+    }
+};
+
+class Fwd_Sm100_Head128_Impl : public FwdImplBase {
+    DECLARE_SUPPORTED_FEATURES(
+        FwdFeatures::HEAD_128,
+        FwdFeatures::HEAD_DIM_512,
+        FwdFeatures::ATTN_SINK,
+        FwdFeatures::TOPK_LENGTH
+    )
+
+protected:
+    void run_(const SparseAttnFwdParams &params, const std::vector<FeatureT> &required_features) override {
+        sm100::prefill::sparse_fwd::head128::run_sparse_fwd_phase1_kernel(params);
+    }
+};
+
+class Fwd_Sm100_Head128_Small_TopK_Impl : public FwdImplBase {
+    DECLARE_SUPPORTED_FEATURES(
+        FwdFeatures::HEAD_128,
+        FwdFeatures::HEAD_DIM_512,
+        FwdFeatures::ATTN_SINK,
+        FwdFeatures::TOPK_LENGTH
+    )
+
+protected:
+    void run_(const SparseAttnFwdParams &params, const std::vector<FeatureT> &required_features) override {
+        sm100::prefill::sparse_fwd_for_small_topk::head128::run_sparse_fwd_for_small_topk_phase1_kernel<SparseAttnFwdMode::Prefill, ModelType::V41, ModelType::V41>(params);
+    }
+};
+
+// =============================================================================
+// d_qk = 576 (DeepSeek V3.2). Upstream dropped this head dimension in the
+// 2026.09.30 release, so these dispatch to the kernels kept under legacy/.
+// =============================================================================
+
+class Fwd_Sm100_Head64_HeadDim576_Impl : public FwdImplBase {
+    DECLARE_SUPPORTED_FEATURES(
+        FwdFeatures::HEAD_64,
+        FwdFeatures::HEAD_DIM_576,
+        FwdFeatures::ATTN_SINK,
+        FwdFeatures::TOPK_LENGTH
+    )
+
+protected:
+    void run_(const SparseAttnFwdParams &params, const std::vector<FeatureT> &required_features) override {
+        STD_TORCH_CHECK(params.h_q == 64, "Unsupported h_q: ", params.h_q);
+        legacy::sm100::prefill::sparse_fwd::head64::run_sparse_fwd_phase1_kernel<SparseAttnFwdMode::Prefill, 576>(params);
+    }
+};
+
+class Fwd_Sm100_Head128_HeadDim576_Impl : public FwdImplBase {
+    DECLARE_SUPPORTED_FEATURES(
+        FwdFeatures::HEAD_128,
+        FwdFeatures::HEAD_DIM_576,
+        FwdFeatures::ATTN_SINK,
+        FwdFeatures::TOPK_LENGTH
+    )
+
+protected:
+    void run_(const SparseAttnFwdParams &params, const std::vector<FeatureT> &required_features) override {
+        legacy::sm100::prefill::sparse_fwd::head128::run_sparse_fwd_phase1_kernel<576>(params);
+    }
+};
+
+std::vector<Tensor> sparse_attn_prefill_interface(
+    const Tensor &q,
+    const Tensor &kv,
+    const Tensor &indices,
+    double sm_scale,
+    int64_t d_v,
+    const std::optional<Tensor> &attn_sink,
+    const std::optional<Tensor> &topk_length,
+    const std::optional<Tensor> &out_
+) {
+    using bf16 = cutlass::bfloat16_t;
+
+    Arch arch = Arch();
+    bool is_sm90a = arch.is_sm90a();
+    bool is_sm100f = arch.is_sm100f();
+    STD_TORCH_CHECK(is_sm90a || is_sm100f, "Sparse Attention Forward Kernel is only supported on SM90a and SM100f architectures.");
+
+    KU_CHECK_NDIM(q, 3);
+    KU_CHECK_NDIM(kv, 3);
+    KU_CHECK_NDIM(indices, 3);
+    KU_CHECK_NDIM(attn_sink, 1);
+    KU_CHECK_NDIM(topk_length, 1);
+
+    int s_q = q.size(0);
+    int s_kv = kv.size(0);
+    int h_q = q.size(1);
+    int h_kv = kv.size(1);
+    int d_qk = q.size(2);
+    int topk = indices.size(2);
+    bool have_topk_length = topk_length.has_value();
+    const bool small_heads = is_sm90a && is_sm90_small_heads_h_q(h_q);
+    STD_TORCH_CHECK(small_heads || h_q == 64 || h_q == 128,
+                    "Unsupported h_q: ", h_q,
+                    ". SM90a supports 8, 16, 32, 64 and 128 heads; SM100f supports 64 and 128.");
+    STD_TORCH_CHECK(h_kv == 1, "Sparse prefill requires h_kv == 1, got ", h_kv);
+
+    STD_TORCH_CHECK(d_qk == 576 || d_qk == 512, "Invalid d_qk: ", d_qk);
+    STD_TORCH_CHECK(d_v == 512, "Invalid d_v", d_v);
+
+    KU_CHECK_DEVICE(q);
+    KU_CHECK_DEVICE(kv);
+    KU_CHECK_DEVICE(indices);
+    KU_CHECK_DEVICE(attn_sink);
+    KU_CHECK_DEVICE(topk_length);
+
+    KU_CHECK_DTYPE(q, ScalarType::BFloat16);
+    KU_CHECK_DTYPE(kv, ScalarType::BFloat16);
+    KU_CHECK_DTYPE(indices, ScalarType::Int);
+    KU_CHECK_DTYPE(attn_sink, ScalarType::Float);
+    KU_CHECK_DTYPE(topk_length, ScalarType::Int);
+
+    KU_CHECK_SHAPE(q, s_q, h_q, d_qk);
+    KU_CHECK_SHAPE(kv, s_kv, h_kv, d_qk);
+    KU_CHECK_SHAPE(indices, s_q, h_kv, topk);
+    KU_CHECK_SHAPE(attn_sink, h_q);
+    KU_CHECK_SHAPE(topk_length, s_q);
+
+    KU_CHECK_LAST_DIM_CONTIGUOUS(q);
+    KU_CHECK_LAST_DIM_CONTIGUOUS(kv);
+    KU_CHECK_LAST_DIM_CONTIGUOUS(indices);
+    KU_CHECK_LAST_DIM_CONTIGUOUS(attn_sink);
+    KU_CHECK_LAST_DIM_CONTIGUOUS(topk_length);
+
+    // Allocate results and buffers
+    torch::stable::accelerator::DeviceGuard device_guard(q.get_device_index());
+
+    Tensor out;
+    if (out_.has_value()) {
+        out = out_.value();
+        KU_CHECK_DTYPE(out, ScalarType::BFloat16);
+        KU_CHECK_SHAPE(out, s_q, h_q, d_v);
+        KU_CHECK_LAST_DIM_CONTIGUOUS(out);
+        KU_CHECK_DEVICE(out);
+    } else {
+        out = torch::stable::new_empty(q, {s_q, h_q, d_v});
+    }
+    Tensor lse = torch::stable::new_empty(q, {s_q, h_q}, ScalarType::Float);
+    Tensor max_logits = torch::stable::new_empty(q, {s_q, h_q}, ScalarType::Float);
+    if (small_heads) {
+        STD_TORCH_CHECK(out.stride(1) >= d_v &&
+                        out.stride(0) >= (h_q - 1) * out.stride(1) + d_v,
+                        "out must not have overlapping rows");
+    } else {
+        KU_CHECK_CONTIGUOUS(out);
+    }
+    KU_CHECK_CONTIGUOUS(lse);
+    KU_CHECK_CONTIGUOUS(max_logits);
+
+    SparseAttnFwdParams params = {
+        s_q, s_kv, h_q, h_kv, d_qk, d_v, topk,
+        sm_scale, sm_scale * LOG_2_E,
+
+        (bf16*)q.data_ptr(),
+        (bf16*)kv.data_ptr(),
+        (int*)indices.data_ptr(),
+        ku::get_optional_tensor_ptr<float>(attn_sink),
+        ku::get_optional_tensor_ptr<int>(topk_length),
+
+        int64_stride_to_int(q.stride(0)), int64_stride_to_int(q.stride(1)),
+        int64_stride_to_int(kv.stride(0)), int64_stride_to_int(kv.stride(1)),
+        int64_stride_to_int(indices.stride(0)), int64_stride_to_int(indices.stride(1)),
+
+        (bf16*)out.data_ptr(),
+        (float*)max_logits.data_ptr(),
+        (float*)lse.data_ptr(),
+
+        int64_stride_to_int(out.stride(0)), int64_stride_to_int(out.stride(1)),
+
+        SparseAttnFwdMode::Prefill,
+        arch.num_sms,
+        get_current_cuda_stream(q)
+    };
+
+    std::vector<FwdFeatures> required_features;
+    if (small_heads) {
+        required_features.push_back(FwdFeatures::SMALL_HEADS);
+    } else if (h_q == 64) {
+        required_features.push_back(FwdFeatures::HEAD_64);
+    } else if (h_q == 128) {
+        required_features.push_back(FwdFeatures::HEAD_128);
+    } else {
+        STD_TORCH_CHECK(false, "Unsupported h_q: ", h_q);
+    }
+    if (d_qk == 576) {
+        required_features.push_back(FwdFeatures::HEAD_DIM_576);
+    } else if (d_qk == 512) {
+        required_features.push_back(FwdFeatures::HEAD_DIM_512);
+    } else {
+        STD_TORCH_CHECK(false, "Unsupported d_qk: ", d_qk);
+    }
+    if (attn_sink.has_value()) {
+        required_features.push_back(FwdFeatures::ATTN_SINK);
+    }
+    if (have_topk_length) {
+        required_features.push_back(FwdFeatures::TOPK_LENGTH);
+    }
+
+    if (is_sm90a) {
+        Fwd_Sm90_Impl fwd_impl;
+        fwd_impl.run(params, required_features);
+    } else if (is_sm100f) {
+        if (h_q == 64) {
+            if (d_qk == 576) {
+                Fwd_Sm100_Head64_HeadDim576_Impl fwd_impl;
+                fwd_impl.run(params, required_features);
+            } else {
+                Fwd_Sm100_Head64_Impl fwd_impl;
+                fwd_impl.run(params, required_features);
+            }
+        } else if (h_q == 128) {
+            if (d_qk == 576) {
+                // The small-topk kernel is only instantiated for d_qk = 512
+                Fwd_Sm100_Head128_HeadDim576_Impl fwd_impl;
+                fwd_impl.run(params, required_features);
+            } else {
+                Fwd_Sm100_Head128_Small_TopK_Impl small_topk_impl;
+                Fwd_Sm100_Head128_Impl regular_impl;
+                bool use_small_topk_impl = false;
+                if (
+                    (topk <= 1280 && small_topk_impl.check_if_all_features_are_supported(required_features)) ||
+                    !regular_impl.check_if_all_features_are_supported(required_features)
+                ) {
+                    use_small_topk_impl = true;
+                }
+                if (use_small_topk_impl) {
+                    small_topk_impl.run(params, required_features);
+                } else {
+                    regular_impl.run(params, required_features);
+                }
+            }
+        } else {
+            STD_TORCH_CHECK(false, "Unsupported h_q: ", h_q);
+        }
+    } else {
+        STD_TORCH_CHECK(false, "Unsupported architecture");
+    }
+
+    return {out, max_logits, lse};
+}

@@ -1,0 +1,134 @@
+{
+ "note": "R25 csa2_attention_core pin：vLLM 侧 5 文件对 vllm-tree.json 逐项 blob 校验；FlashMLA 9 文件为 vllm cmake GIT_TAG 847ef308 钉定的外部项目源码（vllm/third_party/flashmla 在 tree 中仅占位 __init__，接口经 cmake file(READ)+改写 vendored），blob SHA1 对该提交 git 对象计算。全部为 source-checked 静态阅读证据；未执行任何 kernel。",
+ "vllm_commit": "f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+ "flashmla_commit": "847ef308bb7a6828c8117301f5a5a84a095a90e8",
+ "flashmla_pin_source": "cmake/external_projects/flashmla.cmake GIT_TAG（vllm-tree blob 一致）",
+ "files": [
+  {
+   "repo": "github.com/vllm-project/vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+   "path": "vllm/models/deepseek_v41/nvidia/flashmla.py",
+   "local": "vllm/vllm/models/deepseek_v41/nvidia/flashmla.py",
+   "blob_sha1": "185d54f4f74b8565d5a961662df45d5347ff4f81",
+   "sha256": "90c6fa6cf12e2d6007d0af687e0e92d3bf736452b01b192014453a5f82ff34fc",
+   "size": 16116,
+   "vllm_tree_sha1": "185d54f4f74b8565d5a961662df45d5347ff4f81"
+  },
+  {
+   "repo": "github.com/vllm-project/vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+   "path": "vllm/v1/attention/ops/flashmla.py",
+   "local": "vllm/vllm/v1/attention/ops/flashmla.py",
+   "blob_sha1": "eb5383e5d13a5ba84be6c36cdcefd6438aadae39",
+   "sha256": "26f88facc103f97fea7688962efdaf8b434e2c8e3aa3dbb5928898fafc782150",
+   "size": 4785,
+   "vllm_tree_sha1": "eb5383e5d13a5ba84be6c36cdcefd6438aadae39"
+  },
+  {
+   "repo": "github.com/vllm-project/vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+   "path": "cmake/external_projects/flashmla.cmake",
+   "local": "vllm/cmake/external_projects/flashmla.cmake",
+   "blob_sha1": "6286e8e163038d74a21ac6920f1a99e591c1c458",
+   "sha256": "4fe4d4703a0d828788d0d5ab6006137ea68e263fda2ea830c0ad0ceb0dad63a4",
+   "size": 14289,
+   "vllm_tree_sha1": "6286e8e163038d74a21ac6920f1a99e591c1c458"
+  },
+  {
+   "repo": "github.com/vllm-project/vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+   "path": "vllm/models/deepseek_v41/nvidia/specialized_decode/__init__.py",
+   "local": "vllm/vllm/models/deepseek_v41/nvidia/specialized_decode/__init__.py",
+   "blob_sha1": "5f0f4df389f5f3f6421b9e45f99327a7f5daa821",
+   "sha256": "a59de72c430e02272d6a168a9ed831d7c92a65d1b778fb8a368ba010b04adae2",
+   "size": 7174,
+   "vllm_tree_sha1": "5f0f4df389f5f3f6421b9e45f99327a7f5daa821"
+  },
+  {
+   "repo": "github.com/vllm-project/vllm@f358f0578a83f4e1fe6fc49a492d3ae9362de8e5",
+   "path": "vllm/v1/kv_cache_interface.py",
+   "local": "vllm/vllm/v1/kv_cache_interface.py",
+   "blob_sha1": "033d527d7f35679c99e86404cabca813b6099962",
+   "sha256": "82fd1fdcf7f3ffe1f254545ad267f7f19b910ba7a252e7976ea6d1e148ec2656",
+   "size": 65820,
+   "vllm_tree_sha1": "033d527d7f35679c99e86404cabca813b6099962"
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "flash_mla/flash_mla_interface.py",
+   "local": "flashmla/flash_mla/flash_mla_interface.py",
+   "blob_sha1": "36fe13c75627faec6b02f7d10081d5b4becbe572",
+   "sha256": "de7f3c25e1a9431de4036d3e4f031a6179bbe52e1265b41222d6dac864934027",
+   "size": 23203,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/params.h",
+   "local": "flashmla/csrc/params.h",
+   "blob_sha1": "3041501fc43895a5ac8413a60e38a7bdf7e51cb9",
+   "sha256": "a145ea6f56996ac1b0a30a307faaccac2111ff88e40539d22588ff52fa120166",
+   "size": 12102,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/api/sparse_decode.cpp",
+   "local": "flashmla/csrc/api/sparse_decode.cpp",
+   "blob_sha1": "791aa8b47fcf9bbe3782be6eaf693d5f1791b76d",
+   "sha256": "4586e4b1cebf5b6874b90a7bdfde3e4bc75ee6fe2c0a0ce319efb2bb85675a41",
+   "size": 29721,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/api/sparse_prefill.cpp",
+   "local": "flashmla/csrc/api/sparse_prefill.cpp",
+   "blob_sha1": "c17565319cb1cf705d82cb804603d483b56d19fc",
+   "sha256": "ac31c217aabcf8002868484b38b4ff4642d336e8ddb1751303c5ac1a62f34683",
+   "size": 11023,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/cuda_kernels/smxx/decode/combine/combine.cu",
+   "local": "flashmla/csrc/cuda_kernels/smxx/decode/combine/combine.cu",
+   "blob_sha1": "99331bdda8c8a9e3ef99b60ab32f5f5b30abe862",
+   "sha256": "5751390f052e7a873be9178c828008168a03e84789dcf793d6ed630836161003",
+   "size": 11275,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/cuda_kernels/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu",
+   "local": "flashmla/csrc/cuda_kernels/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu",
+   "blob_sha1": "2307c47f3dbd731510eae2ada4f9a502e67eb420",
+   "sha256": "3f1486182d65781dd351d24e402285f961055dd0674f5ada37dd23d5a0cd9287",
+   "size": 6990,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/cuda_kernels/legacy/sm90/decode/sparse/splitkv_mla.cuh",
+   "local": "flashmla/csrc/cuda_kernels/legacy/sm90/decode/sparse/splitkv_mla.cuh",
+   "blob_sha1": "712d5c7cbaefd5cc88a8410c0be3eb4630398dfe",
+   "sha256": "55911620b0bbd696e598f7c92af7581153dee734d32312898225737c3a08f861",
+   "size": 39401,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/cuda_kernels/legacy/sm90/decode/sparse/splitkv_mla.h",
+   "local": "flashmla/csrc/cuda_kernels/legacy/sm90/decode/sparse/splitkv_mla.h",
+   "blob_sha1": "1d5b94d9b7de2dda6c7bdbb81c35c0a887f13ab4",
+   "sha256": "a0e8bbeeffc1b29005052aa309079e9990f3ace9d36b9a9109e3c66251152a63",
+   "size": 211,
+   "vllm_tree_sha1": null
+  },
+  {
+   "repo": "github.com/vllm-project/FlashMLA@847ef308bb7a6828c8117301f5a5a84a095a90e8",
+   "path": "csrc/cuda_kernels/legacy/sm90/prefill/sparse/phase1.h",
+   "local": "flashmla/csrc/cuda_kernels/legacy/sm90/prefill/sparse/phase1.h",
+   "blob_sha1": "fac4a8d272b70dcdc3cecc43c00d437839202c4e",
+   "sha256": "3743bd1b59f80786a5f2225bd128fd8ffd630518e474fceef6110264e00aef38",
+   "size": 190,
+   "vllm_tree_sha1": null
+  }
+ ]
+}

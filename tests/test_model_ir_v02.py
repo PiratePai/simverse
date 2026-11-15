@@ -89,7 +89,7 @@ def test_v41_structure_and_gaps(cat):
     m = cat["models"]["deepseek_v41_flash"]
     assert len(m.layers) == 40
     assert m.kind_counts() == {"mla_csa2": 40}
-    assert not m.structure_complete          # 注意力核本体仍阻断（不冒充）
+    assert not m.structure_complete          # 执行变体未核（R25 后核本体已核）
     # R24：swiglu_limit/尾部缺口解除后 config 覆盖完备；结构资格仍由
     # forward 证据（核本体 unverified_paths）阻断——两栏不得互相冒充。
     assert m.config_coverage_complete and not m.forward_evidence_complete
@@ -103,7 +103,8 @@ def test_v41_structure_and_gaps(cat):
     # 不再是 gap。
     # R24（2026-11-13）：swiglu_limit 与 compress_ratios[40:43] 尾部已按
     # swiglu-tail-pin.json 13 文件 source-checked 解除（合法门禁更新，
-    # 非放宽）；structure_complete 仍由注意力核本体 unverified_paths 阻断。
+    # 非放宽）；R25 后核本体已 source-checked，structure_complete 由
+    # 剩余执行变体 unverified_paths 阻断（不冒充）。
     # R20（2026-11-12）：CSA2 索引/candidate 键已 mapped（csa2-pin.json 21
     # 文件 source-checked）；R24 补 candidate_block_size 入 struct 集合
     # （R20 注记此前因键漏登记未生效）。
@@ -235,7 +236,7 @@ def test_tiny_gqa_decode_totals_hand_derived(cat):
     残差加法 FLOPs——E09 修复后逻辑算量超集 5160）。
     """
     m = cat["models"]["tiny_gqa"]
-    rows = build_model_work(m, "decode", 1, 100, 1, Q16, tp=1)
+    rows = build_model_work(m, "decode", 1, 100, 1, Q16, tp=1, device_sms=132)
     t = totals(rows)
     h, heads, kv, d, ffn, V, L = 256, 8, 2, 32, 512, 1000, 2
     per_layer = (2 * h * heads * d + 2 * (2 * h * kv * d)
@@ -262,7 +263,7 @@ def test_tiny_gqa_decode_totals_hand_derived(cat):
 def test_tiny_gqa_verify_query_scaling(cat):
     """验证步 Q=K+1=3：GEMM ×3、attention 对数 S·Q+Q(Q+1)/2=306（golden）。"""
     m = cat["models"]["tiny_gqa"]
-    rows = build_model_work(m, "verify", 1, 100, 3, Q16, tp=1)
+    rows = build_model_work(m, "verify", 1, 100, 3, Q16, tp=1, device_sms=132)
     core = next(r for r in rows if r.op == "attention_core" and r.layer == 0)
     assert core.flops == G.CAUSAL_S100_Q3 * 8 * (4 * 32 + 5)
     q = next(r for r in rows if r.op == "q_proj" and r.layer == 0)
@@ -272,7 +273,7 @@ def test_tiny_gqa_verify_query_scaling(cat):
 def test_tiny_moe_union_expectation_exact_split(cat):
     """MoE 行：期望并集权重读为浮点单列；精确 FLOPs/容量为整数（E05 修复）。"""
     m = cat["models"]["tiny_moe"]
-    rows = build_model_work(m, "decode", 1, 0, 1, Q8, tp=1)  # ctx=0 只看 MoE 行
+    rows = build_model_work(m, "decode", 1, 0, 1, Q8, tp=1, device_sms=132)  # ctx=0 只看 MoE 行
     routed = next(r for r in rows if r.op == "moe_routed")
     assert routed.weight_read == 0
     assert routed.weight_read_expected == pytest.approx(2.0 * 3 * 256 * 512 * 1.0)
@@ -289,7 +290,7 @@ def test_tiny_moe_union_expectation_exact_split(cat):
 def test_hybrid_gdn_state_is_constant_not_kv(cat):
     """GDN 层：无 per-token KV；递推状态读写/容量单列（结构证据 L558/607）。"""
     m = cat["models"]["tiny_hybrid"]
-    rows = build_model_work(m, "decode", 1, 1000, 1, Q8, tp=1)
+    rows = build_model_work(m, "decode", 1, 1000, 1, Q8, tp=1, device_sms=132)
     lin = [r for r in rows if r.layer == 0 and r.op in
            ("gdn_recurrence", "causal_conv1d", "in_proj_qkv")]
     assert lin, "GDN 层行缺失"
@@ -305,7 +306,7 @@ def test_hybrid_gdn_state_is_constant_not_kv(cat):
 
 def test_full_attention_layer_kv_only_on_full_layers(cat):
     qwen = cat["models"]["qwen36_35b_a3b"]
-    rows = build_model_work(qwen, "decode", 1, 1024, 1, Q8, tp=1)
+    rows = build_model_work(qwen, "decode", 1, 1024, 1, Q8, tp=1, device_sms=132)
     kv_by_layer = {}
     for r in rows:
         if r.kv_read:
@@ -320,7 +321,7 @@ def test_full_attention_layer_kv_only_on_full_layers(cat):
 def test_mla_kv_compressed_layout(cat):
     """V3 MLA：KV 读按压缩布局 (kv_lora+rope)/token；tiny_mla 独立对账。"""
     m = cat["models"]["tiny_mla"]
-    rows = build_model_work(m, "decode", 1, 100, 1, Q16, tp=1)
+    rows = build_model_work(m, "decode", 1, 100, 1, Q16, tp=1, device_sms=132)
     core = next(r for r in rows if r.op == "mla_absorbed_core" and r.layer == 0)
     assert core.kv_read == 100 * (128 + 32) * 2          # golden MLA 元素式
     assert core.kv_write == 1 * (128 + 32) * 2
@@ -344,19 +345,21 @@ def test_v41_counting_matches_v01_transplant(cat):
     m = cat["models"]["deepseek_v41_flash"]
     rows = build_model_work(m, "decode", 1, 32768, 1,
                             {"dense_w": 8, "expert_w": 4, "act": 8, "kv": 8,
-                             "state": 32}, tp=8)
+                             "state": 32}, tp=8, device_sms=132)
     kvs = m.extras["kv_spec"]
-    # 独立重算 layer 0 sparse_attention（全 SWA r=0）：heads(card)=128/8=16
+    # 独立重算 layer 0 sparse_attention（全 SWA r=0）。R25：decode 头数按
+    # padded_heads=64（fp8 kernel h_q∈{64,128}，fused insert 零填充 Q，
+    # flashmla.py get_padded_num_q_heads）——不再 heads//tp=8
     l0 = next(r for r in rows if r.op == "sparse_attention" and r.layer == 0)
     from simverse.count.work import causal_pairs
     swa = kvs["sliding_window"]
     local = causal_pairs(32769, 1, swa) - causal_pairs(32768, 1, swa)
-    heads_card = kvs["heads"] // 8      # config num_attention_heads=64
     assert kvs["heads"] == 64
+    padded = 64 if kvs["heads"] <= 64 else 128
     # R20：SWA 行按打包记录 584 B/token（fp8_ds_mla_sm90，attention.py
     # L583-589），不再 d×kv 位宽
     assert l0.kv_read == 1 * min(32769, swa) * 584
-    assert l0.flops == 1 * local * heads_card * (4 * kvs["head_dim"] + 5)
+    assert l0.flops == 1 * local * padded * (4 * kvs["head_dim"] + 5)
 
 
 def test_qwen36_active_params_ballpark(cat):
@@ -364,7 +367,7 @@ def test_qwen36_active_params_ballpark(cat):
     A3B 口径（模型名，≈3.5B，假设登记）±25% 内；注意力项解释超出部分。
     """
     m = cat["models"]["qwen36_35b_a3b"]
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=1)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=1, device_sms=132)
     t = totals(rows)
     implied_active = t["flops"] / 2
     official_a3b = 3.5e9   # 假设：官方命名 A3B 的量级口径（非 config 字段）
