@@ -29,16 +29,13 @@ ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 _VERSION = "0.3.0"
 
 _QWEN36_EVIDENCE = ModelEvidence(
-    forward_source="partial-source",
+    forward_source="source-checked",
     cpu_forward="not-run", gpu_measurement="none",
     checked_paths=("sm-qwen35-gdn-decode-branch", "sm-qwen35-attn-output-gate",
                    "sm-qwen35-moe-shared-gate", "sm-qwen35-moe-router",
                    "sm-vllm-attn-gdn-shard", "sm-vllm-moe-tp-ep-recipe",
-                   "sm-qwen36-mtp"),
-    unverified_paths=(
-        "text_mrope_position_ids: Qwen3.6 文本 RoPE 读 mrope_section；本仓未执行"
-        "位置 id 选择，算量不受影响但语义未实测",
-    ),
+                   "sm-qwen36-mtp", "sm-qwen36-text-mrope"),
+    unverified_paths=(),
     method_status={"baseline": "source-checked", "dflash_v1": "source-checked",
                    "mtp": "source-checked"},
     note="GDN/full-attn output gate/MoE router+shared gate/MoE TP-EP 分片已逐行"
@@ -51,7 +48,13 @@ _QWEN36_EVIDENCE = ModelEvidence(
          "计数与 shape 精确对账）；独立张量参考已对两相位输出/缓存逐元素"
          "核验（ev-qwen36-cpu-numeric-r06，随机权重 fixture 范围）；"
          "R23 另有 MTP 头小尺寸独立数学对照（ev-qwen36-mtp-cpu-numeric，"
-         "fixture 级，非模型级执行）；模型级 cpu_forward 仍 not-run。")
+         "fixture 级，非模型级执行）；R26（2026-11-16）补齐文本 MRoPE "
+         "position_ids 语义（sm-qwen36-text-mrope：文本退化=标准部分 NeoX "
+         "RoPE；主模型 prefill/decode 增量与 MTP 步进/回退/夹紧已核，三路 "
+         "f64 对照 + 官方 HF 旋转类实测 + 负例，ev-qwen36-mrope-cpu-numeric）"
+         "——文本域 forward 路径至此全部 source-checked（多模态 2D 位置分支"
+         "域外，见 source_map uncovered_domain）；模型级 cpu_forward 仍 "
+         "not-run，GPU 无实测，structure_complete 不冒充执行/实测。")
 
 _V41_EVIDENCE = ModelEvidence(
     forward_source="partial-source",
@@ -262,7 +265,9 @@ def _qwen36() -> ModelIR:
                                   "ev-qwen36-cpu-fixture-r06",
                                   "ev-qwen36-cpu-numeric-r06",
                                   "ev-vllm-qwen36-mtp", "ev-sglang-qwen36-mtp",
-                                  "ev-qwen36-mtp-cpu-numeric"))
+                                  "ev-qwen36-mtp-cpu-numeric",
+                                  "ev-vllm-qwen36-mrope",
+                                  "ev-qwen36-mrope-cpu-numeric"))
 
 
 def _dflash_draft() -> DraftIR:

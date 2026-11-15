@@ -152,16 +152,25 @@ def test_qwen36_required_scenario(cat):
     assert m.mtp_layers == 1
     assert m.source.repo_id == "Qwen/Qwen3.6-35B-A3B"
     assert m.source.revision.startswith("345d467b")
-    # config 全覆盖；MTP 头已 R23 双栈 source-checked（extras['mtp'] 结构
-    # spec 在册）；mrope 仍未核 → 不得宣称结构/forward 完备
+    # config 全覆盖；MTP 头已 R23 双栈 source-checked；R26（2026-11-16）
+    # 文本 MRoPE position_ids 语义补齐（sm-qwen36-text-mrope）→ unverified
+    # 清空、forward_source=source-checked、structure_complete=True——
+    # 只表示文本域源码证据完备，不冒充 CPU 执行/GPU 实测（另列字段）
     assert m.config_coverage_complete
-    assert not m.forward_evidence_complete and not m.structure_complete
-    assert m.evidence.forward_source == "partial-source"
-    assert any("mrope" in p for p in m.evidence.unverified_paths)
-    assert all("mtp_head" not in p for p in m.evidence.unverified_paths)
+    assert m.forward_evidence_complete and m.structure_complete
+    assert m.evidence.forward_source == "source-checked"
+    assert m.evidence.unverified_paths == ()
+    assert m.evidence.cpu_forward == "not-run"
+    assert m.evidence.gpu_measurement == "none"
+    assert "sm-qwen36-text-mrope" in m.evidence.checked_paths
     assert m.evidence.method_status["mtp"] == "source-checked"
     assert m.extras["mtp"]["n_layers"] == 1
     assert m.extras["mtp"]["layer_kind"] == "full_attention"
+    rope = m.extras["rope"]
+    assert rope["rotary_dim"] == 64 and rope["mrope_section"] == [11, 11, 10]
+    assert rope["text_semantics"]["degenerate"] is True
+    assert rope["text_semantics"]["positions_factor_text"] == 1
+    assert "rewind" in rope["mtp_position_advance"]
     # 已核分支保持 source-checked，不降格为 config-only
     assert "sm-qwen35-gdn-decode-branch" in m.evidence.checked_paths
     assert m.evidence.method_status["baseline"] == "source-checked"

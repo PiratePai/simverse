@@ -550,6 +550,60 @@ _PINNED_ASSETS = [
       "fixture 级证据：模型级 cpu_forward 保持 not-run，不构成完整 forward "
       "或部署验证；部署排名资格不变"],
      True, "2026-11-13"),
+    ("ev-vllm-qwen36-mrope", "source-checked",
+     "Qwen3.6 文本路径 MRoPE position_ids 语义（R26）：rope 栈逐行核对——"
+     "rope_type=default+mrope_section → MRotaryEmbedding（openpangu 才走 "
+     "Interleaved 变体）；文本 positions 一维（mrope_positions_factor 仅视频"
+     "剪枝=4），_forward_text_rope=标准部分 NeoX RoPE 不经 section 重组；"
+     "2D 三行恒等（SupportsMRoPE 文本 fallback get_mrope_input_positions="
+     "arange(len).expand(3,-1)）时交错重组恒等；HF 栏 L1322-1332 "
+     "arange(seq)+past_seen 扩 4 行（行 0=text 供 mask/GDN、行 1:3 进旋转）；"
+     "MTP 传递（tdar）：prefill 复制 target positions、每步 +1 夹 "
+     "max_model_len−1、末步不推进、下轮 seq_len=target_seq_len−num_rejected、"
+     "sample_src=+1/步；sum(mrope_section)==rotary_dim//2 构造断言",
+     "identity/vllm_qwen36_mrope_pin/manifest.json",
+     "vllm-project/vllm @dc74b8cbbbe3dbb9399fe369757d63defd614cc2"
+     "（5 文件 SHA256/blob sha1 清单在 manifest：qwen3_vl、rope_init、"
+     "rope_base、rope_common、rope_mrope；跨 commit 检查：rope_mrope/base/"
+     "common 在 MTP pin @10a854ed 字节一致，2026-11-16）+ 既有 pin "
+     "vllm_qwen35_pin qwen3_5.py/qwen3_next.py（同 commit）与 "
+     "vllm_qwen36_mtp_pin qwen3_5_mtp.py/tdar_speculator.py（@10a854ed）；"
+     "HF 栏 assets/identity/hf_transformers modeling_qwen3_5_moe.py "
+     "@b6401d66 L130-194/L655-690/L1322-1332",
+     "R26：qwen36 unverified_paths 清空与 forward_source=source-checked 的"
+     "依据；config 键 rope_parameters.mrope_section/mrope_interleaved 升 "
+     "mapped；ModelIR.extras['rope'] 文本语义+MTP 位置步进 spec",
+     ["source-checked 源码阅读；vLLM MRotaryEmbedding 模块本机未执行"
+      "（公式转写三路对照代替，见 ev-qwen36-mrope-cpu-numeric）；引擎调度"
+      "循环（decode 迭代↔草稿步映射）未 replay，仅核内核转移语义",
+      "多模态 2D 行相异（视觉 T/H/W 网格、get_rope_index/rope_deltas）域外"
+      "未核——文本退化结论不得外推多模态",
+      "fused_qk_rmsnorm_rope_gate Triton 融合核未执行（文本取 positions[0]，"
+      "与 eager 同数学）；视频剪枝 factor=4 与 openpangu 分支域外"],
+     False, "2026-11-16"),
+    ("ev-qwen36-mrope-cpu-numeric", "numeric-checked",
+     "Qwen3.6 文本 MRoPE 小尺寸独立数学对照（R26）：真实 rope 几何"
+     "（theta=1e7、rotary_dim=64/256、mrope_section [11,11,10]）下三路独立"
+     "实现互核——HF 公式转写（expand(3)+交错重组+cos/sin 加倍+rotate_half）、"
+     "vLLM 公式转写（cos_sin_cache+1D 文本路径+ApplyRotaryEmb NeoX）、独立"
+     "标量复数旋转 oracle；positions 0..8 与上界 262143、prefill/decode 增量"
+     "序列、2D 同行退化恒等；官方 pinned HF 旋转类（Qwen3_5MoeTextRotary"
+     "Embedding，importlib 加载执行，fp32 路径）vs oracle 实测对账；MTP "
+     "位置状态机（复制/+1/末步不推进/回退 num_rejected/夹紧 max_model_len）"
+     "随机接受场景 + 跨步 KV 一致性 + 6 负例（decode 重启 0、步进 +2、不回退、"
+     "2D 异行分支可区分、sum 断言触发、夹紧边界）",
+     "tests/fixtures/qwen36_mrope_r26_numeric.json",
+     "tools/probe_qwen36_mrope_numeric.py（hermetic 纯标准库 f64 本机执行；"
+     "live 段 torch 2.15.0+cpu / transformers 5.22.1 / Python 3.12 执行 "
+     "pinned HF 旋转类）",
+     "真实 rope 参数（ev-qwen36-main-config 同源）+ 随机 q/k（seed 20261116）；"
+     "hermetic atol=1e-12、live atol=1e-5（官方类 fp32）",
+     ["fixture 级证据（随机张量数学对照），不是模型级 cpu_forward 执行，"
+      "不升级模型级证据；真实 checkpoint/多模态/融合 kernel/部署性能不覆盖",
+      "vLLM 侧为公式转写（模块未执行）；vLLM 执行/实测另列，不因此获得",
+      "部署排名资格不因本证据解除（cpu_forward=not-run、GPU=none、预算 "
+      "unknown 保持）"],
+     True, "2026-11-16"),
 ]
 
 

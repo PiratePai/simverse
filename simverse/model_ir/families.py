@@ -202,6 +202,16 @@ _MTP_KEY_NOTES = {
         "路径（loader 不消费 mtp.embed_tokens/lm_head），config 域直接拒绝",
 }
 
+# R26（2026-11-16）：MRoPE 两叶键的 mapped 注记（证据 vllm_qwen36_mrope_pin
+# 5 文件 + hf pin modeling L130-194/L1322-1332 + vllm_qwen35_pin qwen3_5/
+# qwen3_next + vllm_qwen36_mtp_pin tdar/qwen3_5_mtp；消费者 model_ir extras
+# ['rope']。文本域语义：三行恒等 → 重组恒等 → 标准部分 NeoX RoPE）。
+_MROPE_KEY_NOTE = (
+    "mapped（R26 文本域）：mrope_section/mrope_interleaved 进 ModelIR."
+    "extras['rope']；文本 positions 三行恒等时交错重组恒等、旋转=标准"
+    "部分 NeoX RoPE（sm-qwen36-text-mrope；fixture ev-qwen36-mrope-cpu-"
+    "numeric 三路 f64 diff=0）；多模态 2D 行相异分支域外未核")
+
 # R21（2026-11-12）：V4.1 MoE 路由键的 mapped 注记（证据 moe-pin.json
 # 14 文件 + ev-vllm-v41-moe；消费者 count/moe.v41_moe_route_rows、
 # lowering/memory 路由偏置对象）。
@@ -498,8 +508,11 @@ def _coverage(family: str, config: Dict[str, Any], gaps_hint: Dict[str, str] = N
                 covered[path] = {"status": "metadata-only", "consumer": "identity",
                                  "note": "角度参数；不改变本仓计数，未执行"}
             elif leaf in ("mrope_section", "mrope_interleaved"):
-                covered[path] = {"status": "metadata-only", "consumer": "identity",
-                                 "note": "多模位置 id 选择语义；文本算量不变，未执行"}
+                # R26（2026-11-16）：文本域 mapped——三行恒等时交错重组为
+                # 恒等、旋转=标准部分 NeoX RoPE（fixture f64 diff=0）；
+                # 多模态 2D 行相异分支域外（sm-qwen36-text-mrope uncovered）
+                covered[path] = {"status": "mapped", "consumer": "model_ir",
+                                 "note": _MROPE_KEY_NOTE}
             else:
                 covered[path] = {"status": "unsupported-semantic", "consumer": "-",
                                  "note": "未登记的 rope_parameters 叶键（不默认忽略）"}
@@ -671,6 +684,50 @@ def _parse_hybrid(config: Dict[str, Any], source: SourceIdentity, model_id: str,
             "step_selection": "spec_step_idx % n_layers",
             "source_pin": "vllm@10a854ed6b3bbd7411c65ccbf87594e71c4d322c",
         }
+    # R26（2026-11-16）：文本 MRoPE 位置语义 spec（sm-qwen36-text-mrope；
+    # qwen3_5 家族共享 MRotaryEmbedding 栈，qwen3_next 配置无 mrope_section
+    # 时不建 spec）。sum(section)==rotary_dim//2 与 vLLM 构造断言同口径
+    # （rope_mrope.py L362-363），违反即拒绝（不静默）。
+    rope_spec: Dict[str, Any] = {}
+    _rp = config.get("rope_parameters") or {}
+    _section = _rp.get("mrope_section")
+    if family in ("qwen3_5_moe", "qwen3_next") and _section is not None:
+        if sum(_section) != attn.rotary_dim // 2:
+            raise ValueError(
+                f"mrope_section 和 {_section} != rotary_dim//2="
+                f"{attn.rotary_dim // 2}（vLLM MRotaryEmbedding 构造断言同口径，"
+                "rope_mrope.py L362-363；不静默接受）")
+        rope_spec = {
+            "rope_type": _rp.get("rope_type", "default"),
+            "theta": _rp.get("rope_theta"),
+            "partial_rotary_factor": _rp.get("partial_rotary_factor", 1.0),
+            "rotary_dim": attn.rotary_dim,
+            "mrope_section": list(_section),
+            "mrope_interleaved": bool(_rp.get("mrope_interleaved", False)),
+            "text_semantics": {
+                "positions": "prefill arange(T)+past_seen(0)；decode {ctx}"
+                             "（HF past_key_values.get_seq_length / vLLM 引擎"
+                             "缓存续位）",
+                "degenerate": True,
+                "degenerate_meaning": "三行恒等 → 交错重组恒等 → 标准部分 "
+                                      "NeoX RoPE（fixture 三路 f64 diff=0）",
+                "layout": "interleaved：freq idx%3∈{1,2} 且 idx<3·section 归 "
+                          "H/W，余归 T；文本下行相同故恒等",
+                "positions_factor_text": 1,
+                "hf_position_ids": "arange(seq)+past_seen → expand(4,B,T)；"
+                                   "行 0=text（mask/GDN）、行 1:3 进旋转",
+            },
+            "mtp_position_advance": {
+                "init": "draft positions = target positions（逐元素复制，"
+                        "tdar L494-499）",
+                "per_step": "+1（夹 max_position−1），末步 s=K−1 不推进；"
+                            "sample_src=positions+1 每步 +1",
+                "rewind": "下轮 seq_len=target_seq_len−num_rejected（+1 "
+                          "bonus）；KV 行随 seq_len 回退（被拒行下轮重写）",
+                "source_pin": "vllm@10a854ed6b3bbd7411c65ccbf87594e71c4d322c",
+            },
+            "source_pin": "hf@b6401d66 + vllm@dc74b8cb（sm-qwen36-text-mrope）",
+        }
     # 两键的 mapped 注记逐键替换为行号证据（同 Engram/CSA2 模式）
     for key, note in _MTP_KEY_NOTES.items():
         path = f"{text_prefix}.{key}" if text_prefix else key
@@ -691,6 +748,7 @@ def _parse_hybrid(config: Dict[str, Any], source: SourceIdentity, model_id: str,
                            bool(config.get("mtp_use_dedicated_embeddings", False)),
                        "mamba_ssm_dtype": config.get("mamba_ssm_dtype", ""),
                        **({"mtp": mtp_spec} if mtp_spec else {}),
+                       **({"rope": rope_spec} if rope_spec else {}),
                    })
 
 
