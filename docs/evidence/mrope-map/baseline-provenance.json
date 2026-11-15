@@ -1,0 +1,9 @@
+{
+ "captured": "2026-11-16",
+ "before": "pristine main ee70ce2 (worktree D:/Github/new-viewer, clean)",
+ "scenarios": {
+  "mtp_default": "docs/evidence/mtp-map/scenario.json",
+  "dflash_default": "ScenarioV2() 默认"
+ },
+ "expectation": "R26 语义/证据级改动：账本零漂移；M07 structure_complete False→True；M02 排名阻断理由不再含 mrope（cpu/gpu/预算仍阻断）"
+}

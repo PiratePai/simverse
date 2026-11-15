@@ -2,6 +2,7 @@
 # 行尾转换会破坏哈希（Windows autocrlf=true 下 CI clean checkout 会转 CRLF）。
 # eol=lf 保证任意平台 checkout 后字节不变（refs 内文件本就以 LF 入库）。
 docs/rebuild-20261106/references/** text eol=lf
+assets/identity/** text eol=lf
 assets/identity/hf_transformers/*.py text eol=lf
 tests/fixtures/qwen36_r06_numeric_oracle.json text eol=lf
 
@@ -29,3 +30,6 @@ docs/evidence/swiglu-tail/*.json binary
 
 # R25 原始 replay 快照（同 R05/R20-R24 先例）：保留捕获字节防行尾转换破坏 SHA256。
 docs/evidence/csa2-core/*.json binary
+assets/identity/vllm_qwen36_mrope_pin/* text eol=lf
+# R26 replay 快照（同 mtp-map/swiglu-tail 先例）：保留捕获字节防行尾转换。
+docs/evidence/mrope-map/*.json binary

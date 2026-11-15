@@ -1,0 +1,16 @@
+{
+ "dflash_default": {
+  "forward_source": "source-checked",
+  "ledger_digest": "07983d65f58f7b8f93123f5c7b7d42cb91503aee2f4979be06d022ce39d9f8c5",
+  "m02_reason": "不参与排名：当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; DFlash 草稿结构/轮协议已源码核过，但未执行/未实测；未核：served_deployment: R07a 双栈源码核对不等于已部署实测；真实 trace 与匹配环境待 R07b；rejection_sampling_cost: 拒绝采样/KV 回退/hidden 提取无独立耗时，当前显式 0 占位（两栈 GPU kernel 证据已注记；vLLM prepare-inputs 为图外 eager Triton）；runtime_pool_sizes: workspace/CUDA graph/NCCL 池尺寸无证据; DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；时间线以显式 0 占位，仅为已建模阶段下界。R07a 源码核对：两栈 accept/bonus/prepare-inputs 均为 GPU kernel，但计时边界不同——vLLM prepare_dflash_inputs 是图外 eager Triton，draft sampler 在 draft FULL 图内；SGLang draft sampler 在 draft 图内，accept/bonus 为独立 Triton launch；均未独立计价，仍 unknown。成本行按 vLLM 实现（layout copy/全量 logits）；SGLang 无全局 layout copy 等差异单列 source_map; colocated_r0 known_peak=2831405056B（steady=2830652352）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
+  "m02_support": "approximated",
+  "structure_complete": true
+ },
+ "mtp_default": {
+  "forward_source": "source-checked",
+  "ledger_digest": "5b95dd04fb4a8b90097ffcf2c561ac221e67a62a2a2c52b65cfb8232c227be2b",
+  "m02_reason": "不参与排名：当前模型未登记完整小尺寸 CPU forward；shape/numeric 执行证据缺失; 两款主模型无 GPU/部署实测；历史 H200 profile 只绑定已归档模型; 实际部署排名需要 forward 执行 + GPU/部署实测 + 完整预算；当前证据不足，数值仅供假设探索; MTP 微头结构/加载/colocated 共享/TP-EP 配方已 source-checked（R23：vllm @10a854ed qwen3_5_mtp pin 8 文件 + SGLang 对照；fc+双预归一+full-attn MoE 层+final norm+共享 embed/lm_head）；接受率仍是显式假设输入，kernel/CPU/GPU 未执行、未实测; colocated_r0 known_peak=2841130688B（steady=2841004480）；可分配预算未知（allocatable=None）：仅标称容量，低于标称不能证明 feasible（§7.4）",
+  "m02_support": "approximated",
+  "structure_complete": true
+ }
+}

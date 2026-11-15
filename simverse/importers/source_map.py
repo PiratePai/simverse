@@ -24,6 +24,11 @@ SGLANG_DFLASH_PIN = "sgl-project/sglang@74cb973d78dfa4af85a90d2841891fec27e78db2
 # assets/identity/sglang_qwen36_mtp_pin/manifest.json（1 文件）
 VLLM_MTP_PIN = "vllm@10a854ed6b3bbd7411c65ccbf87594e71c4d322c"
 SGLANG_MTP_PIN = "sgl-project/sglang@1b2870d33de7b5f31844fd74e97eea6d7896c53a"
+# R26（2026-11-16）Qwen3.6 文本 MRoPE rope 栈 pin（与 VLLM_PARALLEL_PIN
+# 同 commit）：5 文件 SHA256/blob sha1 见 assets/identity/
+# vllm_qwen36_mrope_pin/manifest.json；rope_mrope/rope_base/rope_common
+# 在 MTP pin commit 10a854ed 字节一致（跨 commit 交叉验证 2026-11-16）
+VLLM_MROPE_PIN = "vllm@dc74b8cbbbe3dbb9399fe369757d63defd614cc2"
 
 
 @dataclass
@@ -198,6 +203,106 @@ ENTRIES: List[SourceMapEntry] = [
              "常驻/草稿 KV/临时对象、pipeline 逐步阶段+草稿通信+dt 拒绝。"
              "HF 主模型仍丢弃 mtp.*（qwen3_5.py:326/476 hf_to_vllm_mapper "
              "与 HF _keys_to_ignore 保持原状，两栏分立）"),
+    SourceMapEntry(
+        entry_id="sm-qwen36-text-mrope",
+        model_or_method="qwen3_5_moe 文本 MRoPE position_ids（主模型 + "
+                        "原生 MTP 传递）",
+        semantic="Qwen3.6-35B-A3B 纯文本路径 MRoPE（R26，2026-11-16 双栈 "
+                 "source-checked + fixture 数值对照）：**文本退化**——"
+                 "position_ids 三个 T/H/W 分量恒等 → mrope_section 交错重组"
+                 "为恒等 → 旋转数学与标准部分 NeoX RoPE 完全一致（cos/sin "
+                 "加倍拼接 vs 32 宽 chunk 两实现逐元素相等，fixture f64 "
+                 "diff=0；官方 HF 类实测 fp32 diff 4.35e-07）。几何："
+                 "head_dim 256、partial_rotary_factor 0.25 → rotary_dim 64，"
+                 "inv_freq[i]=theta^(−2i/64)（32 对），mrope_section "
+                 "[11,11,10]（和 32=rotary_dim/2；交错布局 idx%3∈{1,2} 且 "
+                 "idx<3·section 归 H/W，余归 T），尾部 192 维直通。"
+                 "位置生成（主模型）：HF position_ids=None 时 "
+                 "arange(seq)+past_key_values.get_seq_length() 扩展 4 行"
+                 "（[text,T,H,W]，行 0 供 mask/GDN、行 1:3 进旋转，四行"
+                 "恒等）；vLLM get_mrope_input_positions=arange(len)."
+                 "expand(3,-1) 起始 0，decode 由引擎缓存续位（=上下文"
+                 "长度），prefill 0..T−1 / decode {ctx}。mrope_positions_"
+                 "factor 仅多模态视频剪枝时 4（cos/sin 缓存放大），文本=1"
+                 "（positions 一维，MRotaryEmbedding 走 _forward_text_"
+                 "rope=标准 RoPE，不经 section 重组）。MTP 传递（tdar）："
+                 "prefill 草稿 positions 逐元素复制 target positions；"
+                 "sample_src=positions+1；每草稿步 +1（夹 max_model_len−1），"
+                 "末步（s=K−1）不推进；下轮 seq_len=target_seq_len−"
+                 "num_rejected（+1 bonus，回退被拒位置），positions+1 夹紧；"
+                 "草稿 KV 行随 seq_len 回退（被拒行下轮重写）。"
+                 "算量结论：rope 行 flops=3·T·heads·rotary_dim 口径不变，"
+                 "本轮零计数/内存改动（replay 数值不变）",
+        source_pin=VLLM_MROPE_PIN,
+        source_location=(
+            "HF huggingface/transformers@b6401d66（assets/identity/"
+            "hf_transformers/modeling_qwen3_5_moe.py）：130-194"
+            "（Qwen3_5MoeTextRotaryEmbedding：146 mrope_section 默认 "
+            "[11,11,10]、162-168 partial dim+inv_freq、171-183 forward "
+            "expand(3)、185-194 交错重组+cos/sin 加倍）、1322-1332"
+            "（Qwen3_5MoeTextModel.forward 文本 position_ids：arange+"
+            "past_seen → expand(4,B,T)；行 0=text_position_ids、行 1:3 "
+            "进 rotary）、655-690（apply_rotary_pos_emb rotate_half/NeoX）；"
+            "vllm@dc74b8cb：qwen3_5.py 440-446（get_mrope_input_positions="
+            "arange(len).expand(3,-1)，偏移 0）、163（mrope_positions_factor"
+            " 注入 full-attn 层）、qwen3_next.py 344-350（get_rope）、"
+            "384-401（supports_mrope：MRotaryEmbedding+mrope_section 且 "
+            "sum==rotary_dim//2 且 mrope_interleaved；text_only 时 fused "
+            "核可用）、423-426（fused 文本路径取 positions[0]）、467"
+            "（rotary_emb(positions,q,k)）、qwen3_vl.py 1821-1828"
+            "（mrope_positions_factor=4 仅视频剪枝，否则 1）、"
+            "rope_init.py 112-124（rope_type=default+mrope_section → "
+            "MRotaryEmbedding；openpangu 才走 MRotaryEmbeddingInterleaved，"
+            "Qwen3.6 不经过）、rope_mrope.py 304-363（构造 + assert "
+            "sum(mrope_section)==rotary_dim//2）、375-436（forward_native "
+            "1D 无重组/2D 交错 apply_interleaved_rope）、438-470"
+            "（_forward_text_rope=标准 RoPE）、472-504（forward_cuda 1D→"
+            "text 路径）、573-586（get_next_input_positions 3 行同 "
+            "range）、rope_base.py 80-103（inv_freq/cos_sin_cache）、"
+            "rope_common.py 19-22+133-173（rotate_neox/ApplyRotaryEmb）；"
+            "vllm@10a854ed（MTP 位置步进）：qwen3_5_mtp.py 55-62"
+            "（positions 契约：3×seq 仅多模态，否则 1×seq）、147-180"
+            "（forward positions 直传 full_attention 层）、"
+            "tdar_speculator.py 351-355/388-389（prefill sample_src="
+            "positions+1）、494-499（draft positions 逐元素复制 target）、"
+            "601-616（下轮 sample_src+1、seq_len=target−num_rejected、"
+            "positions+1 夹 max_model_len−1）、641-689（步进 +1 夹紧、"
+            "末步 649-651 不推进）"),
+        branch_predicate="positions.ndim==1（文本）→ 标准 RoPE 无 section "
+                         "重组；ndim==2 且三行恒等（SupportsMRoPE 文本"
+                         "fallback）→ 交错重组恒等；ndim==2 且行相异"
+                         "（多模态）→ apply_interleaved_rope 生效（本仓"
+                         "域外）",
+        thresholds="sum(mrope_section)==rotary_dim//2（rope_mrope.py:363 "
+                   "assert，32==32）；rotary_dim=0.25×256=64；"
+                   "positions ≤ max_model_len−1（夹紧）",
+        input_domain="纯文本 prefill（0..T−1）/ decode（{ctx}，引擎缓存"
+                     "续位）/ MTP 草稿步（复制起点 + 每步 +1 + 拒绝回退 + "
+                     "夹紧 262143）；rotary_dim 64/256、theta 1e7、"
+                     "mrope_section [11,11,10]",
+        both_sides_covered=True,
+        evidence_kind="source-checked",
+        uncovered_domain=[
+            "多模态 2D positions（T/H/W 行相异，视觉 token 网格）与 "
+            "Qwen3_5MoeModel.get_rope_index/rope_deltas 域外未核——文本"
+            "退化结论不得外推多模态",
+            "vLLM MRotaryEmbedding 模块本机未执行（公式转写三路 f64 对照 "
+            "+ 跨 commit 字节一致代替执行证据）；vLLM/SGLang 引擎调度"
+            "循环（哪一步 decode 迭代对应哪一草稿步）未 replay，仅核"
+            "内核转移语义",
+            "fused_qk_rmsnorm_rope_gate Triton 融合核未执行（文本路径取 "
+            "positions[0] 与 eager 同数学；supports_mrope 判定已核）",
+            "视频剪枝（mrope_positions_factor=4）与 openpangu/"
+            "MRotaryEmbeddingInterleaved 分支域外"],
+        note="R26（2026-11-16）：fixture=tools/probe_qwen36_mrope_numeric."
+             "py → tests/fixtures/qwen36_mrope_r26_numeric.json（三路 f64 "
+             "diff=0、官方 HF 旋转类实测 4.35e-07、MTP 状态机+6 负例）；"
+             "证据 ev-vllm-qwen36-mrope（source-checked）+ ev-qwen36-"
+             "mrope-cpu-numeric（numeric-checked fixture 级）。config 键 "
+             "rope_parameters.mrope_section/mrope_interleaved 升 mapped"
+             "（文本域）；qwen36 unverified_paths 清空 → forward_source="
+             "source-checked、structure_complete=True（cpu_forward/gpu "
+             "另列，排名资格不因此解除）"),
     SourceMapEntry(
         entry_id="sm-v41-index-short-branch",
         model_or_method="deepseek_v41_flash CSA2",

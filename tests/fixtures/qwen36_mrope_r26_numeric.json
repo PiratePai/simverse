@@ -1,0 +1,290 @@
+{
+ "seed": 20261116,
+ "rope_config": {
+  "head_dim": 256,
+  "partial_rotary_factor": 0.25,
+  "rope_theta": 10000000.0,
+  "rope_type": "default",
+  "mrope_section": [
+   11,
+   11,
+   10
+  ],
+  "mrope_interleaved": true,
+  "max_position_embeddings": 262144,
+  "num_attention_heads": 16,
+  "num_key_value_heads": 2
+ },
+ "rotary_dim": 64,
+ "positions": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  262143
+ ],
+ "main_model": {
+  "max_diff_hf_vs_oracle": 0.0,
+  "max_diff_vllm_vs_oracle": 0.0,
+  "max_diff_hf_vs_vllm": 0.0,
+  "position_sequences": [
+   {
+    "T": 5,
+    "past_seen": 0,
+    "hf": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "vllm": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "equal": true
+   },
+   {
+    "T": 1,
+    "past_seen": 5,
+    "hf": [
+     5
+    ],
+    "vllm": [
+     5
+    ],
+    "equal": true
+   },
+   {
+    "T": 1,
+    "past_seen": 6,
+    "hf": [
+     6
+    ],
+    "vllm": [
+     6
+    ],
+    "equal": true
+   }
+  ],
+  "twod_identical_rows_degenerate_diff": 0.0
+ },
+ "mtp": {
+  "trace": [
+   {
+    "round": 0,
+    "ctx_before": 7,
+    "steps": [
+     {
+      "step": 0,
+      "fwd_pos": 6,
+      "sample_src": 8,
+      "pos_after": 7,
+      "seq_len": 8,
+      "kv_rows": 8
+     },
+     {
+      "step": 1,
+      "fwd_pos": 7,
+      "sample_src": 9,
+      "pos_after": 8,
+      "seq_len": 9,
+      "kv_rows": 9
+     },
+     {
+      "step": 2,
+      "fwd_pos": 8,
+      "sample_src": 9,
+      "pos_after": 8,
+      "seq_len": 9,
+      "kv_rows": 10
+     }
+    ],
+    "accepted": 1,
+    "num_rejected": 2,
+    "target_seq_len": 10,
+    "pos_after_round": 9,
+    "seq_len_after": 9,
+    "sample_src": 10
+   },
+   {
+    "round": 1,
+    "ctx_before": 9,
+    "steps": [
+     {
+      "step": 0,
+      "fwd_pos": 8,
+      "sample_src": 10,
+      "pos_after": 9,
+      "seq_len": 10,
+      "kv_rows": 10
+     },
+     {
+      "step": 1,
+      "fwd_pos": 9,
+      "sample_src": 11,
+      "pos_after": 10,
+      "seq_len": 11,
+      "kv_rows": 11
+     },
+     {
+      "step": 2,
+      "fwd_pos": 10,
+      "sample_src": 11,
+      "pos_after": 10,
+      "seq_len": 11,
+      "kv_rows": 12
+     }
+    ],
+    "accepted": 0,
+    "num_rejected": 3,
+    "target_seq_len": 12,
+    "pos_after_round": 11,
+    "seq_len_after": 10,
+    "sample_src": 12
+   },
+   {
+    "round": 2,
+    "ctx_before": 10,
+    "steps": [
+     {
+      "step": 0,
+      "fwd_pos": 9,
+      "sample_src": 11,
+      "pos_after": 10,
+      "seq_len": 11,
+      "kv_rows": 11
+     },
+     {
+      "step": 1,
+      "fwd_pos": 10,
+      "sample_src": 12,
+      "pos_after": 11,
+      "seq_len": 12,
+      "kv_rows": 12
+     },
+     {
+      "step": 2,
+      "fwd_pos": 11,
+      "sample_src": 12,
+      "pos_after": 11,
+      "seq_len": 12,
+      "kv_rows": 13
+     }
+    ],
+    "accepted": 1,
+    "num_rejected": 2,
+    "target_seq_len": 13,
+    "pos_after_round": 12,
+    "seq_len_after": 12,
+    "sample_src": 13
+   },
+   {
+    "round": 3,
+    "ctx_before": 12,
+    "steps": [
+     {
+      "step": 0,
+      "fwd_pos": 11,
+      "sample_src": 13,
+      "pos_after": 12,
+      "seq_len": 13,
+      "kv_rows": 13
+     },
+     {
+      "step": 1,
+      "fwd_pos": 12,
+      "sample_src": 14,
+      "pos_after": 13,
+      "seq_len": 14,
+      "kv_rows": 14
+     },
+     {
+      "step": 2,
+      "fwd_pos": 13,
+      "sample_src": 14,
+      "pos_after": 13,
+      "seq_len": 14,
+      "kv_rows": 15
+     }
+    ],
+    "accepted": 1,
+    "num_rejected": 2,
+    "target_seq_len": 15,
+    "pos_after_round": 14,
+    "seq_len_after": 14,
+    "sample_src": 15
+   }
+  ],
+  "invariant_checks": 36
+ },
+ "negatives": {
+  "decode_restart_zero": {
+   "what": "decode 位置重启 0 而非续缓存长度",
+   "caught": true,
+   "max_diff": 1.8431373515797758
+  },
+  "step_plus_two": {
+   "what": "draft 步进 +2 跳位",
+   "caught": true,
+   "max_diff": 1.444283449957644
+  },
+  "no_rewind": {
+   "what": "下轮不回退 num_rejected",
+   "caught": true,
+   "correct_seq_len": 9,
+   "wrong_seq_len": 11
+  },
+  "multimodal_2d_distinct_rows": {
+   "what": "2D 异行走交错重组（多模态分支，域外登记）",
+   "branch_exists": true,
+   "max_diff": 1.3471310456945482,
+   "scope": "out-of-scope：视觉域 T/H/W 位置选择未建模"
+  },
+  "section_sum_assert": {
+   "what": "sum(section)≠rotary_dim//2 断言触发",
+   "fired": true
+  },
+  "clamp_max_len": {
+   "what": "positions 夹紧 max_model_len−1 / seq_len 夹 max",
+   "pos": 23,
+   "seq_len": 24,
+   "clamped": true
+  }
+ },
+ "pins_sha256": {
+  "hf/modeling_qwen3_5_moe.py": "abac917f54dfe822a35f3bdb846593f76a2d74b251c96c45a245df273554c44c",
+  "hf/configuration_qwen3_5_moe.py": "b4292600803686a2d0aca86f39309177cc5564cc751ec81479594369a6b88416",
+  "vllm_dc74b8cb/qwen3_5.py": "3e8987847515cf00e879f444ed0cd09aae95e25280b307ecc66c05d1222baf1a",
+  "vllm_dc74b8cb/qwen3_next.py": "7b9a1fd0e159e02fc0f88bc22870f04d763c8736b917bca650cd6a19afebdec5",
+  "vllm_dc74b8cb/rope_init.py": "b0487bc2998033fe5e8007759329728342c8827b1f2d6e55e750abe826513c74",
+  "vllm_dc74b8cb/rope_base.py": "c81804498f08f072356a26b41967f211475df2694dabf5da9f488c074d1fdef5",
+  "vllm_dc74b8cb/rope_common.py": "af4825138c1d8ee3823bfad04dadd91f6657818f867756c676faeb9d14d64f02",
+  "vllm_dc74b8cb/rope_mrope.py": "a73071b1a8df576ab1796abf9538a8540e0d7c42143f9dbe7d2349ab6390534f",
+  "vllm_dc74b8cb/qwen3_vl.py": "0d953c7963672c6297bfd95c3f1043362975c974025cafba8f40e7f4c9bc8b28",
+  "vllm_10a854ed/qwen3_5_mtp.py": "d78955d0116c5628b2aeea2911175fc55dfdd07b4455d09f75c71c296a4893a9",
+  "vllm_10a854ed/tdar_speculator.py": "f172b47b9c98a74ecc318dcfaeb855b0dc3941d13ff9aa9b878ed95e2ff88ec8"
+ },
+ "environment": {
+  "python": "3.12.10",
+  "implementation": "CPython",
+  "mode": "pure-python f64（无 torch）"
+ },
+ "live_hf_class": {
+  "executed": true,
+  "torch": "2.15.0+cpu",
+  "transformers": "5.22.1",
+  "official_class": "Qwen3_5MoeTextRotaryEmbedding(pinned @b6401d66)",
+  "max_diff_official_vs_oracle": 4.3512536607170915e-07,
+  "decode_pos5_cos_diff": 1.8854927952283163e-08,
+  "atol": 1e-05
+ }
+}

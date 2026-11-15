@@ -12,8 +12,11 @@ ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
 linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）；
 2026-11-13 R22：G-C14 新增（量化映射主干已解除、执行变体登记），
 quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新增
-（Qwen3.6 原生 MTP forward 主干已解除、执行/变体登记）；2026-11-16 R25：
-G-C16 新增（V4.1 稀疏 MLA 注意力核本体主干已解除、执行/变体登记）。
+（Qwen3.6 原生 MTP forward 主干已解除、执行/变体登记）；2026-11-16
+R26：G-C16 新增（Qwen3.6 文本 MRoPE 语义已解除、structure_complete 翻转；
+多模态 2D 位置分支登记为域外）；2026-11-16 R25：G-C17 新增（V4.1 稀疏
+MLA 注意力核本体主干已解除、执行/变体登记；编号在 R26 合入后让位——
+初稿曾用 G-C16）。
 
 ## G-C15 ~~Qwen3.6 原生 MTP forward 证据与仿真映射~~ → 主干已解除（2026-11-13 R23）⭐P0
 
@@ -48,10 +51,37 @@ G-C16 新增（V4.1 稀疏 MLA 注意力核本体主干已解除、执行/变体
   （DraftLogitsCache）、CUDA-graph 桶 padding、SGLang NPU/量化分支未建模；
   草稿 prefill KV 同步未入稳态 TPOT（一次性成本，cache_policy 登记）；
   接受率仍假设输入（R07b）。
-- **当前降级**：无结构降级（MTP 头主干 mapped+source-checked；mrope 仍
-  阻断 structure_complete）；method_status["mtp"]=source-checked 但
+- **当前降级**：无结构降级（MTP 头主干 mapped+source-checked；mrope 阻断
+  已于 2026-11-16 R26 解除，structure_complete=True——只表示源码证据完备，
+  不冒充 CPU 执行/GPU 实测）；method_status["mtp"]=source-checked 但
   method_recipe_ready 保持 approximated（接受假设+未执行）→ M02 不参与
   实际部署排名。
+- **优先级**：P0（必需模型场景）。
+
+## G-C16 ~~Qwen3.6 文本路径 MRoPE position_ids 语义~~ → 已解除（2026-11-16 R26）⭐P0
+
+- **解除交付**：vllm_qwen36_mrope_pin 5 文件（@dc74b8cb，与 R01 同 commit：
+  qwen3_vl/rope_init/rope_base/rope_common/rope_mrope；blob sha1 对 GitHub
+  contents API 校验）+ HF pin modeling L130-194/L655-690/L1322-1332 + 既有
+  qwen35/mtp pin 三栏 source-checked（ev-vllm-qwen36-mrope；sm-qwen36-
+  text-mrope）。查明：文本 MRoPE 完全退化为标准部分 NeoX RoPE（三行恒等
+  →交错重组恒等；vLLM 1D positions 走 _forward_text_rope 不经 section
+  重组；mrope_positions_factor 仅视频剪枝=4）；prefill arange+past_seen、
+  decode 缓存续位；MTP 位置传递（prefill 复制 target、每步 +1 夹
+  max_model_len−1、末步不推进、下轮 seq_len=target−num_rejected 回退）。
+  fixture 数值对照（ev-qwen36-mrope-cpu-numeric：三路独立实现 f64 两两
+  diff=0.0 + 官方 pinned HF 旋转类本机执行 4.35e-07 + MTP 状态机 ≥16
+  不变量 + 6 负例；fixture 绑定 11 个 pin SHA256）；账本零漂移 replay
+  （docs/evidence/mrope-map；M07 structure_complete False→True、M02 排名
+  理由不再含 mrope）。测试 tests/test_qwen36_mrope_r26.py 17 项。
+- **仍缺（登记不冒充）**：多模态 2D 行相异分支（视觉 T/H/W 网格、
+  get_rope_index/rope_deltas、视频剪枝 factor=4、openpangu Interleaved
+  变体）域外未核未建模；vLLM MRotaryEmbedding 模块本机未执行（公式
+  转写三路对照+跨 commit 字节一致代替）；引擎调度循环未 replay；
+  fused_qk_rmsnorm_rope_gate Triton 核未执行。
+- **当前降级**：无结构降级——structure_complete=True（config 覆盖 + 文本域
+  forward 源码证据完备）；CPU 执行/GPU 实测/预算 unknown 另列，M02 排名
+  资格不变（G15 仍阻断）。
 - **优先级**：P0（必需模型场景）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0
@@ -84,7 +114,7 @@ G-C16 新增（V4.1 稀疏 MLA 注意力核本体主干已解除、执行/变体
   CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE
   scoring/top-k/分组路由已由 R21 解除（见 G-C13）；量化映射已由 R22 解除
   （见 G-C14）；SwiGLU clamp 与 compress_ratios 尾部已由 R24 解除
-  （见 G-C15）；稀疏 MLA 注意力核本体已由 R25 解除（见 G-C16）。
+  （见 G-C15）；稀疏 MLA 注意力核本体已由 R25 解除（见 G-C17）。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
   mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需
   稀疏 MLA 核本体缺口闭环（CSA2 索引、MoE 路由、量化映射、SwiGLU/尾部
@@ -185,7 +215,7 @@ G-C16 新增（V4.1 稀疏 MLA 注意力核本体主干已解除、执行/变体
 - **当前降级**：无（执行域按注册设备固定为 Marlin W8A16/W4A16，变体以
   extras.quant 披露）；structure_complete 曾由 swiglu/核本体/尾部缺口阻断
   ——swiglu/尾部已由 R24 解除（见 G-C15），核本体已由 R25 解除（见
-  G-C16）；现仅由剩余显式执行变体阻断（不冒充）。
+  G-C17）；现仅由剩余显式执行变体阻断（不冒充）。
 - **优先级**：P0（必需模型场景）。
 
 ## G-C15 ~~V4.1 SwiGLU clamp + compress_ratios 尾部~~ → 已解除（2026-11-13 R24）⭐P0
@@ -391,7 +421,7 @@ G-C16 新增（V4.1 稀疏 MLA 注意力核本体主干已解除、执行/变体
   改指 G-D2 数据准入（分片混尺不再是阻塞）。
 - 残留：G-D2 的 moe 蒸馏准入与留出验收（数据侧，独立进行）。
 
-## G-C16 ~~V4.1 稀疏 MLA 注意力核本体（csa2_attention_core）~~ → 主干已解除（2026-11-16 R25）⭐P0
+## G-C17 ~~V4.1 稀疏 MLA 注意力核本体（csa2_attention_core）~~ → 主干已解除（2026-11-16 R25）⭐P0
 
 - **解除交付**：csa2-core-pin.json 14 文件（vllm @`f358f057` 5 文件 blob
   对 vllm-tree.json 逐项校验：nvidia/flashmla.py 消费链、v1/attention/

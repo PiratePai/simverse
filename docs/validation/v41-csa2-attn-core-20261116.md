@@ -134,7 +134,7 @@ baseline-provenance.json；`tools/replay_v41_csa2_core.py`（`--check`
    与 R20 选择 op 惯例同法登记。
 2. **调度器移植的 ceil 语义曾错**：初版把 `ku::ceil(cur,64)` 写成除成
    块数（128→2 而非 128），独立 oracle 锚点（640 长行应为 10 块）抓住，
-   已修正并加随机对照。教训入 G-C16。
+   已修正并加随机对照。教训入 G-C17（编号在 R26 合入后自 G-C16 让位）。
 3. **prefill 工作区逐对行读为逻辑口径**：不记跨行 SMEM/L2 复用（与全仓
    unfused 逻辑访问口径一致）；物理 HBM 流量未实测。
 4. **执行变体未建模（登记于 catalog csa2_attn_execution_variants 与
@@ -188,5 +188,5 @@ baseline-provenance.json；`tools/replay_v41_csa2_core.py`（`--check`
 - `tests/test_v41_csa2_core.py`（新 27 项）；test_v41_csa2（2 项改
   写）、test_model_ir_v02/test_v41_quant/test_v41_swiglu/test_v41_hc/
   test_v41_engram（口径随事实更新）、test_merge_gate（G1/G16）
-- docs：本报告、`gaps/capability-gaps.md`（G-C16）、
+- docs：本报告、`gaps/capability-gaps.md`（G-C17；编号在 R26 合入后自 G-C16 让位）、
   `IMPLEMENTATION_STATUS.md`、`FOCUS_STATUS.md`

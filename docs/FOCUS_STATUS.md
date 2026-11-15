@@ -2,7 +2,7 @@
 
 2026-11-16 R25（V4.1 稀疏 MLA 注意力核本体）：14 文件 pin（csa2-core-pin.json：
 vllm @f358f057 5 文件 + FlashMLA @847ef308 9 文件，外部项目经 vllm cmake
-GIT_TAG 钉定）source-checked 解除核本体缺口（G-C16）。修正：decode 头数
+GIT_TAG 钉定）source-checked 解除核本体缺口（G-C17）。修正：decode 头数
 heads//tp → padded_heads=64（fp8 kernel h_q∈{64,128}、Q 零填充；TP8 旧口径
 少算 8×）；SM90 恒 split-KV（o_accum/lse_accum/combine + 贪心调度器移植
 count/flashmla_sched）；prefill 记录读改 gather 口径（全量压缩前缀+SWA 尾窗
@@ -43,8 +43,9 @@ M01 +0.00002ms）。**模型级 cpu_forward 仍 not-run**——这是 fixture �
 的 prefill/带缓存 decode，每相位 12 个输出与缓存张量；最大绝对差
 2.98e−7（容限 atol=1e−5、rtol=1e−4）。新增
 `ev-qwen36-cpu-numeric-r06`（numeric-checked），原算量/形状证据保持
-shape-checked；模型级 CPU forward、mrope 位置生成、真实 checkpoint 与
-GPU 部署仍未验证。详见 [R06 报告 §9](validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
+shape-checked；模型级 CPU forward、真实 checkpoint 与
+GPU 部署仍未验证（mrope 位置生成已于 2026-11-16 R26 文本域补齐核验，
+见 [R26 报告](validation/qwen36-text-mrope-20261116.md)；多模态 2D 分支域外）。详见 [R06 报告 §9](validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
 
 2026-11-12 R05（V4.1 mHC/Sinkhorn 修正）：14 文件 blob SHA1 对 tree、SHA256
 pin 后补齐 sqrsum/prenorm、comb post、首层无 post、出口两行；Sinkhorn gates+
@@ -102,7 +103,7 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 
 | 能力 | 范围与限制 |
 |---|---|
-| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 + 原生 MTP 头（R23，双栈 pin）source-checked；V4.1 Engram 单副本路径 + hc（R04）与 CSA2 索引打分/top-k/candidate（R20）、MoE 路由（R21）、量化映射（R22）已 source-checked 建模（Engram DP 交换/cpu_offload 运行时、注意力核本体/swiglu、Qwen3.6 mrope 仍缺口）；四栏证据见 JSON |
+| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 + 原生 MTP 头（R23，双栈 pin）source-checked；V4.1 Engram 单副本路径 + hc（R04）与 CSA2 索引打分/top-k/candidate（R20）、MoE 路由（R21）、量化映射（R22）已 source-checked 建模（Engram DP 交换/cpu_offload 运行时、注意力核本体/swiglu 仍缺口；Qwen3.6 文本 MRoPE 已 R26 source-checked、多模态 2D 域外）；四栏证据见 JSON |
 | Qwen3.6+DFlash | pinned 草稿、接受律、draft/verify 解析成本、同卡与 DT 串行；非实测收益；CPU 仅 R06 fixture 级对照（模型级未执行），GPU 未执行 |
 | **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
 | **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
