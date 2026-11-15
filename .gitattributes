@@ -2,6 +2,7 @@
 # 行尾转换会破坏哈希（Windows autocrlf=true 下 CI clean checkout 会转 CRLF）。
 # eol=lf 保证任意平台 checkout 后字节不变（refs 内文件本就以 LF 入库）。
 docs/rebuild-20261106/references/** text eol=lf
+assets/identity/** text eol=lf
 assets/identity/hf_transformers/*.py text eol=lf
 tests/fixtures/qwen36_r06_numeric_oracle.json text eol=lf
 

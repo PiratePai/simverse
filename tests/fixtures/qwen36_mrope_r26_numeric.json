@@ -263,8 +263,8 @@
  "pins_sha256": {
   "hf/modeling_qwen3_5_moe.py": "abac917f54dfe822a35f3bdb846593f76a2d74b251c96c45a245df273554c44c",
   "hf/configuration_qwen3_5_moe.py": "b4292600803686a2d0aca86f39309177cc5564cc751ec81479594369a6b88416",
-  "vllm_dc74b8cb/qwen3_5.py": "21e0414ca0533eb4d991ef4568bef0b815ce2c4069029c9b1030d16bc9963980",
-  "vllm_dc74b8cb/qwen3_next.py": "96798dee020f339b2a8300ca763bb86961dcb039550cf5cfb5f1c670ed6a41e1",
+  "vllm_dc74b8cb/qwen3_5.py": "3e8987847515cf00e879f444ed0cd09aae95e25280b307ecc66c05d1222baf1a",
+  "vllm_dc74b8cb/qwen3_next.py": "7b9a1fd0e159e02fc0f88bc22870f04d763c8736b917bca650cd6a19afebdec5",
   "vllm_dc74b8cb/rope_init.py": "b0487bc2998033fe5e8007759329728342c8827b1f2d6e55e750abe826513c74",
   "vllm_dc74b8cb/rope_base.py": "c81804498f08f072356a26b41967f211475df2694dabf5da9f488c074d1fdef5",
   "vllm_dc74b8cb/rope_common.py": "af4825138c1d8ee3823bfad04dadd91f6657818f867756c676faeb9d14d64f02",
