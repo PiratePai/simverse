@@ -329,13 +329,13 @@ def test_cpu_offload_lookup_is_not_priced_as_gpu_hbm():
 def test_real_model_engram_rows_only_on_engram_layers():
     """真实 V4.1：非 engram 层无 engram 行；layer_ids=[] → 无任何 engram 行。"""
     m = _model()
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp=1, device_sms=132)
     eng_layers = {r.layer for r in rows if r.op.startswith("engram_")}
     assert eng_layers == {1, 14}
     # layer_ids=[]（显式去掉 engram 层）→ 完全无行（不猜默认）
     m_off = replace(m, extras={**m.extras, "engram":
                                {**m.extras["engram"], "layer_ids": []}})
-    rows_off = build_model_work(m_off, "decode", 1, 1024, 1, Q16, tp=1)
+    rows_off = build_model_work(m_off, "decode", 1, 1024, 1, Q16, tp=1, device_sms=132)
     assert not any(r.op.startswith("engram_") for r in rows_off)
 
 
@@ -407,8 +407,8 @@ def test_ledger_delta_is_exactly_engram_rows():
     m_on = _model()
     m_off = replace(m_on, extras={**m_on.extras, "engram":
                                   {**m_on.extras["engram"], "layer_ids": []}})
-    on = build_model_work(m_on, "decode", 1, 1024, 1, Q16, tp=8)
-    off = build_model_work(m_off, "decode", 1, 1024, 1, Q16, tp=8)
+    on = build_model_work(m_on, "decode", 1, 1024, 1, Q16, tp=8, device_sms=132)
+    off = build_model_work(m_off, "decode", 1, 1024, 1, Q16, tp=8, device_sms=132)
     delta_rows = [r for r in on if r.op.startswith("engram_")]
     assert len(delta_rows) == 7
     t_on, t_off = totals(on), totals(off)
@@ -441,7 +441,7 @@ def test_count_capacity_matches_memory_engram_objects():
     """count 行 weight_capacity ↔ memory engram 对象逐层相等（rank0，同精度）。"""
     m = _model()
     for tp in (1, 8):
-        rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp)
+        rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp, device_sms=132)
         allocs = {a.alloc_id: a.bytes for a in target_weight_allocations(
             m, Q16, tp, engram_table_placement="cpu_offload")
             if "engram" in a.alloc_id}
@@ -515,8 +515,15 @@ def test_scenario_engram_table_placement_validation():
     j = run_v2(sc).to_json()
     r0 = j["cost"]["memory"]["target_r0"]
     assert r0["host_resident_bytes"] == 25_344_443_520   # 2×rank0 分片×264
-    # R20：staged 下界 + 共享索引/候选缓冲下界（1×512×4 + 1×2048×4）
-    assert r0["transient_peak_bytes"] == 2 * 1 * 3 * 256 * 2 + 1 * 512 * 4         + 1 * 2048 * 4
+    # R20：staged 下界 + 共享索引/候选缓冲下界（1×512×4 + 1×2048×4）；
+    # R25：FlashMLA 注意力核瞬态下界——decode split-KV o_accum
+    # (1+132)×64×512×4 + (1+132)×64×4、prefill gather 工作区
+    # 1×(32768+32768)×512×2（最宽层型 r=1）、合并索引 32768×640×4+32768×4
+    r25 = ((1 + 132) * 64 * 512 * 4 + (1 + 132) * 64 * 4
+           + 1 * (32768 + 32768) * 512 * 2
+           + 32768 * 640 * 4 + 32768 * 4)
+    assert r0["transient_peak_bytes"] == (2 * 1 * 3 * 256 * 2
+                                          + 1 * 512 * 4 + 1 * 2048 * 4 + r25)
     inv = [a for a in r0["inventory"] if "engram" in a["alloc_id"]]
     assert {a["placement"] for a in inv if "table" in a["alloc_id"]} == \
         {"cpu_offload"}

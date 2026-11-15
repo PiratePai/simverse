@@ -62,6 +62,7 @@ class DeviceSpec:
     peak_by_dtype: 各精度峰值算力 (FLOP/s)；hbm_bw: 聚合有效带宽 (B/s)；
     mem_capacity: HBM 容量 (B)；launch_overhead_ms: 单 kernel launch 估计（T0）；
     mfu_cap: roofline 计算项的 MFU 上限系数（来源：旧仓 spec_gain 口径 0.75）。
+    sm_count: SM 数（R25 起 FlashMLA split-KV 调度器需要；spec 来源）。
     每个数值都带 source（"spec:..." 或 "assumed:..."）——数据身份原则。
     """
 
@@ -74,6 +75,8 @@ class DeviceSpec:
     mfu_cap: float
     sources: Dict[str, str]
     card_count: int = 1  # 0 表示由场景的 tp 决定
+    # R25：SM 数（FlashMLA split-KV 调度器的 num_sm_parts 输入；spec 来源）
+    sm_count: Optional[int] = None
 
     def peak(self, dtype: str) -> float:
         if dtype not in self.peak_by_dtype:

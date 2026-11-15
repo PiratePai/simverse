@@ -1,4 +1,20 @@
-# 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06 增补）
+# 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06、2026-11-16 R25 增补）
+
+2026-11-16 R25（V4.1 稀疏 MLA 注意力核本体）：14 文件 pin（csa2-core-pin.json：
+vllm @f358f057 5 文件 + FlashMLA @847ef308 9 文件，外部项目经 vllm cmake
+GIT_TAG 钉定）source-checked 解除核本体缺口（G-C16）。修正：decode 头数
+heads//tp → padded_heads=64（fp8 kernel h_q∈{64,128}、Q 零填充；TP8 旧口径
+少算 8×）；SM90 恒 split-KV（o_accum/lse_accum/combine + 贪心调度器移植
+count/flashmla_sched）；prefill 记录读改 gather 口径（全量压缩前缀+SWA 尾窗
+→bf16 工作区→逐对行读）；R20 decode sparse_index_build 归因修正为 prefill
+每 chunk 每层（decode 实际每步一次 SWA 窗索引+每压缩层全局槽位+每层型调度器
+元数据）。默认场景 decode +2,850,849,054 flops（+39.7%）/+73 行/
+known_peak +168.6MB 下界；M01 +0.0328 ms/步（解析档）。oracle 27 项
+（tests/test_v41_csa2_core.py，调度器独立重演 200 例）；replay
+evidence/csa2-core --check 无漂移（quant/moe/swiglu check 链式改指）。
+structure_complete 仍 False（剩余 unverified 全为显式执行变体：specialized
+decode/SM100 mega/FlashInfer plain-row/PCP 等）。详见
+[validation/v41-csa2-attn-core-20261116.md](validation/v41-csa2-attn-core-20261116.md)。
 
 2026-11-13 R24（V4.1 SwiGLU clamp + compress_ratios 尾部）：13 文件 pin
 （swiglu-tail-pin.json，vllm @f358f057）source-checked 解除 swiglu_limit
@@ -8,8 +24,8 @@ Marlin 经 apply_moe_activation 同 clamp）→ 新增 moe_act/moe_shared_act �
 （6 算术 op/元素；decode TP8 +483,840 flops/+80 行，字节 0 单一所有者）。
 尾部逐项归 DSpark/nextn 草稿层（层号 40-42、0=纯 SWA、is_backbone 门控
 永不为源；非零尾部域外拒绝）。附带补漏 candidate_block_size 键入 struct
-集合。**V4.1 config 覆盖自此完备**；structure_complete 仍 False（仅稀疏
-MLA 核本体阻断）。oracle 32 项（tests/test_v41_swiglu.py）；replay
+集合。**V4.1 config 覆盖完备**（R25 后核本体亦已 source-checked；
+structure_complete 由剩余执行变体阻断）。oracle 32 项（tests/test_v41_swiglu.py）；replay
 evidence/swiglu-tail --check 无漂移。详见
 [validation/v41-swiglu-tail-20261113.md](validation/v41-swiglu-tail-20261113.md)。
 
@@ -49,7 +65,7 @@ tests/test_v41_engram.py 24 项（素数桶和 == engram_num_embeddings 精确
 相等、TP1 表 202,758,032,400 B、tp=7/9/16 拒绝）。默认 V4.1 replay：
 GPU 侧解析耗时下界 113.34→116.15ms（host 查表时延未知）、GPU steady +39.5MB
 （表在 host 25.3GB 另列）；
-structure_complete 仍 False（CSA2 索引管线 R20、MoE 路由 R21、量化映射 R22 均已 source-checked，但 swiglu/注意力核本体/尾部缺口不变）。详见
+structure_complete 仍 False（主干语义已全部 source-checked（R20-R25）；剩余为显式执行变体 unverified_paths。）详见
 [validation/v41-engram-20261111.md](validation/v41-engram-20261111.md)。
 
 2026-11-10 两模型门禁轮：活跃目录只保留 Qwen3.6-35B-A3B + DFlash、

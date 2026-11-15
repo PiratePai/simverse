@@ -21,6 +21,7 @@ from .. import formula_registry as FR
 from ..model_ir.families import engram_bucket_primes
 from ..model_ir.schema import (FULL, LINEAR, MLA, MLA_CSA2, SLIDING, LayerIR,
                                ModelIR)
+from .flashmla_sched import flashmla_decode_num_splits
 from .moe import moe_rows, require_divisible_ep, v41_moe_route_rows
 
 
@@ -250,15 +251,21 @@ def mla_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
 # ---------------------------------------------------------------------------
 # V4.1 CSA2 层（R20，2026-11-12：索引打分/top-k/candidate block 与压缩器/
 # 索引 K 按 csa2-pin.json 21 文件 pin（vllm @f358f057）source-checked 重写；
-# 注意力核本体（flops 4d+5）仍为 v0.1 移植惯例，见 sm-v41-csa2-indexer）
+# R25，2026-11-16：注意力核本体按 csa2-core-pin.json 14 文件
+# （vllm @f358f057 5 文件 + FlashMLA @847ef308 9 文件，cmake GIT_TAG 钉定）
+# source-checked 重写：decode 头数按 padded_heads=64（fp8 kernel h_q∈{64,128}，
+# Q 零填充）、SM90 恒 split-KV（o_accum/lse_accum/combine/调度器）、prefill
+# 全量压缩前缀 gather + bf16 工作区口径、combine 仅 prefill 每 chunk 每层）
 # ---------------------------------------------------------------------------
 
 
 def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
                    h: int, kvs: dict, quant: dict, prefill: bool, tp: int = 1,
                    v41_kv_record: str = "fp8_ds_mla_sm90",
-                   index_run_first: bool = False,
                    quant_recipe: Optional[dict] = None,
+                   device_sms: Optional[int] = None,
+                   attn_type_first: bool = False,
+                   attn_step_first: bool = False,
                    ) -> List[OpRow]:
     """V4.1 CSA2 层账本（per-rank）。
 
@@ -343,8 +350,20 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
     rows.append(gemm("q_b_proj", qrank, heads * d))
     for name, hd in (("q_rope", heads), ("k_rope", 1)):
         ops, _w, ar, aw = _rope_row(T, hd, d, rd, b_a)
-        rows.append(OpRow(stage, li, name, flops=ops, act_read=ar, act_write=aw,
-                          formula=FR.F_ROPE, shape=f"rotary={rd} heads={hd}"))
+        if name == "q_rope":
+            # R25：fp8_ds_mla 布局下 fused insert 把 Q 零填充到 padded_heads
+            # 再返回（attention.py L1216-1247 pad_to=padded_heads）；RoPE 只
+            # 算真实头，但 q_padded 按填充宽度写（decode 核与 prefill 切片
+            # 各自消费，见 sparse_attention 行）
+            aw = int(T * (64 if heads_full <= 64 else 128) * d * 2)
+            rows.append(OpRow(stage, li, name, flops=ops, act_read=ar,
+                              act_write=aw, formula=FR.F_ROPE,
+                              shape=f"rotary={rd} heads={hd}（写零填充 "
+                                    "padded_heads 宽 q_padded，bf16）"))
+        else:
+            rows.append(OpRow(stage, li, name, flops=ops, act_read=ar,
+                              act_write=aw, formula=FR.F_ROPE,
+                              shape=f"rotary={rd} heads={hd}"))
     # SWA 写：fused 插入核读 bf16 kv 行、写打包记录（584/528 B/token；
     # R20 修正：旧式 d×b_kv 漏 scale/pad 尾部字节）
     rows.append(OpRow(stage, li, "swa_cache_write", act_read=int(T * d * 2),
@@ -512,35 +531,142 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
                 shape=f"top-{topk} 选择惯例 2·n+k/行（n={n_eff}）；写共享 "
                       "topk_indices_buffer（R20 起与旧 index_select 的 "
                       "T·topk 口径区分扫描项）"))
-    # decode：本层若是其 (kv源:索引源:r) 运行的首层，构建稀疏索引表
-    #（combine_topk_swa_indices；SparseIndexTables 等键复用，L159-250；
-    # 运行首 = 该 (kv源,索引源,r) 组合的最小层号）
-    if index_run_first and not prefill:
-        win = min(end, swa)
-        # combine_topk_swa_indices 的固定宽度按 128 对齐（cache_utils.py
-        # L819/L837-841：_SPARSE_PREFILL_TOPK_ALIGNMENT=128；SWA-only 的
-        # TOP_K=0 由 warmup 注释 L898-910 确认）。旧稿按 256 对齐会多计。
-        w_c = -(-((topk if r else 0) + win) // 128) * 128
-        rows.append(OpRow(
-            stage, li, "sparse_index_build",
-            flops=T * ((topk + win) if r else win) * 3,
-            act_read=int(T * (topk if r else 0) * 4 + T * 8),
-            act_write=int(T * w_c * 4 + T * 4),
-            formula=FR.F_CSA2_SPARSE_INDEX_BUILD, statistic="approximated",
-            shape=f"combine_topk_swa_indices 整数核（topk+窗 → 128 对齐宽 "
-                  f"{w_c}）；每 (kv源:索引源:r) 运行首层一次，等键后继复用"))
+    # ---- R25：注意力核本体（csa2-core-pin.json；vllm flashmla.py 消费链）----
+    # 头数口径（flashmla.py L92-100 get_padded_num_q_heads：fp8 decode kernel
+    # 仅支持 h_q∈{64,128}；fp8_ds_mla 布局下 fused insert 把 Q 零填充到
+    # padded_heads=64，attention.py L1216-1247）：decode 按 padded 头计
+    # FLOPs/激活；prefill 在 SM90 small-heads（8/16/32）用真实本地头切片
+    # （flashmla.py L79-87 _get_prefill_num_heads + flash_mla_sparse_fwd
+    # "SM90 supports 8, 16, 32, 64 or 128 heads"）。
+    padded_heads = 64 if heads_full <= 64 else 128
+    sm90 = rec["family"] == "sm90"
+    kern_heads = (heads if (prefill and sm90 and heads in (8, 16, 32))
+                  else padded_heads)
     local_pairs = causal_pairs(end, 1, swa) - causal_pairs(start, 1, swa)
     compressed_pairs = (causal_pairs(end, r, topk) - causal_pairs(start, r, topk)) if r else 0
-    read_swa = min(end, swa) if not prefill else local_pairs
-    read_comp = (min(end // r, topk) if (r and not prefill) else compressed_pairs)
-    rows.append(OpRow(
-        stage, li, "sparse_attention",
-        flops=B * (local_pairs + compressed_pairs) * heads * (4 * d + 5),
-        act_read=int(T * heads * d * b_a), act_write=int(T * heads * d * b_a),
-        kv_read=int(B * (read_swa * swa_rec + read_comp * comp_rec)),
-        formula=FR.F_CSA2_RECORD,
-        shape=f"SWA {read_swa}×{swa_rec}B + 压缩 {read_comp}×{comp_rec}B"
-              f"（每消费者各读一次；flops 4d+5 仍为 v0.1 移植惯例）"))
+    pairs = B * (local_pairs + compressed_pairs)
+    if prefill:
+        # prefill：每请求每 chunk 一次全量压缩前缀 gather（seq_lens//r 行，
+        # flashmla.py L334-346 gather_lens=None → [0, seq_len) 全取）+ SWA
+        # 尾窗 gather（gather_len = Q + min(S, swa−1)，ComputePrefillMetadata
+        # Kernel L376-384）；记录读在 gather 行，注意力核读 bf16 工作区
+        n_comp_rows = (end // r) if r else 0
+        gather_len = Q + min(S, swa - 1)
+        rows.append(OpRow(
+            stage, li, "attn_kv_gather",
+            flops=B * (n_comp_rows + gather_len) * 2 * d,
+            kv_read=int(B * (n_comp_rows * comp_rec + gather_len * swa_rec)),
+            act_write=int(B * (n_comp_rows + gather_len) * d * 2),
+            formula=FR.F_CSA2_ATTN_GATHER, statistic="exact",
+            shape=f"dequantize_and_gather：压缩前缀 {n_comp_rows}×{comp_rec}B"
+                  f" + SWA 尾窗 {gather_len}×{swa_rec}B → bf16 工作区"
+                  f"（{d}×2B/行）；dequant ≈2 op/elem 惯例"))
+        rows.append(OpRow(
+            stage, li, "sparse_attention",
+            flops=pairs * kern_heads * (4 * d + 5),
+            act_read=int(T * kern_heads * d * 2
+                         + pairs * d * 2 + kern_heads * 4),
+            act_write=int(T * kern_heads * d * 2 + T * kern_heads * 8),
+            formula=FR.F_CSA2_ATTN_CORE, statistic="exact",
+            shape=f"flash_mla_sparse_fwd：SWA {local_pairs} + 压缩 "
+                  f"{compressed_pairs} 对/请求 × {kern_heads} 头 × (4·{d}+5)"
+                  f"（QK 2d + PV 2d_v=2d + softmax 5 op 惯例；工作区逐对"
+                  f" bf16 行读为逻辑口径不记跨行复用；out bf16 + "
+                  "max_logits/lse fp32；sink 每头标量 4B）"))
+        # combine_topk_swa_indices：prefill 每 chunk 每层（flashmla.py
+        # L370-383）；R20 误记为 decode 运行首层——decode 路径不调用该
+        # Triton 核（只有 specialized decode 变体的 SparseIndexTables 用
+        # 等键复用），本轮归位到 prefill
+        w_c = -(-((topk if r else 0) + swa) // 128) * 128
+        items = pairs
+        rows.append(OpRow(
+            stage, li, "sparse_index_build",
+            flops=items * 3,
+            act_read=int(compressed_pairs * B * 4 + T * 16),
+            act_write=int(T * w_c * 4 + items * 4 + T * 4),
+            formula=FR.F_CSA2_SPARSE_INDEX_BUILD, statistic="approximated",
+            shape=f"combine_topk_swa_indices：fill −1 整宽 {w_c}（128 对齐）"
+                  f"+ 有效 {items} 项（topk+窗，无去重拼接，cache_utils.py "
+                  "L970-1020）；3 op/项惯例"))
+    else:
+        # decode：flash_mla_with_kvcache 一次核联读 SWA 记录（indices=窗）
+        # 与压缩记录（extra_indices=topk），逐行按各自窗/topk 直读分页记录
+        rows.append(OpRow(
+            stage, li, "sparse_attention",
+            flops=pairs * kern_heads * (4 * d + 5),
+            act_read=int(T * kern_heads * d * 2 + kern_heads * 4),
+            act_write=int(T * kern_heads * d * 2),
+            kv_read=int(B * (local_pairs * swa_rec
+                             + compressed_pairs * comp_rec)),
+            formula=FR.F_CSA2_ATTN_CORE, statistic="exact",
+            shape=f"flash_mla_with_kvcache（SM90 v4 记录 584B）：SWA "
+                  f"{local_pairs}×{swa_rec}B + 压缩 {compressed_pairs}×"
+                  f"{comp_rec}B/请求；{kern_heads} 头 × (4·{d}+5)"
+                  f"（Q 零填充 padded_heads；softmax 5 op 惯例；sink 4B/头）"))
+        if r:
+            # 每压缩层每步：共享 topk 缓冲 → 全局分页槽位（flashmla.py
+            # L214-228 compute_global_topk_indices_and_lens；块表逐有效项）
+            rows.append(OpRow(
+                stage, li, "attn_index_global",
+                flops=T * topk * 5,
+                act_read=int(T * topk * 4 + compressed_pairs * B * 4),
+                act_write=int(T * topk * 4 + T * 4),
+                formula=FR.F_CSA2_ATTN_INDEX_GLOBAL, statistic="exact",
+                shape="local topk → 全局槽位（整除/查表/取模/乘加 ≈5 op/项"
+                      "惯例；topk 缓冲整宽读 + 块表按有效项读）"))
+        # SM90 恒 split-KV（sparse_decode.cpp L488 must_split_kv）：逐层
+        # o_accum/lse_accum fp32 写 + combine 归并；num_splits 由调度器
+        # 移植精确给出（flashmla_sched）。SM100 记录族走 Decode_Sm100_*
+        # 实例（有 unsplit 路径、fixed_overhead/block 不同）——本仓无注册
+        # SM100 设备，域外显式拒绝，不静默套 SM90 口径
+        if rec["family"] != "sm90":
+            raise NotImplementedError(
+                f"decode split-KV 账本仅按 SM90 实例 pin（sparse_decode.cpp "
+                f"Decode_Sm90_Impl）；记录族 {v41_kv_record} 的 decode 行"
+                "未建模（SM100 mega/FlashInfer 变体见 G-C16）")
+        row_swa = [min(t, swa) for t in range(start + 1, end + 1)] * B
+        row_extra = ([min(t // r, topk) for t in range(start + 1, end + 1)] * B
+                     if r else [0] * (B * Q))
+        splits = flashmla_decode_num_splits(row_swa, row_extra, device_sms or 0)
+        n_split_rows = sum(1 for s in splits if s > 1)
+        split_total = sum(s for s in splits if s > 1)
+        accum = split_total * padded_heads * (d * 4 + 4)
+        rows.append(OpRow(
+            stage, li, "attn_splitkv",
+            flops=split_total * padded_heads * (2 * d + 6),
+            act_read=accum, act_write=accum + T * padded_heads * 4,
+            formula=FR.F_CSA2_ATTN_SPLITKV, statistic="exact",
+            shape=f"SM90 恒 split-KV：{n_split_rows}/{T} 行分片，Σsplits="
+                  f"{split_total}；o_accum {d}×4B + lse_accum 4B/头/split，"
+                  "combine 2·d_v+6 op/头/split + lse 每行一次"
+                  f"（num_sm_parts={device_sms}，调度器移植见 "
+                  "flashmla_sched）"))
+        if attn_type_first:
+            # 每层型每步一次调度器核（tile_sched 空实例 → C++ 分配+规划，
+            # sparse_swa.py build_tile_scheduler L911-945 + sparse_decode.cpp
+            # L633-656；DecodingSchedMeta=32B，params.h L104-113）
+            rows.append(OpRow(
+                stage, li, "attn_sched_meta",
+                flops=T * 10,
+                act_read=int(T * 4),
+                act_write=int((device_sms or 0) * 32 + (T + 1) * 4),
+                formula=FR.F_CSA2_ATTN_SCHED_META, statistic="approximated",
+                shape="get_decoding_sched_meta 单 warp 贪心（每层型每步一次"
+                      f"，记在各型首层）：{device_sms}×32B 元数据 + "
+                      "num_splits T+1 项；≈10 op/行惯例"))
+    if attn_step_first:
+        # SWA 窗口索引每步一次（全体层共享同一 spec 组的元数据构建；
+        # sparse_swa.py L663-732 build() + kv_cache_interface.py 同 spec
+        # 分组共享 builder）；记在第 0 层
+        swa_entries = B * sum(min(t, swa) for t in range(start + 1, end + 1))
+        rows.append(OpRow(
+            stage, li, "attn_swa_index_build",
+            flops=swa_entries * 5,
+            act_read=int(swa_entries * 4),
+            act_write=int(swa_entries * 4 + T * 4),
+            formula=FR.F_CSA2_ATTN_SWA_INDEX_BUILD, statistic="exact",
+            shape="_compute_swa_indices_and_lens（宽 window=128；≈5 op/项"
+                  "惯例；每步一次全层共享，不乘层数）"))
 
     ops, _w, ar, aw = _rope_row(T, heads, d, rd, b_a)
     rows.append(OpRow(stage, li, "o_rope", flops=ops, act_read=ar, act_write=aw,
@@ -863,6 +989,7 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                      role: str = "target", ep: int = 1, rank: int = 0,
                      plan=None, v41_kv_record: str = "fp8_ds_mla_sm90",
                      quant_recipe: Optional[dict] = None,
+                     device_sms: Optional[int] = None,
                      ) -> List[OpRow]:
     """整模型一个阶段的逻辑账本（**per-rank 口径**，默认 rank=0）。
 
@@ -873,6 +1000,9 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     (tp, ep) 直接求值，合法性与 plan 相同规则）。
     v41_kv_record：R20 显式 KV 记录配方（scenario.V41_KV_RECORDS；
     仅 v41_csa2 消费，pipeline 从场景 deployment 透传）。
+    device_sms：R25 设备 SM 数（devices.sm_count；pipeline 透传）——V4.1
+    decode 的 split-KV 调度器移植需要；缺失时 v41 decode 行显式拒绝
+    （未知不得默认）。
     """
     h = model.hidden
     S, Q = (0, ctx) if prefill else (ctx, queries)
@@ -905,22 +1035,21 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         base, rem = divmod(layer.moe.experts, ep)
         return base + (1 if rank < rem else 0)
 
-    # R20：SparseIndexTables 的等键运行首层（decode 稀疏索引表构建一次、
-    # 等键后继复用；specialized sparse_mla.py L159-250：key = r==0 →
-    # "swa_only"，否则 (kv_source, index_source, r)；运行 = 连续同键层段）
-    def _index_key(layer):
-        a = layer.csa2
-        if a is None or not a.ratio:
-            return "swa_only"
-        return (a.kv_source, a.index_source, a.ratio)
-
-    prev_key = object()   # 哨兵：首层必为运行首
+    # R25：FlashMLA 注意力核的每步/每层型一次性核归层——SWA 窗口索引每步
+    # 一次（全体层共享同 spec 组的元数据构建，记在第 0 层）；调度器元数据
+    # 每层型（compress_ratio 去重值）每步一次（记在各型首层）
+    prev_ratio = object()          # 哨兵：首个 CSA2 层必为其型首层
+    first_csa2 = True
     for layer in model.layers:
         li = layer.index
-        key, run_first = _index_key(layer), False
-        if key != prev_key:
-            run_first = True
-        prev_key = key
+        type_first = False
+        if layer.kind == MLA_CSA2 and layer.csa2 is not None:
+            if layer.csa2.ratio != prev_ratio:
+                type_first = True
+            prev_ratio = layer.csa2.ratio
+        step_first = first_csa2 and layer.kind == MLA_CSA2
+        if layer.kind == MLA_CSA2:
+            first_csa2 = False
         if layer.kind in (FULL, SLIDING) and layer.attn:
             rows += gqa_layer_rows(stage, li, layer, B, S, Q, h, quant, tp)
         elif layer.kind == LINEAR and layer.linear:
@@ -930,8 +1059,10 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         elif layer.kind == MLA_CSA2 and layer.mla and layer.csa2:
             rows += v41_layer_rows(stage, li, layer, B, S, Q, h, kvs, quant,
                                    prefill, tp, v41_kv_record=v41_kv_record,
-                                   index_run_first=run_first,
-                                   quant_recipe=quant_recipe)
+                                   quant_recipe=quant_recipe,
+                                   device_sms=device_sms,
+                                   attn_type_first=type_first,
+                                   attn_step_first=step_first)
         T = B * Q
         rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
                                 local_experts=_local_experts(layer),

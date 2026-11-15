@@ -1,0 +1,8 @@
+{
+  "head": "ee70ce236415ad4855d5994ca4521f49d8a03b38",
+  "captured_before_edits": true,
+  "worktree": "D:\\Github\\new-viewer",
+  "git_status_porcelain": "?? docs/evidence/csa2-core/\n?? tools/replay_v41_csa2_core.py\n",
+  "note": "R25 基线：生产代码 = main ee70ce2（R23 合入后）于主工作树D:/Github/new-viewer 执行捕获（csa2mla 工作树已含 R25 改动，不能自证基线）；场景/拓扑与 R24 swiglu-tail 相同（TP8/B1/ctx32768/quant=V41_QUANT 冻结档）",
+  "before_sha256": "3f3448348a52ac02d7a2ea315613b1dd5f9857d29cda30922b00eef884fce152"
+}

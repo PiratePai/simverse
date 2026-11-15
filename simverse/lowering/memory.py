@@ -376,6 +376,53 @@ def v41_index_buffer_allocations(kv_spec: dict, tokens: int,
     return allocs
 
 
+def v41_attn_transient_allocations(kv_spec: dict, tokens: int, ctx: int,
+                                   sms: Optional[int],
+                                   role: str = "target") -> List[Allocation]:
+    """V4.1 FlashMLA 注意力核瞬态缓冲下界（R25；csa2-core-pin.json）。
+
+    decode：SM90 恒 split-KV——o_accum/lse_accum 每层调用分配
+    (tokens+SM)×1×h_q(64)×512 fp32 + (tokens+SM)×64 fp32（sparse_decode.cpp
+    L669-681），caching allocator 逐层复用 → 峰值一份（下界）。
+    prefill：bf16 gather 工作区 [chunk≤4, M, 512]（flashmla.py L326-333
+    get_simultaneous）取最宽层型 M = ⌊ctx/r⌋ + (ctx + min(0,win−1)) 的最大
+    值（r=1），加合并索引 [tokens, ⌈(topk+win)/128⌉·128] int32 + lens。
+    两族不同阶段存活；按上界口径同时入峰值（live_note 注明阶段）。
+    """
+    allocs: List[Allocation] = []
+    if sms:
+        o_accum = int((tokens + sms) * 64 * 512 * 4)
+        lse_accum = int((tokens + sms) * 64 * 4)
+        allocs.append(Allocation(
+            f"{role}-t-v41-attn-oaccum", "transient", role,
+            o_accum + lse_accum, lifecycle="cross-round",
+            live_note=f"decode split-KV o_accum ({tokens}+{sms})×64×512×4B"
+                      " fp32 + lse_accum（每层调用分配/回收，allocator 复用"
+                      "→峰值一份下界；仅 decode 步存活）"))
+    if ctx > 0:
+        topk = int(kv_spec["index_topk"])
+        win = int(kv_spec["sliding_window"])
+        d = int(kv_spec["head_dim"])
+        ratios = kv_spec.get("compress_ratios") or [0]
+        n_max = max((ctx // r) if r else 0 for r in ratios)
+        m_worst = n_max + ctx                      # S=0：gather = Q = ctx
+        chunk = min(4, max(1, tokens))
+        allocs.append(Allocation(
+            f"{role}-t-v41-attn-prefill-ws", "transient", role,
+            int(chunk * m_worst * d * 2), lifecycle="cross-round",
+            live_note=f"prefill gather 工作区 [chunk≤{chunk}, M={m_worst},"
+                      f"{d}] bf16（最宽层型 r=1：压缩 {n_max} + SWA {ctx}；"
+                      "workspace manager 共享池；仅 prefill 步存活）"))
+        w_c = -(-(topk + win) // 128) * 128
+        allocs.append(Allocation(
+            f"{role}-t-v41-attn-combined-idx", "transient", role,
+            int(ctx * w_c * 4 + ctx * 4), lifecycle="cross-round",
+            live_note=f"prefill 合并索引 [tokens,{w_c}] int32 + lens"
+                      "（combine_topk_swa_indices 工作区；实际按 "
+                      "max_num_batched_tokens 分配，运行时常数未 pin → 下界）"))
+    return allocs
+
+
 def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                               role: str = "target", ep: int = 1, rank: int = 0,
                               plan=None,
@@ -1005,7 +1052,8 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                           ENGRAM_PLACEMENT_CPU_OFFLOAD,
                           engram_tokens: int = 0,
                           v41_kv_record: str = "fp8_ds_mla_sm90",
-                          mtp_model: Optional[ModelIR] = None) -> RankMemory:
+                          mtp_model: Optional[ModelIR] = None,
+                          device_sms: Optional[int] = None) -> RankMemory:
     """同卡混部 per-rank 账本（R02a/R02b）。
 
     草稿与 target 同 TP 组（vLLM pin）；embed/lm_head 为 target 的物理
@@ -1040,6 +1088,12 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
     if kv_spec and kv_spec.get("family") == "v41_csa2" and engram_tokens > 0:
         for a in v41_index_buffer_allocations(kv_spec, engram_tokens,
                                               role="target"):
+            a.consumers = ["target"]
+            rank_mem.add(a)
+        # R25：FlashMLA 注意力核瞬态缓冲下界（split-KV o_accum / prefill
+        # gather 工作区 / 合并索引）
+        for a in v41_attn_transient_allocations(kv_spec, engram_tokens, ctx,
+                                                device_sms, role="target"):
             a.consumers = ["target"]
             rank_mem.add(a)
     for a in kv_allocations(model, quant, batch, ctx, role="target", tp=tp,

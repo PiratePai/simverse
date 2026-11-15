@@ -59,7 +59,7 @@ _V41_EVIDENCE = ModelEvidence(
     checked_paths=("sm-v41-engram-hc", "sm-v41-index-short-branch",
                    "sm-v41-mhc-kernels", "sm-v41-csa2-indexer",
                    "sm-v41-moe-route", "sm-v41-quant-dispatch",
-                   "sm-v41-swiglu-tail"),
+                   "sm-v41-swiglu-tail", "sm-v41-csa2-attn-core"),
     unverified_paths=(
         "engram_dp_exchange: DP 分片交换（all-to-all/peer/symmetric memory）与"
         "EngramBatch MXFP8 路径未建模（本仓默认单副本路径不启用）；"
@@ -67,9 +67,16 @@ _V41_EVIDENCE = ModelEvidence(
         "已 source-checked（ev-vllm-v41-engram，R04）",
         "mhc_tilelang_kernel: TileLang kernel 源已 pin，算术 op 公式源码精确；"
         "RMSNorm 4h+2 为惯例近似；CPU/GPU 未执行，部署变体/split-k 运行时未建模",
-        "csa2_attention_core: 稀疏 MLA 注意力核本体（flops 4d+5 惯例、bmm 尺度）"
-        "仍为 v0.1 移植——索引打分/top-k/candidate/压缩器/索引 K 已 R20 "
-        "source-checked（ev-vllm-v41-csa2），核本体未独立逐行核",
+        "csa2_attn_execution_variants: 注意力核本体主干（FlashMLA SM90 "
+        "decode/prefill、split-KV、gather 工作区、索引消费）已 R25 "
+        "source-checked（ev-vllm-v41-csa2-core，csa2-core-pin.json 14 文件）；"
+        "未建模/未执行变体：specialized decode（FlashInfer TRTLLM-gen/"
+        "sparse_mla_cute，需 decode_backend=latency_specialized 显式开启）、"
+        "SM100 mega attention（nvfp4 压缩记录）、FlashInfer plain-row BF16 "
+        "KV、ROCm aiter/XPU、PCP 跨片、SWA bounded replay 回放边界、"
+        "CuTe DSL dequant gather 变体（字节语义同 Triton）、softmax +5/"
+        "整数核 op/调度器 ≈10 op/行的解析惯例（非 kernel 指令数）、"
+        "prefill 工作区逐对行读不记跨行 SMEM 复用",
         "swiglu_deploy_variants: SwiGLU clamp 主干（共享专家 SiluAndMulWithClamp"
         "+路由专家 fused MoE clamp，6 op/elem 计量）已 R24 source-checked"
         "（ev-vllm-v41-swiglu-tail，swiglu-tail-pin.json 13 文件）；未建模/"
@@ -124,7 +131,11 @@ _V41_EVIDENCE = ModelEvidence(
          "clamp（共享专家+路由专家 6 op/elem 激活行）与 compress_ratios 尾部"
          "（归 DSpark 草稿层，0=纯 SWA，非零域外拒绝）已 R24 source-checked"
          "（ev-vllm-v41-swiglu-tail，swiglu-tail-pin.json 13 文件）；"
-         "注意力核本体仍缺口；hc 仅 source-checked，未执行。")
+         "注意力核本体已 R25 source-checked（ev-vllm-v41-csa2-core，"
+         "csa2-core-pin.json：vllm @f358f057 5 文件 + FlashMLA @847ef308 "
+         "9 文件；decode padded 头数/split-KV/prefill gather/索引消费重归因，"
+         "docs/evidence/csa2-core 归因）；剩余 unverified 均为显式执行变体"
+         "（structure_complete 仍 False；hc 仅 source-checked，未执行）。")
 
 _DFLASH_EVIDENCE = ModelEvidence(
     forward_source="source-checked",
@@ -244,7 +255,8 @@ def _v41() -> ModelIR:
                                   "ev-vllm-v41-model",
                                   "ev-vllm-v41-engram", "ev-vllm-v41-csa2",
                                   "ev-vllm-v41-moe", "ev-vllm-v41-quant",
-                                  "ev-vllm-v41-swiglu-tail"))
+                                  "ev-vllm-v41-swiglu-tail",
+                                  "ev-vllm-v41-csa2-core"))
 
 
 def _qwen36() -> ModelIR:

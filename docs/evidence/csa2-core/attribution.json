@@ -1,0 +1,365 @@
+{
+  "before_sha256": "3f3448348a52ac02d7a2ea315613b1dd5f9857d29cda30922b00eef884fce152",
+  "scenario_sha256": "2fbd1b03adce486cac4d2278752c11016dbf4d3ac65ce36a271d89809107ac67",
+  "before": {
+    "flops": 7176937062,
+    "weight_read": 1769999808,
+    "weight_read_expected": 752027184.0,
+    "act_read": 19047934,
+    "act_write": 10928656,
+    "kv_read": 42467988,
+    "kv_write": 24076,
+    "state_read": 12288,
+    "state_write": 12288,
+    "rows": 1087
+  },
+  "after": {
+    "flops": 10027786116,
+    "weight_read": 1769999808,
+    "weight_read_expected": 752027184.0,
+    "act_read": 71921602,
+    "act_write": 66026528,
+    "kv_read": 42467988,
+    "kv_write": 24076,
+    "state_read": 12288,
+    "state_write": 12288,
+    "rows": 1160
+  },
+  "delta": {
+    "flops": 2850849054,
+    "weight_read": 0,
+    "weight_read_expected": 0.0,
+    "act_read": 52873668,
+    "act_write": 55097872,
+    "kv_read": 0,
+    "kv_write": 0,
+    "state_read": 0,
+    "state_write": 0,
+    "rows": 73
+  },
+  "by_op": {
+    "attn_index_global": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 97280,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 155648,
+        "act_write": 77976,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 38
+      },
+      "delta": {
+        "flops": 97280,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 155648,
+        "act_write": 77976,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 38
+      },
+      "rows_before": 0,
+      "rows_after": 38,
+      "t_ms_delta": 6.975816991847232e-05
+    },
+    "attn_sched_meta": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 30,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 12,
+        "act_write": 12696,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 3
+      },
+      "delta": {
+        "flops": 30,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 12,
+        "act_write": 12696,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 3
+      },
+      "rows_before": 0,
+      "rows_after": 3,
+      "t_ms_delta": 3.7934388994894154e-06
+    },
+    "attn_splitkv": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 25313280,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 50429952,
+        "act_write": 50440192,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 25313280,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 50429952,
+        "act_write": 50440192,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "rows_before": 0,
+      "rows_after": 40,
+      "t_ms_delta": 0.030115607124237324
+    },
+    "attn_swa_index_build": {
+      "before": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "after": {
+        "flops": 640,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 512,
+        "act_write": 516,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "delta": {
+        "flops": 640,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 512,
+        "act_write": 516,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 1
+      },
+      "rows_before": 0,
+      "rows_after": 1,
+      "t_ms_delta": 3.069950299035394e-07
+    },
+    "q_rope": {
+      "before": {
+        "flops": 61440,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 332800,
+        "act_write": 327680,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 61440,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 332800,
+        "act_write": 2621440,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 2293760,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.0006847044776119403
+    },
+    "sparse_attention": {
+      "before": {
+        "flops": 403636224,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 327680,
+        "act_write": 327680,
+        "kv_read": 14352384,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "after": {
+        "flops": 3229089792,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 2631680,
+        "act_write": 2621440,
+        "kv_read": 14352384,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 40
+      },
+      "delta": {
+        "flops": 2825453568,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 2304000,
+        "act_write": 2293760,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "rows_before": 40,
+      "rows_after": 40,
+      "t_ms_delta": 0.001943552800090501
+    },
+    "sparse_index_build": {
+      "before": {
+        "flops": 15744,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 16456,
+        "act_write": 21028,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 9
+      },
+      "after": {
+        "flops": 0,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": 0,
+        "act_write": 0,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": 0
+      },
+      "delta": {
+        "flops": -15744,
+        "weight_read": 0,
+        "weight_read_expected": 0.0,
+        "act_read": -16456,
+        "act_write": -21028,
+        "kv_read": 0,
+        "kv_write": 0,
+        "state_read": 0,
+        "state_write": 0,
+        "rows": -9
+      },
+      "rows_before": 9,
+      "rows_after": 0,
+      "t_ms_delta": -1.1192435944582293e-05
+    }
+  },
+  "t_ms_delta": 0.03280653056984306,
+  "before_memory": {
+    "steady_bytes": 50128006592,
+    "transient_peak_bytes": 13312,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "after_memory": {
+    "steady_bytes": 50128006592,
+    "transient_peak_bytes": 168605952,
+    "peak_complete": false,
+    "unknown_components": [
+      "kernel workspace 池（cuBLAS/FlashInfer 等，无源码尺寸证据）",
+      "CUDA graph 捕获池（vLLM eager/graph 模式保留内存，未见配方）",
+      "NCCL 通信缓冲（allreduce/all2all 内部缓冲，未见配方）"
+    ],
+    "allocatable_kind": "unknown"
+  },
+  "before_known_peak": 50128019904,
+  "after_known_peak": 50296612544,
+  "expected_changed_ops": [
+    "attn_index_global",
+    "attn_kv_gather",
+    "attn_sched_meta",
+    "attn_splitkv",
+    "attn_swa_index_build",
+    "q_rope",
+    "sparse_attention",
+    "sparse_index_build"
+  ],
+  "execution": "analytical replay only; no CPU forward or kernel execution"
+}

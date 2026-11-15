@@ -17,7 +17,19 @@ apply_moe_activation 同 clamp）；新增 moe_act/moe_shared_act 行（6 算术
 op/元素，字节已归原行单一所有者）；尾部 [40:43] 逐项归 DSpark/nextn 草稿层
 （层号 40-42、0=纯 SWA、is_backbone 门控永不为源；非零尾部域外拒绝）；
 candidate_block_size 补入 struct 集合（R20 注记因漏登记未生效的修复）；
-V4.1 config 覆盖自此完备（structure_complete 仍由注意力核本体阻断）。
+V4.1 config 覆盖完备；**2026-11-16 R25：稀疏 MLA 注意力核本体按 csa2-core-pin.json
+14 文件（vllm @f358f057 5 文件 + FlashMLA @847ef308 9 文件，cmake GIT_TAG 钉定）
+source-checked 建模并修正**：decode 头数 padded_heads=64（fp8 kernel h_q∈{64,128}、
+Q 零填充——TP8 旧口径少算 8×）、SM90 恒 split-KV（o_accum/lse_accum/combine +
+get_decoding_sched_meta 贪心调度移植 count/flashmla_sched）、prefill 记录读改
+gather 口径（全量压缩前缀+SWA 尾窗→bf16 工作区→逐对行读）、R20 decode
+sparse_index_build 归因修正为 prefill 每 chunk 每层（decode 实际每步一次 SWA
+窗索引+每压缩层全局槽位+每层型调度器元数据）；q_rope 写 padded 宽；devices
+增 sm_count（spec）；默认场景 decode flops +2,850,849,054（+39.7%）、行 +73、
+瞬态峰值 +168.6MB 下界（docs/evidence/csa2-core 归因；before=main ee70ce2）。
+structure_complete 仍 False——剩余 unverified 均为显式执行变体（specialized
+decode/SM100 mega/FlashInfer plain-row/PCP 等），部署排名资格不变（G15）。
+[报告](validation/v41-csa2-attn-core-20261116.md)、[缺口 G-C16](gaps/capability-gaps.md)。
 早前 R22：V4.1 量化映射按 20 文件 pin（quant-pin.json）source-checked 建模——
 quantization_config 5 叶键 mapped：MXFP8 线性（e4m3 1B+ue8m0 (1,32) scale，checkpoint 32×32 块
 装载展开）+ MXFP4 路由专家（打包 2 值/byte+scale+Marlin I→128/H→256 分配对齐）+ embed/lm_head/
@@ -26,7 +38,7 @@ norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fm
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #14（R24）已合入 main；R23 分支 `codex/qwen36-native-mtp-r23`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
 运行：本次 R23 验收修复在 Codex 宿主执行 `py -3.12 -m pytest tests -q`：**425 passed，exit 0**；`tools/replay_qwen36_mtp.py --check`、`tools/replay_v41_swiglu.py --check`、`tools/replay_v41_quant.py --check`、`node --check simverse/static/workbench.js` 均 exit 0；`py -3.12 -m simverse.cli run-v2` status=completed。历史回执（非本次执行）：R23 原提交在 ZCode 会话 424 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
-**pytest 收集数：425**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-14 R23 验收修复；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项（tests/test_qwen36_mtp_r23.py）；367→399 = R24 SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
+**pytest 收集数：452**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-16 R25；425→452 = R25 注意力核本体 27 项（tests/test_v41_csa2_core.py：pin 1、调度器锚点/独立重演/负例/块公式 7、decode 手算绝对 5、prefill 手算 3、守恒/瞬态/设备 3、device_sms 拒绝 1、replay 冻结 1、门禁事实 2；另有少量 R20 断言随归因修正改写，非新增）；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项；367→399 = R24 SwiGLU/尾部 oracle 32 项；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
 R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。

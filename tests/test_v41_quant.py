@@ -310,7 +310,7 @@ def test_dense_projection_scale_bytes_tp1_tp8():
     for tp in (1, 8):
         ng, heads_tp = GROUPS // tp, HEADS // tp
         rows = {r.op: r for r in
-                build_model_work(m, "decode", 1, 1024, 1, Q16, tp)}
+                build_model_work(m, "decode", 1, 1024, 1, Q16, tp, device_sms=132)}
         expect = {
             "q_a_proj": scale(QRANK, H),
             "kv_proj": scale(D, H),
@@ -329,7 +329,7 @@ def test_dense_projection_scale_bytes_tp1_tp8():
 
 def test_shared_expert_mxfp8_scale_bytes():
     m = _model()
-    rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, 8)
+    rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, 8, device_sms=132)
             if r.op == "moe_shared"]
     si = INTER // 8                                   # 288
     values = 3 * H * si
@@ -344,7 +344,7 @@ def test_routed_expert_bytes_packing_and_marlin_roundup():
     """TP8/EP1：I_r=288 → Marlin I_eff=384；per-expert = 51/32·H·I_eff。"""
     m = _model()
     rows = [r for r in build_model_work(m, "decode", 1, 1024, 1,
-                                        Q16, 8) if r.op == "moe_routed"]
+                                        Q16, 8, device_sms=132) if r.op == "moe_routed"]
     i_eff = 384
     per_expert = int(1.5 * H * i_eff) + int(3 * H * i_eff / 32)
     assert per_expert == 3_133_440
@@ -354,7 +354,7 @@ def test_routed_expert_bytes_packing_and_marlin_roundup():
                for r in rows)
     # EP8：I 不分片（2304 已对齐），值+scale = 18,800,640/专家
     rows_ep = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, 8,
-                                           ep=8, rank=0)
+                                           ep=8, rank=0, device_sms=132)
                if r.op == "moe_routed"]
     per_expert_ep = int(1.5 * H * 2304) + int(3 * H * 2304 / 32)
     assert per_expert_ep == 18_800_640
@@ -364,7 +364,7 @@ def test_routed_expert_bytes_packing_and_marlin_roundup():
 def test_embed_lm_head_final_norm_are_bf16_unquantized():
     m = _model()
     rows = {r.op: r for r in
-            build_model_work(m, "decode", 1, 1024, 1, Q16, 8)}
+            build_model_work(m, "decode", 1, 1024, 1, Q16, 8, device_sms=132)}
     v_r = VOCAB // 8
     assert rows["lm_head"].weight_read == rows["lm_head"].weight_capacity \
         == H * v_r * 2
@@ -378,7 +378,7 @@ def test_embed_lm_head_final_norm_are_bf16_unquantized():
 
 def test_ensem_wkv_scale_bytes():
     m = _model()
-    rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, 8)
+    rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, 8, device_sms=132)
             if r.op == "engram_wkv"]
     oc = H * 5 // 8                                   # 3200
     assert len(rows) == 2
@@ -390,7 +390,7 @@ def test_memory_moe_object_matches_count_capacity():
     """count moe capacity ↔ memory -w-moe- 对象逐层相等（EP off / on）。"""
     m = _model()
     for tp, ep in ((8, 1), (8, 8)):
-        rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp, ep=ep)
+        rows = build_model_work(m, "decode", 1, 1024, 1, Q16, tp, ep=ep, device_sms=132)
         allocs = {a.alloc_id.split("-L")[-1]: a.bytes
                   for a in target_weight_allocations(m, Q16, tp, ep=ep)
                   if "-w-moe-L" in a.alloc_id}
@@ -512,7 +512,7 @@ def test_evidence_record_registered_and_not_executed():
     m = _model()
     assert "ev-vllm-v41-quant" in m.evidence_refs
     assert "sm-v41-quant-dispatch" in m.evidence.checked_paths
-    assert not m.structure_complete       # swiglu/尾部/核本体缺口仍阻断
+    assert not m.structure_complete       # 执行变体未核（R25 后核本体已核）
 
 
 def test_formulas_registered():

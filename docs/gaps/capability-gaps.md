@@ -12,7 +12,8 @@ ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
 linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）；
 2026-11-13 R22：G-C14 新增（量化映射主干已解除、执行变体登记），
 quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新增
-（Qwen3.6 原生 MTP forward 主干已解除、执行/变体登记）。
+（Qwen3.6 原生 MTP forward 主干已解除、执行/变体登记）；2026-11-16 R25：
+G-C16 新增（V4.1 稀疏 MLA 注意力核本体主干已解除、执行/变体登记）。
 
 ## G-C15 ~~Qwen3.6 原生 MTP forward 证据与仿真映射~~ → 主干已解除（2026-11-13 R23）⭐P0
 
@@ -83,7 +84,7 @@ quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新�
   CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE
   scoring/top-k/分组路由已由 R21 解除（见 G-C13）；量化映射已由 R22 解除
   （见 G-C14）；SwiGLU clamp 与 compress_ratios 尾部已由 R24 解除
-  （见 G-C15）；稀疏 MLA 注意力核本体仍为独立缺口。
+  （见 G-C15）；稀疏 MLA 注意力核本体已由 R25 解除（见 G-C16）。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
   mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需
   稀疏 MLA 核本体缺口闭环（CSA2 索引、MoE 路由、量化映射、SwiGLU/尾部
@@ -183,7 +184,8 @@ quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新�
   gemm 峰值档未随 W8A16（bf16 TC）改路由（乐观算力上限，登记）。
 - **当前降级**：无（执行域按注册设备固定为 Marlin W8A16/W4A16，变体以
   extras.quant 披露）；structure_complete 曾由 swiglu/核本体/尾部缺口阻断
-  ——swiglu/尾部已由 R24 解除（见 G-C15），现仅由核本体阻断。
+  ——swiglu/尾部已由 R24 解除（见 G-C15），核本体已由 R25 解除（见
+  G-C16）；现仅由剩余显式执行变体阻断（不冒充）。
 - **优先级**：P0（必需模型场景）。
 
 ## G-C15 ~~V4.1 SwiGLU clamp + compress_ratios 尾部~~ → 已解除（2026-11-13 R24）⭐P0
@@ -214,7 +216,9 @@ quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新�
   --check 无漂移；Δflops=+483,840、Δrows=+80、字节全 0、M06 不变）。
   附带补漏：candidate_block_size 键入 struct 集合（R20 注记因键漏登记
   未生效，长期误挂"未登记 config 键"缺口）。V4.1 config 覆盖自此完备
-  （config_coverage_complete=True；结构资格仍由核本体 forward 证据阻断）。
+  （config_coverage_complete=True；核本体 forward 证据已 R25 补齐，结构
+  资格现由剩余执行变体 unverified_paths 阻断——specialized decode/SM100
+  mega/FlashInfer plain-row 等部署变体未建模、CPU/GPU 未执行）。
 - **仍缺（登记不冒充）**：clamp CUDA kernel 与 native 的数值等价未执行
   （vLLM 测试在册未跑）；masked 每 expert padded 激活路径与 pad-aware
   Triton 跳过未路由槽的运行时差异未入账（按逻辑 assignment 计费）；
@@ -386,6 +390,38 @@ quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新�
   草稿二次读独立手算 oracle）；235B manifest defer 理由已
   改指 G-D2 数据准入（分片混尺不再是阻塞）。
 - 残留：G-D2 的 moe 蒸馏准入与留出验收（数据侧，独立进行）。
+
+## G-C16 ~~V4.1 稀疏 MLA 注意力核本体（csa2_attention_core）~~ → 主干已解除（2026-11-16 R25）⭐P0
+
+- **解除交付**：csa2-core-pin.json 14 文件（vllm @`f358f057` 5 文件 blob
+  对 vllm-tree.json 逐项校验：nvidia/flashmla.py 消费链、v1/attention/
+  ops/flashmla.py、cmake GIT_TAG `847ef308`、specialized_decode/__init__
+  （decode_backend=latency_specialized 显式开启）、kv_cache_interface.py
+  （同 spec 层共享 builder）；FlashMLA @`847ef308` 9 文件：接口/decode
+  API/调度器/combine/SM90 split-kv 主核/prefill API/params.h——blob 对
+  该提交 git 对象校验）。修正四项：
+  1. decode 头数 heads//tp → **padded_heads=64**（fp8 kernel h_q∈{64,128}、
+     fused insert 零填充 Q；TP8 少算 8×）；prefill SM90 small-heads 用真实
+     n_local∈{8,16,32} 切片；
+  2. **SM90 恒 split-KV**：o_accum/lse_accum ((b+SM)×64×512×4B fp32) +
+     combine + get_decoding_sched_meta 贪心调度（块 64/开销 5——
+     count/flashmla_sched 精确移植，随机化独立重演对账）；
+  3. prefill kv_read 从"每对直读记录"改为 **gather 口径**（每请求每 chunk
+     全量压缩前缀 ⌊seq/r⌋ 行 + SWA 尾窗 gather → bf16 工作区 → 逐对行读）；
+  4. R20 的 decode sparse_index_build 归因修正为 prefill 每 chunk 每层
+     （decode 实际：每步一次 SWA 窗索引全层共享 + 每压缩层全局槽位转换 +
+     每层型首层调度器元数据）。
+- **账本变化**（默认场景 TP8/B1/ctx32768 decode，docs/evidence/csa2-core）：
+  flops +2,850,849,054（+39.7%，主项为 8× 头修正）、act_read +52.9MB、
+  act_write +55.1MB、行 +73；M01 +0.0328 ms/步（解析档）；瞬态峰值 +
+  168.6MB 下界（o_accum 17.5MB + prefill 工作区 67.1MB + 合并索引 84.0MB）。
+- 验收：tests/test_v41_csa2_core.py 27 项（pin/调度器锚点+独立重演 200 例/
+  decode-prefill 手算绝对值/头数口径/守恒/瞬态/负例/replay 冻结/证据四栏）。
+- 残留（登记不冒充）：specialized decode（FlashInfer TRTLLM-gen/CuTe，需
+  显式 decode_backend）、SM100 mega attention、FlashInfer plain-row BF16
+  KV、ROCm/XPU、PCP、SWA bounded replay、CuTe DSL gather 变体未建模；
+  softmax +5/整数核 op/工作区逐对行读为解析口径；CPU/GPU 未执行——
+  structure_complete 仍 False、部署排名资格不变（G15）。
 
 ## G-C9 小形状地板解析模型（暂缓；判定实验已明确）
 

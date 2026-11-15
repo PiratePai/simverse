@@ -23,7 +23,8 @@ STATUS_DOC = ROOT / "docs" / "IMPLEMENTATION_STATUS.md"
 def test_g1_device_sources_complete_and_dense_labeled():
     for dev in DEVICES.values():
         for key in list(dev.peak_by_dtype) + ["hbm_bw", "mem_capacity",
-                                              "launch_overhead_ms", "mfu_cap"]:
+                                              "launch_overhead_ms", "mfu_cap",
+                                              "sm_count"]:
             assert key in dev.sources or f"peak_{key}" in dev.sources, \
                 f"{dev.id}: 数值 {key} 无来源"
         for dt, src_key in [("fp16", "peak_fp16"), ("fp8", "peak_fp8")]:
@@ -384,7 +385,7 @@ def test_g11_v41_oa_group_flops_absolute_tp1_2_4_8():
     # 组）；quant 位宽对 V4.1 inert（配方驱动）
     for tp in (1, 2, 4, 8):
         ng = 8 // tp
-        rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp)
+        rows = [r for r in build_model_work(m, "decode", 1, 1024, 1, Q16, tp, device_sms=132)
                 if r.op == "o_a_proj"]
         assert len(rows) == 40
         for r in rows:
@@ -397,7 +398,7 @@ def test_g12_qwen36_shared_gate_row_every_moe_layer():
     from simverse.model_ir import build_catalog
     m = build_catalog()["models"]["qwen36_35b_a3b"]
     Q8 = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8, "state": 32}
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, 1)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, 1, device_sms=132)
     gate = [r for r in rows if r.op == "shared_gate"]
     assert len(gate) == 40
     assert all(r.weight_capacity == 2048 for r in gate)
@@ -548,10 +549,14 @@ def test_g16_source_map_line_and_status_corrections():
     assert any("GPU 未执行" in u or "CPU forward" in u
                for u in mtp["uncovered_domain"])
     assert "sm-qwen36-mtp-unverified" not in sm
-    v41 = sm["sm-v41-csa2-moe-unverified"]
-    # R21：MoE 路由已另立条目解除，本条目只剩注意力核本体/量化缺口
-    assert "MoE scoring" not in " ".join(v41["uncovered_domain"])
-    assert "稀疏 MLA" in " ".join(v41["uncovered_domain"])
+    assert "sm-v41-csa2-moe-unverified" not in sm
+    # R25：注意力核本体已另立条目解除（旧核本体缺口条目 sm-v41-csa2-moe-
+    # unverified 移除，语义并入 sm-v41-csa2-attn-core；两侧覆盖，
+    # 执行变体仍在 uncovered_domain，不冒充）
+    core = sm["sm-v41-csa2-attn-core"]
+    assert core["both_sides_covered"] is True and core["uncovered_domain"]
+    assert "4d+5" in core["semantic"] and "padded_heads" in core["semantic"]
+    assert "latency_specialized" in " ".join(core["uncovered_domain"])
     moe = sm["sm-v41-moe-route"]
     assert moe["both_sides_covered"] is True and moe["uncovered_domain"]
     assert "noaux_tc" in moe["branch_predicate"]

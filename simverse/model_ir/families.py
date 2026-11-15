@@ -795,8 +795,10 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
     本 gaps。
     swiglu clamp（R24：moe_act/moe_shared_act 行 + extras.swiglu）与
     compress_ratios 尾部（R24：逐项归 DSpark 草稿层，0=纯 SWA）已
-    source-checked 映射；稀疏 MLA 注意力核本体仍为显式缺口 →
-    gaps 非空，structure_complete=False。
+    source-checked 映射；稀疏 MLA 注意力核本体已 R25 source-checked
+    （ev-vllm-v41-csa2-core，csa2-core-pin.json 14 文件）——主干语义
+    无 unsupported-semantic 残余，structure_complete 仍 False 仅因
+    catalog unverified_paths 的显式执行变体（不冒充）。
     dspark_* 为方法层字段（methods 消费），模型侧 metadata-only。
     """
     tc = config

@@ -65,7 +65,7 @@ def _rows(B, ctx, Q=1, prefill=False, tp=8, quant=None, rec="fp8_ds_mla_sm90"):
     m = _model()
     return build_model_work(m, "target_decode" if not prefill else "prefill",
                             B, ctx, Q, quant or Q8, tp, prefill=prefill,
-                            v41_kv_record=rec)
+                            v41_kv_record=rec, device_sms=132)
 
 
 def _layer_rows(rows, li):
@@ -149,29 +149,34 @@ def test_topology_oracle_from_config():
 
 
 def test_sparse_index_runs_and_candidate_ownership():
-    """SparseIndexTables 等键运行首 + candidate 所有权（源写、>源消费）。"""
+    """R25 decode 索引消费归位 + candidate 所有权（源写、>源消费）。
+
+    decode 默认（FlashMLA）路径没有 combine_topk_swa_indices（那是 prefill
+    每 chunk 每层的核；R20 误记为 decode 运行首层——specialized decode 的
+    SparseIndexTables 等键复用属 opt-in 变体）。decode 实际每步一次 SWA 窗
+    索引构建（全体层共享，记 L0）+ 每压缩层 compute_global_topk 全局槽位
+    转换 + 每层型首层调度器元数据（compress_ratio 去重值 0/2/1 → L0/L2/L20）。
+    """
     rows = _rows(B=1, ctx=32768)
-    # 等键运行首：key(layer) != key(prev)；key = r==0→"swa"，否则
-    # (kv_source, index_source, r)（specialized sparse_mla.py L159-250）
-    keys = []
-    for layer in _model().layers:
-        a = layer.csa2
-        keys.append("swa" if not a.ratio else (a.kv_source, a.index_source, a.ratio))
-    run_first = [i for i, k in enumerate(keys) if i == 0 or k != keys[i - 1]]
-    build_layers = sorted(r.layer for r in rows if r.op == "sparse_index_build")
-    assert build_layers == run_first
-    # V4.1 实际运行首：L0(swa)、L2/L8/L14(r2 三源)、L20/L24/L28/L32/L36
-    assert build_layers == [0, 2, 8, 14, 20, 24, 28, 32, 36]
+    # decode 无 combine 行（prefill-only）
+    assert not [r for r in rows if r.op == "sparse_index_build"]
+    assert [r.layer for r in rows if r.op == "attn_swa_index_build"] == [0]
+    assert [r.layer for r in rows if r.op == "attn_sched_meta"] == [0, 2, 20]
+    cr_layers = [i for i, r in enumerate(_RATIOS) if r]
+    assert [r.layer for r in rows if r.op == "attn_index_global"] == cr_layers
     # candidate 所有权：candidate_select 仅 L20；candidate_mask 仅 >20 的
     # index source（24/28/32/36）
     assert [r.layer for r in rows if r.op == "candidate_select"] == [_CAND]
-    assert [r.layer for r in rows if r.op == "candidate_mask"] == \
-        [x for x in _IX_SRC if x > _CAND]
-    # 非源压缩层（如 L3/L21）无任何 indexer 行——只消费 topk（sparse_attention）
+    assert [r.layer for r in rows if r.op == "candidate_mask"] ==         [x for x in _IX_SRC if x > _CAND]
+    # 非源压缩层（如 L3/L21）无任何 indexer 行——只经 attn_index_global
+    # 消费共享 topk（sparse_attention 读全局槽位）
     for li in (3, 21):
         lr = _layer_rows(rows, li)
         assert not any(r.op.startswith(("index_", "candidate_",
                                         "sparse_index")) for r in lr)
+        assert any(r.op == "attn_index_global" for r in lr)
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -373,18 +378,26 @@ def test_candidate_rows_oracle():
 # ---------------------------------------------------------------------------
 
 def test_sparse_index_build_width_alignment_128():
-    """combine_topk_swa_indices 按 128 对齐（不是 256）；SWA-only topk=0。"""
-    rows = _rows(B=1, ctx=32768)
+    """R25：combine_topk_swa_indices 是 prefill 每 chunk 每层的核。
+
+    写 = fill −1 整宽（128 对齐，SWA-only topk=0 → 128）+ 有效项
+    （topk+窗拼接，无去重）+ lens；读 = topk 缓冲有效对 + 每行标量。
+    """
+    ctx = 1024
+    rows = _rows(B=1, ctx=ctx, Q=ctx, prefill=True)
     build = {r.layer: r for r in rows if r.op == "sparse_index_build"}
-    # L0 为 swa-only：topk=0，仅 min(ctx,swa)=128 项 → 128 对齐宽
-    assert build[0].act_write == 1 * (128 * 4 + 4)
-    # L2/L20 等压缩运行首：topk 512 + 窗 128 = 640（已对齐）
-    assert build[2].act_write == 1 * (640 * 4 + 4)
+    assert sorted(build) == list(range(40))     # prefill 每层
+    from simverse.count.work import causal_pairs
     for li, row in build.items():
         r = _RATIOS[li]
-        win = min(32769, _SWA)
-        w_c = -(-((_TOPK if r else 0) + win) // 128) * 128
-        assert row.act_write == 1 * (w_c * 4 + 4), li
+        local = causal_pairs(ctx, 1, _SWA) - causal_pairs(0, 1, _SWA)
+        comp = (causal_pairs(ctx, r, _TOPK) - causal_pairs(0, r, _TOPK)
+                if r else 0)
+        items = local + comp
+        w_c = -(-((_TOPK if r else 0) + _SWA) // 128) * 128
+        assert row.act_write == ctx * w_c * 4 + items * 4 + ctx * 4, li
+        assert row.act_read == comp * 4 + ctx * 16, li
+        assert row.flops == items * 3, li
 
 
 def test_bf16_module_activation_bytes_producer_consumer():
@@ -618,9 +631,9 @@ def test_v41_kv_record_compatible_registered_devices():
                         "v41_kv_record": "fp8_ds_mla_sm90"})
         assert sc.validate().deployment.v41_kv_record == "fp8_ds_mla_sm90"
     rows_q = build_model_work(_CAT["models"]["qwen36_35b_a3b"], "decode", 1, 1024,
-                              1, Q8, 8, v41_kv_record="nvfp4_ds_mla_sm100")
+                              1, Q8, 8, v41_kv_record="nvfp4_ds_mla_sm100", device_sms=132)
     rows_q2 = build_model_work(_CAT["models"]["qwen36_35b_a3b"], "decode", 1,
-                               1024, 1, Q8, 8)
+                               1024, 1, Q8, 8, device_sms=132)
     assert totals(rows_q) == totals(rows_q2)      # 非 v41 家族不消费
 
 
