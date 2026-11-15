@@ -12,7 +12,9 @@ ExpertMapManager 未入 pin 的读取点登记）；2026-11-13 gate 字节修复
 linear.py/base_loader.py/layer.py pin；dtype 域固定 official V4.1 bf16）；
 2026-11-13 R22：G-C14 新增（量化映射主干已解除、执行变体登记），
 quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新增
-（Qwen3.6 原生 MTP forward 主干已解除、执行/变体登记）。
+（Qwen3.6 原生 MTP forward 主干已解除、执行/变体登记）；2026-11-16
+R26：G-C16 新增（Qwen3.6 文本 MRoPE 语义已解除、structure_complete 翻转；
+多模态 2D 位置分支登记为域外）。
 
 ## G-C15 ~~Qwen3.6 原生 MTP forward 证据与仿真映射~~ → 主干已解除（2026-11-13 R23）⭐P0
 
@@ -47,10 +49,37 @@ quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新�
   （DraftLogitsCache）、CUDA-graph 桶 padding、SGLang NPU/量化分支未建模；
   草稿 prefill KV 同步未入稳态 TPOT（一次性成本，cache_policy 登记）；
   接受率仍假设输入（R07b）。
-- **当前降级**：无结构降级（MTP 头主干 mapped+source-checked；mrope 仍
-  阻断 structure_complete）；method_status["mtp"]=source-checked 但
+- **当前降级**：无结构降级（MTP 头主干 mapped+source-checked；mrope 阻断
+  已于 2026-11-16 R26 解除，structure_complete=True——只表示源码证据完备，
+  不冒充 CPU 执行/GPU 实测）；method_status["mtp"]=source-checked 但
   method_recipe_ready 保持 approximated（接受假设+未执行）→ M02 不参与
   实际部署排名。
+- **优先级**：P0（必需模型场景）。
+
+## G-C16 ~~Qwen3.6 文本路径 MRoPE position_ids 语义~~ → 已解除（2026-11-16 R26）⭐P0
+
+- **解除交付**：vllm_qwen36_mrope_pin 5 文件（@dc74b8cb，与 R01 同 commit：
+  qwen3_vl/rope_init/rope_base/rope_common/rope_mrope；blob sha1 对 GitHub
+  contents API 校验）+ HF pin modeling L130-194/L655-690/L1322-1332 + 既有
+  qwen35/mtp pin 三栏 source-checked（ev-vllm-qwen36-mrope；sm-qwen36-
+  text-mrope）。查明：文本 MRoPE 完全退化为标准部分 NeoX RoPE（三行恒等
+  →交错重组恒等；vLLM 1D positions 走 _forward_text_rope 不经 section
+  重组；mrope_positions_factor 仅视频剪枝=4）；prefill arange+past_seen、
+  decode 缓存续位；MTP 位置传递（prefill 复制 target、每步 +1 夹
+  max_model_len−1、末步不推进、下轮 seq_len=target−num_rejected 回退）。
+  fixture 数值对照（ev-qwen36-mrope-cpu-numeric：三路独立实现 f64 两两
+  diff=0.0 + 官方 pinned HF 旋转类本机执行 4.35e-07 + MTP 状态机 ≥16
+  不变量 + 6 负例；fixture 绑定 11 个 pin SHA256）；账本零漂移 replay
+  （docs/evidence/mrope-map；M07 structure_complete False→True、M02 排名
+  理由不再含 mrope）。测试 tests/test_qwen36_mrope_r26.py 17 项。
+- **仍缺（登记不冒充）**：多模态 2D 行相异分支（视觉 T/H/W 网格、
+  get_rope_index/rope_deltas、视频剪枝 factor=4、openpangu Interleaved
+  变体）域外未核未建模；vLLM MRotaryEmbedding 模块本机未执行（公式
+  转写三路对照+跨 commit 字节一致代替）；引擎调度循环未 replay；
+  fused_qk_rmsnorm_rope_gate Triton 核未执行。
+- **当前降级**：无结构降级——structure_complete=True（config 覆盖 + 文本域
+  forward 源码证据完备）；CPU 执行/GPU 实测/预算 unknown 另列，M02 排名
+  资格不变（G15 仍阻断）。
 - **优先级**：P0（必需模型场景）。
 
 ## G-C1 V4.1 Engram 语义建模（单机算子已解除 2026-11-11 R04；hc 已解除 2026-11-10）⭐P0

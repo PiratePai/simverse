@@ -5,7 +5,7 @@
     numeric.py 双实现互核产物）+ 本仓 mtp_step_rows 与 fixture 逐步重对账；
   * Part B：结构 spec/计数/方法/管线/内存/负例/固定场景重放冻结；
   * 证据分栏：method_status mtp=source-checked；模型级 cpu_forward/not-run
-    不因 fixture 升格；部署排名仍被 mrope/CPU/GPU/预算缺口阻断。
+    不因 fixture 升格；部署排名仍被 CPU/GPU/预算缺口阻断（mrope 已 R26 解除）。
 
 口径披露：fixture 是随机权重小尺寸数学对照（vLLM 结构手工复刻 + 独立
 标量参考），不构成真实 checkpoint/完整 forward/部署验证。
@@ -292,7 +292,7 @@ class TestPipelineMtp:
         checks = b["capability"]["checks"]
         assert checks["mtp_serving_integration"]["status"] == "supported"
         assert checks["method_recipe_ready"]["status"] == "approximated"
-        # 排名资格仍被阻断（mrope/CPU/GPU/预算缺口，不因 source-checked 解除）
+        # 排名资格仍被阻断（CPU/GPU/预算缺口；mrope 阻断已 R26 文本 MRoPE 补齐解除）
         assert b["metrics"]["M02_speedup_vs_baseline"]["reason"]
 
     def test_memory_carries_mtp_objects_and_shared_refs(self):

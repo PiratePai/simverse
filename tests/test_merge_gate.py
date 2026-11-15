@@ -330,18 +330,22 @@ def test_g10_evidence_levels_separated_and_not_overclaimed():
     q = cat["models"]["qwen36_35b_a3b"]
     v = cat["models"]["deepseek_v41_flash"]
     d = cat["drafts"]["dflash_qwen36_35b_a3b"]
-    assert q.config_coverage_complete and not q.forward_evidence_complete
-    assert not q.structure_complete
-    assert q.evidence.forward_source == "partial-source"
+    assert q.config_coverage_complete and q.forward_evidence_complete
+    assert q.structure_complete
+    assert q.evidence.forward_source == "source-checked"
     assert q.evidence.cpu_forward == "not-run"
     assert q.evidence.gpu_measurement == "none"
     # R23（2026-11-13）：原生 MTP 头双栈 source-checked（vllm @10a854ed
-    # qwen3_5_mtp pin 8 文件 + SGLang 对照）；mrope 仍 unverified →
-    # forward_source 仍 partial-source，结构完备不因此解除。
+    # qwen3_5_mtp pin 8 文件 + SGLang 对照）。
+    # R26（2026-11-16）：文本 MRoPE position_ids 语义补齐（sm-qwen36-
+    # text-mrope，vllm_qwen36_mrope_pin 5 文件 + HF pin + fixture 数值
+    # 对照）→ unverified_paths 清空、forward_source=source-checked、
+    # structure_complete=True。多模态 2D 位置分支域外（source_map
+    # uncovered_domain 登记）；CPU/GPU 证据另列不冒充，排名门禁不解除。
     assert q.evidence.method_status["mtp"] == "source-checked"
     assert "sm-qwen36-mtp" in q.evidence.checked_paths
-    assert all("mtp_head" not in p for p in q.evidence.unverified_paths)
-    assert any("mrope" in p for p in q.evidence.unverified_paths)
+    assert q.evidence.unverified_paths == ()
+    assert "sm-qwen36-text-mrope" in q.evidence.checked_paths
     assert "sm-qwen35-gdn-decode-branch" in q.evidence.checked_paths
     # R24：V4.1 config 覆盖已完备（最后一个 unsupported 叶键 swiglu_limit
     # 与尾部缺口解除）；forward 证据仍缺核本体 → 结构资格仍 False。

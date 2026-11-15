@@ -1,6 +1,7 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-13（R23：Qwen3.6 原生 MTP forward 证据与仿真映射——vLLM @10a854ed
+更新：2026-11-16（R26：Qwen3.6 文本路径 MRoPE position_ids 语义补齐——vllm_qwen36_mrope_pin 5 文件（@dc74b8cb，blob sha1 校验）+ HF pin 双栈逐行核对：文本退化（三行恒等→交错重组恒等→标准部分 NeoX RoPE，rotary 64/256、[11,11,10]、theta 1e7）、prefill arange/decode 缓存续位、MTP 位置传递（复制/+1/末步不推进/回退 num_rejected/夹紧）；三路 f64 对照 diff=0 + 官方 HF 旋转类实测 4.35e-07 + 6 负例；mrope_section/interleaved 升 mapped、unverified_paths 清空 → forward_source=source-checked、structure_complete=True（不冒充执行/实测）；账本零漂移 replay；17 项新测试；多模态 2D 分支域外，见
+[报告](validation/qwen36-text-mrope-20261116.md)。早前 2026-11-13（R23：Qwen3.6 原生 MTP forward 证据与仿真映射——vLLM @10a854ed
 `qwen3_5_mtp` 等 8 文件 + SGLang @1b2870d 1 文件双栈逐行核对（SHA256/blob sha1 pin）；
 查明 mtp.* checkpoint 张量/加载重映射/colocated embed-lm_head 物理共享/每轮 K 均匀步+
 层 j%n 循环；count/methods/pipeline/memory 按 pinned 结构建模，撤销 K≤n_predict 旧限制与
@@ -24,13 +25,48 @@ quantization_config 5 叶键 mapped：MXFP8 线性（e4m3 1B+ue8m0 (1,32) scale�
 norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fmt 键 loader 不消费、按声明
 矛盾拒绝；场景 V41_QUANT 冻结；known_peak +14.36 GB（Marlin 对齐主导）；Humming/SM100/emulation
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #14（R24）已合入 main；R23 分支 `codex/qwen36-native-mtp-r23`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：本次 R23 验收修复在 Codex 宿主执行 `py -3.12 -m pytest tests -q`：**425 passed，exit 0**；`tools/replay_qwen36_mtp.py --check`、`tools/replay_v41_swiglu.py --check`、`tools/replay_v41_quant.py --check`、`node --check simverse/static/workbench.js` 均 exit 0；`py -3.12 -m simverse.cli run-v2` status=completed。历史回执（非本次执行）：R23 原提交在 ZCode 会话 424 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
-**pytest 收集数：425**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-14 R23 验收修复；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项（tests/test_qwen36_mtp_r23.py）；367→399 = R24 SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
+代码身份：本仓 git（PR #15（R23）已合入 main；R26 分支 `codex/qwen36-text-mrope-r26`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+运行：本次 R26 在 ZCode 会话（new-viewer-r26 工作树）执行 `py -3.12 -m pytest tests -q`：**442 passed，exit 0**；`tools/replay_qwen36_mrope.py --check`（账本零漂移+证据翻转）、`tools/replay_qwen36_mtp.py --check`（R23 冻结不漂移）、`py -3.12 -m simverse.cli run-v2` status=completed（排名仍阻断，注意行如实输出）。历史回执（非本次执行）：R23 验收修复在 Codex 宿主 425 passed，exit 0；`tools/replay_qwen36_mtp.py --check`、`tools/replay_v41_swiglu.py --check`、`tools/replay_v41_quant.py --check`、`node --check simverse/static/workbench.js` 均 exit 0；`py -3.12 -m simverse.cli run-v2` status=completed。历史回执（非本次执行）：R23 原提交在 ZCode 会话 424 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
+**pytest 收集数：442**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-16 R26 文本 MRoPE；425→442 = R26 文本 MRoPE 语义 17 项（tests/test_qwen36_mrope_r26.py，含 1 项 torch 可选 live）；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项（tests/test_qwen36_mtp_r23.py）；367→399 = R24 SwiGLU/尾部 oracle 32 项（tests/test_v41_swiglu.py）；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
 R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-16 R26：Qwen3.6 文本路径 MRoPE position_ids 语义**（分支
+`codex/qwen36-text-mrope-r26`）：vllm_qwen36_mrope_pin 5 文件
+（@dc74b8cb 与 R01 qwen35 pin 同 commit：qwen3_vl、rope_init、rope_base、
+rope_common、rope_mrope；SHA256+blob sha1 对 GitHub contents API 校验）
++ HF pin（modeling L130-194/L655-690/L1322-1332）+ 既有 vllm_qwen35_pin
+（qwen3_5.py L440-446 get_mrope_input_positions、qwen3_next.py L344-401/
+L423-426）与 vllm_qwen36_mtp_pin（qwen3_5_mtp/tdar 位置步进）三栏 source-
+checked 入册（ev-vllm-qwen36-mrope，executed=False；sm-qwen36-text-mrope）。
+语义结论：**文本路径 MRoPE 完全退化为标准部分 NeoX RoPE**——HF
+position_ids=None 时 arange(seq)+past_seen 扩 4 行（[text,T,H,W] 行 0 供
+mask/GDN、行 1:3 进旋转，纯文本四行恒等）；vLLM 文本 positions 一维
+（mrope_positions_factor 仅视频剪枝=4），MRotaryEmbedding 1D 走
+_forward_text_rope 不经 section 重组，SupportsMRoPE 文本 fallback
+arange(len).expand(3,-1) 三行恒等时交错重组亦恒等；mrope_section
+[11,11,10] 交错布局（idx%3，sum==rotary_dim//2==32 构造断言）；MTP 位置
+传递：prefill 逐元素复制 target positions、每草稿步 +1 夹 max_model_len−1、
+末步不推进、下轮 seq_len=target_seq_len−num_rejected（+1 bonus 回退）、
+sample_src=+1/步。fixture 数值对照（ev-qwen36-mrope-cpu-numeric，
+executed=True：三路独立实现（HF 转写/vLLM 转写/标量复数 oracle）f64
+两两 diff=0.0 + 官方 pinned HF 旋转类本机执行 4.35e-07 + MTP 状态机
+≥16 不变量 + 6 负例 + 测试内独立 mini-oracle；fixture 绑定 11 个 pin
+文件 SHA256）。落地：config 键 mrope_section/mrope_interleaved 升 mapped
+（文本域）；ModelIR extras["rope"]（几何+退化语义+MTP 步进 spec）+
+sum≠rotary_dim/2 显式拒绝；qwen36 unverified_paths 清空 →
+forward_source=source-checked、**structure_complete=True**（只表示源码
+证据完备，cpu_forward=not-run/GPU=none 另列，排名门禁 G15 不解除）。
+计数/内存零改动（rope 行 3·T·heads·rotary_dim 口径不变）：干净 main
+ee70ce2 基线 replay（tools/replay_qwen36_mrope.py，docs/evidence/
+mrope-map/）两场景账本逐字段零漂移、M07 structure_complete False→True、
+M02 排名理由不再含 mrope（CPU/GPU/预算仍阻断）。多模态 2D 行相异分支
+（get_rope_index/rope_deltas/视频剪枝 factor=4/openpangu）域外未核。
+测试 tests/test_qwen36_mrope_r26.py 17 项（pin 完整性/行号锚/证据四栏/
+fixture 复算/解析器负例/replay/CLI-API 一致性 + torch 可选 live）；
+G10/model_ir/product_scope 门禁随事实更新（mrope 阻断解除）。
 
 **2026-11-13 R23：Qwen3.6 原生 MTP forward 证据与仿真映射**
 （分支 `codex/qwen36-native-mtp-r23`）：vllm_qwen36_mtp_pin 8 文件
@@ -65,7 +101,7 @@ G10/G13/G16/model_ir/product_scope/pipeline_v02 随事实更新。前后 replay
 draft_step_0 整段替换；M01 64.55→66.96209320 ms、steady 2,699,569,088→
 2,841,004,480 B（含本次验收修复）。仍缺（G-C15）：kernel/CPU/GPU 未执行、真实 checkpoint
 未加载、多模块 MTP/量化草稿头/采样档变体、草稿 prefill KV 同步、接受率
-假设——部署排名资格不变（mrope 亦仍未核）。
+假设——部署排名资格不变（mrope 未核状态已于 2026-11-16 R26 解除，见下节；排名仍被 CPU/GPU/预算阻断）。
 
 **2026-11-13 R24：V4.1 SwiGLU clamp + compress_ratios 尾部**（分支
 `codex/v41-swiglu-tail-r24`）：swiglu-tail-pin.json 13 文件（vllm
@@ -253,8 +289,9 @@ oracle（tests/test_v41_csa2.py）。[报告](validation/v41-csa2-indexer-202611
 12 个张量（GDN/attention/门控/MoE/层输出/logits/三类缓存），逐元素容限
 `atol=1e-5, rtol=1e-4`，本机最大绝对差 2.98e-7。
 证据 `ev-qwen36-cpu-numeric-r06` 独立绑定数值产物并标 numeric-checked；
-原几何/算量产物保持 shape-checked。RoPE cos/sin 为输入边界，mrope
-生成与真实 checkpoint/MTP/GPU 未验证；模型级 cpu_forward 仍 not-run。
+原几何/算量产物保持 shape-checked。RoPE cos/sin 为输入边界（mrope 位置
+生成已于 2026-11-16 R26 独立补齐核验，见下节）；真实 checkpoint/MTP/GPU
+未验证；模型级 cpu_forward 仍 not-run。
 详见 [R06 报告 §9](validation/qwen36-gdn-moe-cpu-fixture-r06.md)。
 
 **2026-11-12 R05 mHC/Sinkhorn**：14 文件完整 blob SHA1 对 pinned tree、SHA256
@@ -489,7 +526,7 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   DFlash DraftIR。
 - 身份 pin（assets/config + assets/identity，SHA256 全录）：
   - Qwen/Qwen3.6-35B-A3B @345d467b（必需②主模型，qwen3_5_moe，40 层=30 GDN+10 Full@3,7..39，
-    256E top-8+shared512+gate，MTP1，mrope 多模登记 metadata-only）
+    256E top-8+shared512+gate，MTP1，mrope_section/interleaved 文本域 mapped（R26））
   - z-lab/Qwen3.6-35B-A3B-DFlash @f181eece（必需②草稿：6 层 5×SWA(4096)+1×Full GQA dense、
     block16、mask_token 248077、target_layer_ids [1,6,11,16,22,27,32,37]、fc 8·2048→2048）
   - z-lab/dflash @07ebd93（方法实现 pin：dflash_generate 协议/Qwen3DFlashAttention/

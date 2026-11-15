@@ -1,0 +1,38 @@
+{
+ "repo": "vllm-project/vllm",
+ "head_sha": "dc74b8cbbbe3dbb9399fe369757d63defd614cc2",
+ "captured": "2026-11-16",
+ "note": "R26 Qwen3.6 text-path MRoPE pin (rope stack for qwen3_5_moe family): MRotaryEmbedding text degeneration, cos/sin cache, NeoX apply, get_rope dispatch, mrope_positions_factor; raw.githubusercontent bytes at fixed commit; blob sha1 cross-checked vs GitHub contents API; mrope.py/base.py/common.py byte-identical at MTP pin commit 10a854ed6b3bbd7411c65ccbf87594e71c4d322c (cross-checked 2026-11-16)",
+ "files": {
+  "qwen3_vl.py": {
+   "remote_path": "vllm/model_executor/models/qwen3_vl.py",
+   "blob_sha1": "6928f8bb6e01132d4fe78cd695a1cacec3c9cf08",
+   "sha256": "0d953c7963672c6297bfd95c3f1043362975c974025cafba8f40e7f4c9bc8b28",
+   "bytes": 127499
+  },
+  "rope_init.py": {
+   "remote_path": "vllm/model_executor/layers/rotary_embedding/__init__.py",
+   "blob_sha1": "85d4cb63e501d7b18ca5d0dd96f9a9a96c4ffb68",
+   "sha256": "b0487bc2998033fe5e8007759329728342c8827b1f2d6e55e750abe826513c74",
+   "bytes": 11972
+  },
+  "rope_base.py": {
+   "remote_path": "vllm/model_executor/layers/rotary_embedding/base.py",
+   "blob_sha1": "41291a9b56d84cc43acb574fb1ab4abdeed31de9",
+   "sha256": "c81804498f08f072356a26b41967f211475df2694dabf5da9f488c074d1fdef5",
+   "bytes": 10964
+  },
+  "rope_common.py": {
+   "remote_path": "vllm/model_executor/layers/rotary_embedding/common.py",
+   "blob_sha1": "b96ab9cb6642124857c3c43b29e2aea01bab726a",
+   "sha256": "af4825138c1d8ee3823bfad04dadd91f6657818f867756c676faeb9d14d64f02",
+   "bytes": 9949
+  },
+  "rope_mrope.py": {
+   "remote_path": "vllm/model_executor/layers/rotary_embedding/mrope.py",
+   "blob_sha1": "f65524bb36db58b1eca1c4d39e8467928e0e7f9a",
+   "sha256": "a73071b1a8df576ab1796abf9538a8540e0d7c42143f9dbe7d2349ab6390534f",
+   "bytes": 20851
+  }
+ }
+}

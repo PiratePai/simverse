@@ -26,3 +26,6 @@ docs/evidence/mtp-map/*.json binary
 
 # R24 原始 replay 快照（同 R05/R20/R21/R22 先例）：保留捕获字节防行尾转换破坏 SHA256。
 docs/evidence/swiglu-tail/*.json binary
+assets/identity/vllm_qwen36_mrope_pin/* text eol=lf
+# R26 replay 快照（同 mtp-map/swiglu-tail 先例）：保留捕获字节防行尾转换。
+docs/evidence/mrope-map/*.json binary

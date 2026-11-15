@@ -1,0 +1,114 @@
+{
+ "dflash_default": {
+  "memory_scalars": {},
+  "metric_values": {
+   "M01_tpot_analytical": 42.810383894203646,
+   "M01_tpot_baseline": 112.91607144789675,
+   "M03_E_N": 3.05078125,
+   "M03_K": 4,
+   "M03_P_full": 0.31640625,
+   "M04_round_ms": 130.60511648973846,
+   "M05_moe_union": 1572864.0,
+   "M06_memory_colocated_r0": 2831405056
+  },
+  "n_rows": {
+   "draft_block": 109,
+   "target_decode": 623,
+   "verify_block": 623
+  },
+  "totals": {
+   "draft_block": {
+    "act_read": 908032,
+    "act_write": 675840,
+    "flops": 1867445480,
+    "kv_read": 13631488,
+    "kv_write": 12366,
+    "rows": 109,
+    "state_read": 0,
+    "state_write": 0,
+    "weight_read": 144372224,
+    "weight_read_expected": 0.0
+   },
+   "target_decode": {
+    "act_read": 1972864,
+    "act_write": 1330776,
+    "flops": 1493301574,
+    "kv_read": 335544320,
+    "kv_write": 10240,
+    "rows": 623,
+    "state_read": 7864320,
+    "state_write": 7864320,
+    "weight_read": 279451136,
+    "weight_read_expected": 62914560.0
+   },
+   "verify_block": {
+    "act_read": 9864320,
+    "act_write": 6653880,
+    "flops": 7466713670,
+    "kv_read": 335544320,
+    "kv_write": 51200,
+    "rows": 623,
+    "state_read": 39321600,
+    "state_write": 39321600,
+    "weight_read": 279451136,
+    "weight_read_expected": 295516860.0
+   }
+  }
+ },
+ "mtp_default": {
+  "memory_scalars": {},
+  "metric_values": {
+   "M01_tpot_analytical": 66.9620931971199,
+   "M01_tpot_baseline": 112.91607144789675,
+   "M03_E_N": 1.75,
+   "M03_K": 1,
+   "M03_P_full": 0.75,
+   "M04_round_ms": 117.18366309495983,
+   "M05_moe_union": 1572864.0,
+   "M06_memory_colocated_r0": 2841130688
+  },
+  "n_rows": {
+   "draft_step_0": 24,
+   "target_decode": 623,
+   "verify": 623
+  },
+  "totals": {
+   "draft_step_0": {
+    "act_read": 62400,
+    "act_write": 73025,
+    "flops": 215342492,
+    "kv_read": 33554432,
+    "kv_write": 1024,
+    "rows": 24,
+    "state_read": 0,
+    "state_write": 0,
+    "weight_read": 70802432,
+    "weight_read_expected": 3145728.0
+   },
+   "target_decode": {
+    "act_read": 1972864,
+    "act_write": 1330776,
+    "flops": 1493301574,
+    "kv_read": 335544320,
+    "kv_write": 10240,
+    "rows": 623,
+    "state_read": 7864320,
+    "state_write": 7864320,
+    "weight_read": 279451136,
+    "weight_read_expected": 62914560.0
+   },
+   "verify": {
+    "act_read": 3945728,
+    "act_write": 2661552,
+    "flops": 2986623728,
+    "kv_read": 335544320,
+    "kv_write": 20480,
+    "rows": 623,
+    "state_read": 15728640,
+    "state_write": 15728640,
+    "weight_read": 279451136,
+    "weight_read_expected": 123863040.0
+   }
+  }
+ }
+}
