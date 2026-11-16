@@ -190,3 +190,15 @@ baseline-provenance.json；`tools/replay_v41_csa2_core.py`（`--check`
   test_v41_engram（口径随事实更新）、test_merge_gate（G1/G16）
 - docs：本报告、`gaps/capability-gaps.md`（G-C17；编号在 R26 合入后自 G-C16 让位）、
   `IMPLEMENTATION_STATUS.md`、`FOCUS_STATUS.md`
+
+## 9. PR #18 合入后验收修正（2026-11-16）
+
+在合并后的 `main` 上发现 `attn_swa_index_build` 的首层标志也在 prefill
+生效；但 [vLLM @f358f057](https://github.com/vllm-project/vllm/tree/f358f0578a83f4e1fe6fc49a492d3ae9362de8e5)
+的 pinned `sparse_swa.py` 仅在 decode metadata 构建时调用
+`_compute_swa_indices_and_lens`，prefill 已由 `combine_topk_swa_indices` 行计数。
+已将该行限制为 decode，并在既有 prefill 测试中断言其缺席。
+以 TP8/B1/ctx1024 完整 prefill 为例，修正移除 1 行、614,720 解析 op、
+491,776 B 激活读和 495,872 B 激活写；decode 账本及
+`docs/evidence/csa2-core/after.json` 的固定场景重放不变。
+合并后全量门禁为 469 项；本修正的最终验收记录以修复 PR 的检查结果为准。
