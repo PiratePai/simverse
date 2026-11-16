@@ -654,7 +654,7 @@ def v41_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
                 shape="get_decoding_sched_meta 单 warp 贪心（每层型每步一次"
                       f"，记在各型首层）：{device_sms}×32B 元数据 + "
                       "num_splits T+1 项；≈10 op/行惯例"))
-    if attn_step_first:
+    if attn_step_first and not prefill:
         # SWA 窗口索引每步一次（全体层共享同一 spec 组的元数据构建；
         # sparse_swa.py L663-732 build() + kv_cache_interface.py 同 spec
         # 分组共享 builder）；记在第 0 层

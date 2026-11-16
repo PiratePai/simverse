@@ -322,6 +322,8 @@ def test_prefill_combine_row_every_layer():
     assert b2.act_write == ctx * 640 * 4 + (local + comp) * 4 + ctx * 4
     assert b2.act_read == comp * 4 + ctx * 16
     assert b2.flops == (local + comp) * 3
+    # SWA 窗索引由 decode metadata builder 构建；prefill 只走 combine。
+    assert not [r for r in rows if r.op == "attn_swa_index_build"]
     # decode 无 combine 行（默认 FlashMLA 路径不调用该 Triton 核）
     assert not [r for r in _rows(B=1, ctx=ctx) if r.op == "sparse_index_build"]
 

@@ -37,7 +37,7 @@ quantization_config 5 叶键 mapped：MXFP8 线性（e4m3 1B+ue8m0 (1,32) scale�
 norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fmt 键 loader 不消费、按声明
 矛盾拒绝；场景 V41_QUANT 冻结；known_peak +14.36 GB（Marlin 对齐主导）；Humming/SM100/emulation
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
-代码身份：本仓 git（PR #15（R23）/PR #17（R26）已合入 main；R25 分支 `codex/v41-sparse-mla-attention-r25`；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
+代码身份：本仓 git（PR #15（R23）、#16/#17（R26）、#18（R25）已合入 main；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
 运行：R25 在 ZCode 会话（new-viewer-csa2mla 工作树）执行 `py -3.12 -m pytest tests -q`：**469 passed，exit 0**（含 R26 文本 MRoPE 17 项合并后再验证）；`tools/replay_v41_csa2_core.py --check`（新，活性入口）、`replay_v41_swiglu/quant/moe --check`（链式改指 csa2-core）、`tools/replay_qwen36_mrope.py --check`、`tools/replay_qwen36_mtp.py --check`、`node --check simverse/static/workbench.js`、`py -3.12 -m simverse.cli run-v2`（status=completed）均 exit 0。历史回执（非本次执行）：R26 在 ZCode 会话 442 passed；R23 验收修复在 Codex 宿主 425 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
 **pytest 收集数：469**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-16 R25+R26 合并；442→469 = R25 注意力核本体 27 项（tests/test_v41_csa2_core.py：pin 1、调度器锚点/独立重演/负例/块公式 7、decode 手算绝对 5、prefill 手算 3、守恒/瞬态/设备 3、device_sms 拒绝 1、replay 冻结 1、门禁事实 2）；425→442 = R26 文本 MRoPE 语义 17 项（tests/test_qwen36_mrope_r26.py）；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项；367→399 = R24 SwiGLU/尾部 oracle 32 项；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
 R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
@@ -751,11 +751,13 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
    source-checked 解除（G-C12）；MoE scoring/top-k/分组路由已由 R21
    （2026-11-12）source-checked 解除（G-C13；MegaMoE/DSpark 草稿 MoE/
    padding skip 部署变体仍缺）；quantization_config 5 叶键已由 R22 映射
-   （新增未知键保留缺口）；剩余 swiglu clamp、稀疏 MLA 注意力核本体、
-   compress_ratios 尾部仍为显式缺口；mHC 仅
-   source-checked、tilelang kernel 未执行。G-C1。
-2. **Qwen3.6 MTP**：只有 config + 目标首层模板；HF 忽略 `mtp.*`、vLLM 主模型
-   丢弃 `mtp.` → method status=unverified，不进入部署排名。
+   （新增未知键保留缺口）；SwiGLU clamp 与 compress_ratios 尾部已由 R24
+   source-checked，稀疏 MLA 注意力核主干已由 R25 source-checked；剩余
+   Engram DP 交换、SM100/specialized decode 等执行变体和 kernel 执行验证。
+   mHC 仅 source-checked、TileLang kernel 未执行。G-C1/G-C17。
+2. **Qwen3.6 MTP**：原生 forward 已由 R23 双栈源码核对，文本 MRoPE 位置
+   语义由 R26 补齐；method status=source-checked。真实 checkpoint 的模型级
+   CPU forward、GPU/部署实测和可分配预算仍缺，故不进入部署排名。
 3. **DFlash**：服务端集成已双栈逐行核对（R07a 2026-11-12：vLLM @dc74b8cb +
    SGLang @74cb973d，colocated=supported(source-checked)/dt=unsupported；
    ctx 投影改 verify 跨度基（含 K norm/rope/layout copy）、草稿行改生效块、
@@ -805,9 +807,9 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
   run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
   trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
 - 下一工作项：V4.1 量化执行变体（Humming/SM100/emulation）、
-  稀疏 MLA 注意力核本体、MoE 部署变体（MegaMoE/DSpark 草稿 MoE）、
+  稀疏 MLA 专门 decode/SM100 执行变体、MoE 部署变体（MegaMoE/DSpark 草稿 MoE）、
   Engram DP 分片交换路径（或显式永久登记单副本口径）；Qwen3.6 MTP
-  原生 forward；两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/
+  模型级执行验证；两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/
   运行时池尺寸；可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；
   G-C4 单请求超前 → M17；
   V09b 三方对账。历史 235B MoE 蒸馏仅作归档研究，不再是产品优先项。
