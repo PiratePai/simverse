@@ -1,0 +1,7 @@
+{
+  "ENV_VARIABLES": {"ASCEND_GLOBAL_LOG_LEVEL": "3"},
+  "parallel_group_info": {
+    "g0": {"group_name": "ep", "group_rank": 0,
+           "global_ranks": [0, 1, 2, 3, 4, 5, 6, 7]}
+  }
+}

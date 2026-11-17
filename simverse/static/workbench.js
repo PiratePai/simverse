@@ -17,7 +17,8 @@
   'use strict';
   var state = {
     catalog: null, bundle: null, selectedRowKey: null,
-    matrixRuns: {}, scenarioOf: null, matrixRunning: false
+    matrixRuns: {}, scenarioOf: null, matrixRunning: false,
+    auditReport: null, auditSetId: null
   };
   var $ = function (id) { return document.getElementById(id); };
   // 精度档（后端 scenario.validate 契约：dense_w/expert_w/act/kv ∈ {4,8,16}，state=32）
@@ -150,6 +151,7 @@
       }
       renderCatalogDrawer();
       renderMatrixHead();
+      renderProfileAudit(cat.profile_audit || []);
       syncControls();
     }).catch(function (e) { setStatus('能力目录加载失败：' + e, true); });
   }
@@ -1062,6 +1064,140 @@
     $('catalog-body').innerHTML = html + '</ul>';
   }
 
+  // ---------- Ascend profiling 审计（只读证据；前端零物理计算） ----------
+  /* 索引来自 catalog.profile_audit（calibration_admission 恒为 not-admitted，
+   * 不进 #sel-profile）；报告来自 /api/v2/profile-audit/<set_id>。这里只做
+   * 转义展示/格式化/导出，后端给什么显示什么：不生成 selected_ms、不重算
+   * 任何占比、不参与计价/排名。 */
+  function pct(v) {
+    if (v === null || v === undefined) return '–';
+    return (v * 100).toFixed(2) + '%';
+  }
+  function renderProfileAudit(items) {
+    var el = $('audit-body');
+    if (!el) return;
+    state.auditReport = null;
+    state.auditSetId = null;
+    var btn = $('btn-export-audit');
+    if (btn) btn.disabled = true;
+    if (!items || !items.length) {
+      el.innerHTML = '<p>（无审计包）</p>';
+      return;
+    }
+    var html = '<table class="plain"><tr><th>set_id / 设备</th>'
+      + '<th>候选采集模型</th><th>run（并列，不聚合）</th>'
+      + '<th>准入</th><th>证据</th><th>操作</th></tr>';
+    items.forEach(function (it) {
+      var set = it.set_id || '';
+      html += '<tr><td><code>' + esc(set) + '</code><br>'
+        + '<span style="font-size:11px;color:var(--ink3)">'
+        + esc(it.device_label || '–') + '</span></td>'
+        + '<td style="font-size:11.5px">'
+        + esc((it.candidate_model_ids || []).join(', ') || '–') + '</td>'
+        + '<td style="font-size:11px">'
+        + esc((it.run_ids || []).join(' · ') || '–') + '</td>'
+        + '<td><span class="tag warn">'
+        + esc(it.calibration_admission || 'unknown') + '</span><br>'
+        + '<span style="font-size:11px;color:var(--ink3)">admitted='
+        + esc(String(it.admitted)) + '</span></td>'
+        + '<td style="font-size:11px">' + esc(it.evidence_ref || '–')
+        + (it.integrity_error
+          ? '<br><span style="color:var(--red)">完整性失败：'
+            + esc(it.integrity_error) + '</span>' : '') + '</td>'
+        + '<td><button type="button" data-set-id="' + esc(set)
+        + '">查看详情/导出</button></td></tr>';
+    });
+    el.innerHTML = html + '</table><p class="mx-note">审计包未准入：只读展示'
+      + '采集 kernel 时间与映射/通信/未映射占比，不参与计价与排名；'
+      + '导出 JSON 与详情接口同源。</p>';
+    Array.prototype.forEach.call(el.querySelectorAll('[data-set-id]'),
+      function (b) {
+        b.addEventListener('click', function () {
+          viewProfileAudit(b.getAttribute('data-set-id'));
+        });
+      });
+  }
+  function viewProfileAudit(setId) {
+    var el = $('audit-body');
+    if (!el) return;
+    // 新请求先作废旧缓存（失败时不得再导出上一次的报告）
+    state.auditReport = null;
+    state.auditSetId = null;
+    var btn0 = $('btn-export-audit');
+    if (btn0) btn0.disabled = true;
+    var modelSel = $('sel-model');
+    // 可选 model_id：用当前主模型验证“跨模型拒绝”域门禁（后端判定）
+    var q = '?model_id=' + encodeURIComponent(
+      modelSel && modelSel.value ? modelSel.value : '');
+    el.innerHTML = '<p>读取审计详情…</p>';
+    fetch('/api/v2/profile-audit/' + encodeURIComponent(setId) + q)
+      .then(function (r) {
+        return r.json().then(function (j) {
+          if (!r.ok) throw new Error('HTTP ' + r.status + '：'
+            + (j && j.error ? j.error : '响应非 JSON'));
+          return restoreBig(j);
+        }, function () {
+          throw new Error('HTTP ' + r.status + '（响应非 JSON）');
+        });
+      }).then(function (rep) {
+        state.auditReport = rep;
+        state.auditSetId = rep.set_id || setId;
+        renderAuditReport(rep);
+        var btn = $('btn-export-audit');
+        if (btn) btn.disabled = false;
+      }).catch(function (e) {
+        // 失败显示状态码+原因，不渲染成成功表格
+        el.innerHTML = '<div class="unknown-note">审计详情读取失败：'
+          + esc(e.message) + '（不渲染为成功表格）</div>';
+      });
+  }
+  function renderAuditReport(rep) {
+    var adm = rep.admission || {};
+    var cc = rep.candidate_calibration || {};
+    var runs = rep.runs || [];
+    var html = '<p style="font-size:12px"><b>set_id</b> <code>'
+      + esc(rep.set_id) + '</code> · <b>kind</b> ' + esc(rep.kind || '')
+      + ' · <b>证据</b> <code>' + esc(rep.evidence_ref || '–')
+      + '</code> · <b>设备</b> '
+      + esc((rep.device && rep.device.family) || '–') + '</p>'
+      + '<p><span class="tag warn">calibration_admission='
+      + esc(adm.calibration_admission || 'unknown') + '</span> '
+      + '<span class="tag na">admitted=' + esc(String(adm.admitted))
+      + '</span> <span class="tag na">selected_ms='
+      + (cc.selected_ms === null || cc.selected_ms === undefined
+        ? 'null（未准入）' : esc(String(cc.selected_ms))) + '</span></p>';
+    var reasons = adm.reasons || [];
+    html += '<p style="font-size:11.5px"><b>域门禁原因（后端判定）</b></p>'
+      + '<ul style="font-size:11.5px;margin:4px 0 8px">'
+      + (reasons.length
+        ? reasons.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('')
+        : '<li>（无额外原因）</li>') + '</ul>';
+    html += '<table class="plain"><tr><th>run_id（并列，不聚合）</th>'
+      + '<th>observed_kernel_us</th><th>mapped 占比</th><th>通信占比</th>'
+      + '<th>未映射占比</th></tr>';
+    runs.forEach(function (r) {
+      html += '<tr><td><code>' + esc(r.run_id) + '</code></td>'
+        + '<td class="mono" style="font-family:var(--mono)">'
+        + fmt(r.observed_kernel_us, '', 0) + '</td>'
+        + '<td>' + pct(r.mapped_ledger_time_share) + '</td>'
+        + '<td>' + pct(r.communication_time_share) + '</td>'
+        + '<td>' + pct(r.unmapped_time_share) + '</td></tr>';
+    });
+    html += '</table><p class="mx-note">observed_kernel_us 为设备 kernel 时间'
+      + '（profiler task duration）；占比分母含全部设备 kernel 时间，未做'
+      + '关键路径去重。candidate_calibration.selected_ms=null（未准入），'
+      + '不产生成本/排名。</p>';
+    $('audit-body').innerHTML = html;
+  }
+  function exportAudit() {
+    if (!state.auditReport) {
+      setStatus('先点【查看详情/导出】读取审计报告再导出。', true);
+      return;
+    }
+    download('ascend-profile-audit-' + state.auditSetId + '.json',
+      JSON.stringify(state.auditReport, null, 1));
+  }
+
   // ---------- matrix（每格独立 run；串行：最大在途请求 = 1） ----------
   var METHODS = ['dflash_v1', 'mtp'];
   var DEPLOYS = [
@@ -1277,6 +1413,7 @@
   $('btn-sweep').addEventListener('click', runSweep);
   $('btn-export-json').addEventListener('click', exportJson);
   $('btn-export-csv').addEventListener('click', exportCsv);
+  $('btn-export-audit').addEventListener('click', exportAudit);
   $('btn-export-groups').addEventListener('click', exportGroups);
   loadCatalog();
 

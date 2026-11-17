@@ -1,0 +1,6 @@
+Device_id,OP Type,Core Type,Count,Total Time(us),Min Time(us),Avg Time(us),Max Time(us),Ratio(%)
+8,MatMulV3,AI_CORE,2,300.0,140.0,150.0,160.0,30.0
+8,FusedInferAttentionScore,MIX_AIC,1,200.0,200.0,200.0,200.0,20.0
+8,MoeGatingTopK,AI_VECTOR_CORE,1,100.0,100.0,100.0,100.0,10.0
+8,MoeTokenPermute,MIX_AIV,1,150.0,150.0,150.0,150.0,15.0
+8,AddRmsNormBias,AI_VECTOR_CORE,2,250.0,120.0,125.0,130.0,25.0

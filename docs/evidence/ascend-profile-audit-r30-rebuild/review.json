@@ -1,0 +1,234 @@
+{
+  "source_pr": "https://github.com/PiratePai/simverse/pull/26",
+  "supersedes": {
+    "review": "docs/evidence/ascend-profile-audit-r30-review/review.json",
+    "source_commit": "89803d0a09c13bcd237049c2c2ccefe7ec381f4d",
+    "source_manifest_sha256": "165cfed78fc5400e5fed3ae401160357409f1ff2c2af1483754a443c98e33fe5"
+  },
+  "rebuilt_pack": {
+    "path": "assets/profile_audit/ascend_910b_profile_audit_v1",
+    "manifest_sha256": "958cb6c45c3cfa231a399d6bfdba4b3e14cc4c2455618bf1198a38c85954dbc0",
+    "distill_files": [
+      "README.md",
+      "census.json",
+      "diff.json",
+      "identity.json",
+      "ledger_rows.json",
+      "mapping.json",
+      "shape_costs.json"
+    ]
+  },
+  "verification": "committed derived artifacts + manifest/source SHA256 + offline tests; no raw-profile replay (raw tree absent) and no NPU run",
+  "decision": "approve-audit-only: consumed-source hashes complete and group remaining reconciled; production calibration still blocked (A-N4/ownership/阶段)",
+  "missing_consumed_source_hashes": {},
+  "consumed_source_files_per_run": 7,
+  "totals_consistency": [
+    {
+      "run_id": "qwen3-8b-0811/baseline-t=0.6-tp2-bs32-8k",
+      "count_match_non_hcom": true,
+      "total_us_rel_delta_non_hcom": 0.0,
+      "kernel_rows": 44244,
+      "hcom_kernel_rows": 10108
+    },
+    {
+      "run_id": "qwen3-8b-0811/dflash-t=0.6-tp2-bs64-4k",
+      "count_match_non_hcom": true,
+      "total_us_rel_delta_non_hcom": 0.0,
+      "kernel_rows": 30963,
+      "hcom_kernel_rows": 4913
+    },
+    {
+      "run_id": "qwen3-8b-0811/dspark-t=0.6-tp2-bs64-4k",
+      "count_match_non_hcom": true,
+      "total_us_rel_delta_non_hcom": 0.0,
+      "kernel_rows": 39268,
+      "hcom_kernel_rows": 6996
+    },
+    {
+      "run_id": "qwen3-8b-0811/minidraft-t=0.6-tp2-bs64-4k",
+      "count_match_non_hcom": true,
+      "total_us_rel_delta_non_hcom": 0.0,
+      "kernel_rows": 48175,
+      "hcom_kernel_rows": 7116
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/minidraft_4k_bs64",
+      "count_match_non_hcom": true,
+      "total_us_rel_delta_non_hcom": 6e-09,
+      "kernel_rows": 123068,
+      "hcom_kernel_rows": 960
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/mtp_4k_bs64",
+      "count_match_non_hcom": true,
+      "total_us_rel_delta_non_hcom": 2e-09,
+      "kernel_rows": 219981,
+      "hcom_kernel_rows": 9802
+    }
+  ],
+  "group_remaining": [
+    {
+      "run_id": "qwen3-8b-0811/baseline-t=0.6-tp2-bs32-8k",
+      "status": "excluded-or-no-row-match"
+    },
+    {
+      "run_id": "qwen3-8b-0811/dflash-t=0.6-tp2-bs64-4k",
+      "status": "excluded-or-no-row-match"
+    },
+    {
+      "run_id": "qwen3-8b-0811/dspark-t=0.6-tp2-bs64-4k",
+      "status": "excluded-or-no-row-match"
+    },
+    {
+      "run_id": "qwen3-8b-0811/minidraft-t=0.6-tp2-bs64-4k",
+      "status": "excluded-or-no-row-match"
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/minidraft_4k_bs64",
+      "status": "excluded-or-no-row-match"
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/mtp_4k_bs64",
+      "groups": [
+        {
+          "group": "gemm_grouped_moe",
+          "observed_us": 3402028.207,
+          "allocated_us": 0.0,
+          "remaining_us": 3402028.207,
+          "listed_unallocated_us": 3402028.207
+        },
+        {
+          "group": "gemm_dense_quant",
+          "observed_us": 2511260.012,
+          "allocated_us": 2058629.896,
+          "remaining_us": 452630.116,
+          "listed_unallocated_us": 452630.116
+        },
+        {
+          "group": "norm_add_fused",
+          "observed_us": 396528.42,
+          "allocated_us": 0.0,
+          "remaining_us": 396528.42,
+          "listed_unallocated_us": 396528.42
+        },
+        {
+          "group": "gdn_core",
+          "observed_us": 325634.477,
+          "allocated_us": 0.0,
+          "remaining_us": 325634.477,
+          "listed_unallocated_us": 325634.477
+        },
+        {
+          "group": "norm_generic",
+          "observed_us": 246313.882,
+          "allocated_us": 0.0,
+          "remaining_us": 246313.882,
+          "listed_unallocated_us": 246313.882
+        },
+        {
+          "group": "attention_core",
+          "observed_us": 237287.586,
+          "allocated_us": 237287.586,
+          "remaining_us": 0.0,
+          "listed_unallocated_us": null
+        },
+        {
+          "group": "moe_router_topk",
+          "observed_us": 234280.973,
+          "allocated_us": 0.0,
+          "remaining_us": 234280.973,
+          "listed_unallocated_us": 234280.973
+        },
+        {
+          "group": "gdn_conv",
+          "observed_us": 159642.0,
+          "allocated_us": 0.0,
+          "remaining_us": 159642.0,
+          "listed_unallocated_us": 159642.0
+        },
+        {
+          "group": "attn_qkv_norm_rope_fused",
+          "observed_us": 128019.431,
+          "allocated_us": 0.0,
+          "remaining_us": 128019.431,
+          "listed_unallocated_us": 128019.431
+        },
+        {
+          "group": "mlp_activation",
+          "observed_us": 52747.185,
+          "allocated_us": 0.0,
+          "remaining_us": 52747.185,
+          "listed_unallocated_us": 52747.185
+        },
+        {
+          "group": "attention_kv_write",
+          "observed_us": 14337.618,
+          "allocated_us": 0.0,
+          "remaining_us": 14337.618,
+          "listed_unallocated_us": 14337.618
+        }
+      ]
+    }
+  ],
+  "ownership": {
+    "attn_qkv_norm_rope_fused_ledger_rows": [
+      "q_norm",
+      "k_norm",
+      "rope"
+    ],
+    "note": "参考 vllm-ascend forward 中 qkv_proj 先于 split/norm/rope；split kernel 不认领投影 GEMM。采集栈 commit 仍未知。"
+  },
+  "geometry_recheck": [
+    {
+      "run_id": "qwen3-8b-0811/baseline-t=0.6-tp2-bs32-8k",
+      "verification_passed": true,
+      "observed_compatible": true,
+      "unknown": [],
+      "failures": []
+    },
+    {
+      "run_id": "qwen3-8b-0811/dflash-t=0.6-tp2-bs64-4k",
+      "verification_passed": true,
+      "observed_compatible": true,
+      "unknown": [],
+      "failures": []
+    },
+    {
+      "run_id": "qwen3-8b-0811/dspark-t=0.6-tp2-bs64-4k",
+      "verification_passed": true,
+      "observed_compatible": true,
+      "unknown": [],
+      "failures": []
+    },
+    {
+      "run_id": "qwen3-8b-0811/minidraft-t=0.6-tp2-bs64-4k",
+      "verification_passed": true,
+      "observed_compatible": true,
+      "unknown": [],
+      "failures": []
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/minidraft_4k_bs64",
+      "verification_passed": false,
+      "observed_compatible": true,
+      "unknown": [
+        "tp_for_global_heads/vocab"
+      ],
+      "failures": []
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/mtp_4k_bs64",
+      "verification_passed": false,
+      "observed_compatible": true,
+      "unknown": [
+        "tp_for_global_heads/vocab"
+      ],
+      "failures": []
+    }
+  ],
+  "residual_limits": [
+    "M/阶段/角色/布局/权重未与调用关联；row-level 数值仅为 width/count-derived 假设诊断，不标 measured",
+    "设备 SKU/board、vLLM/vllm-ascend commit、权重 revision、warmup/step 边界仍缺",
+    "融合组总时间可作 audit-only，正式 CalibratedPricer 接入另验（#28/#29）"
+  ]
+}

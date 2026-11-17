@@ -103,6 +103,7 @@ def api_v2_catalog():
     from .methods.plans import UNSUPPORTED
     from .validation import registry_json
     from .importers import source_map_json
+    from .cost.profile_audit import audit_packs_json
     from .cost.profile_store import (PRODUCT_PROFILE_SETS, archived_profiles_json,
                                      profile_model_id)
     return jsonify(js_safe({
@@ -120,7 +121,40 @@ def api_v2_catalog():
                              for sid in sorted(PRODUCT_PROFILE_SETS)},
         "evidence": registry_json(),
         "source_map": source_map_json(),
+        # 只读 Ascend profiling 审计索引：审计包恒为未准入（not-admitted），
+        # 不等同于 cost profile，绝不进入 profile_sets / 校准选择器。
+        "profile_audit": audit_packs_json(),
     }))
+
+
+@app.get("/api/v2/profile-audit/<set_id>")
+def api_v2_profile_audit(set_id):
+    """Ascend profiling 审计报告（只读证据，不是校准/profile 选择）。
+
+    只转发 `cost.profile_audit` 的只读审计产物：`calibration_admission` 恒为
+    not-admitted、`candidate_calibration.selected_ms` 恒为 None——不参与计价/
+    排名/校准准入。未知审计包或产物哈希不符 → 404；tp 非整数 → 400。
+    """
+    from .cost.profile_audit import AuditIntegrityError, audit_report_json
+    tp_raw = request.args.get("tp")
+    tp = None
+    if tp_raw:  # 缺省/空串 = 未指定域（None），不当作 0
+        try:
+            tp = int(tp_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": f"tp 必须是整数，收到 {tp_raw!r}"}), 400
+    try:
+        report = audit_report_json(
+            set_id,
+            model_id=request.args.get("model_id") or None,
+            device_id=request.args.get("device_id") or None,
+            tp=tp,
+        )
+    except AuditIntegrityError as exc:  # 哈希/结构不符：拒绝展示，不降级
+        return jsonify({"error": f"审计包完整性校验失败：{exc}"}), 404
+    except ValueError as exc:  # 未知 set_id
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(js_safe(report))
 
 
 @app.post("/api/v2/run")

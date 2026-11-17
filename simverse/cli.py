@@ -379,6 +379,39 @@ def cmd_export_v2(args):
         print(f"已写 {args.html}")
 
 
+def cmd_ascend_audit(args):
+    """Ascend profiling 审计包（只读；未准入）——A-N5 离线交付的活性入口。"""
+    from .cost.profile_audit import audit_report_json, load_audit_pack
+    try:
+        if args.check:
+            pack = load_audit_pack(args.set)
+            print(f"OK 审计包哈希一致：{pack.set_id}"
+                  f"（{len(pack.manifest['distill_files'])} 个产物，"
+                  f"{len(pack.run_ids)} 个 run；准入={pack.admission}）")
+            return
+        report = audit_report_json(args.set, model_id=args.model,
+                                   device_id=args.device, tp=args.tp)
+    except ValueError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        raise SystemExit(2)
+    adm = report["admission"]
+    print(f"set={report['set_id']}  admission={adm['calibration_admission']}"
+          f"  candidate_models={report['domain']['candidate_model_ids']}")
+    print(f"device={report['device']['family']}  "
+          f"runs_used={len(report['domain']['runs_used'])}"
+          f"  merge_allowed={report['domain']['merge_allowed']}")
+    for r in report["runs"]:
+        print(f"  {r['run_id']}: kernel={r['observed_kernel_us']}us  "
+              f"mapped/compute={r['mapped_ledger_time_share_of_compute']}  "
+              f"unmapped/compute={r['unmapped_time_share_of_compute']}")
+    for reason in adm["reasons"]:
+        print(f"  未准入原因：{reason}")
+    print(f"  selected_ms={report['candidate_calibration']['selected_ms']}"
+          f"（{report['candidate_calibration']['fallback_reason']}）")
+    if args.out:
+        _dump(report, Path(args.out))
+
+
 def cmd_list(args):
     if args.what == "formulas":
         from .formulas import formulas_json
@@ -443,6 +476,16 @@ def main(argv=None):
     p_e2.add_argument("--trace", default=None)
     p_e2.add_argument("--html", default=None)
     p_e2.set_defaults(fn=cmd_export_v2)
+    p_aa = sub.add_parser(
+        "ascend-audit", help="Ascend profiling 审计包（只读；未准入，不参与计价）")
+    p_aa.add_argument("--set", default="ascend-910b-profile-audit-v1")
+    p_aa.add_argument("--model", default=None)
+    p_aa.add_argument("--device", default=None)
+    p_aa.add_argument("--tp", type=int, default=None)
+    p_aa.add_argument("-o", "--out", default=None)
+    p_aa.add_argument("--check", action="store_true",
+                      help="只校验审计包 manifest 哈希（可重放）")
+    p_aa.set_defaults(fn=cmd_ascend_audit)
     p_srv = sub.add_parser("serve", help="Web 工作台")
     p_srv.add_argument("--host", default="127.0.0.1")
     p_srv.add_argument("--port", type=int, default=8765)

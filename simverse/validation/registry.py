@@ -652,6 +652,22 @@ _PINNED_ASSETS = [
       "部署排名资格不因本证据解除（cpu_forward=not-run、GPU=none、预算 "
       "unknown 保持）"],
      True, "2026-11-16"),
+    ("ev-ascend-profile-audit-v1", "source-checked",
+     "Ascend NPU（Ascend910B 家族）profiling 的离线审计/映射/差异包（A-N5 第一阶段）："
+     "6 个 run（Qwen3.6-35B-A3B MTP/minidraft + Qwen3-8B 类 dense baseline/DFlash/"
+     "DSpark/minidraft）的设备 kernel census、OP Type→账本行组 ownership、"
+     "账本覆盖/未建模时间占比、设备内核间隙与身份缺失清单；"
+     "calibration_admission=not-admitted",
+     "profile_audit/ascend_910b_profile_audit_v1/manifest.json",
+     "外部只读导入（tools/import_ascend_profiles.py；每个 run 的源产物逐文件 "
+     "SHA256 在 manifest.source.files_sha256）；本仓未执行 NPU 采集",
+     "Ascend910B 家族 + 上述 6 run 的设备 kernel 边界；只读审计，未准入",
+     ["executed=False：本仓未在 NPU 上执行采集；只重放外部已归档 profiling 产物",
+      "不构成 measured 校准：无 selected_ms、无成本/排名结论；不进入 PROFILE_SETS",
+      "设备 SKU/驱动/vLLM 与 vllm-ascend commit/权重身份/warmup/step 边界缺失 → "
+      "禁止跨 SKU、跨模型、跨 run 复用",
+      "多个 run 身份不同，禁止相减或拼接（R28/R29 先例：不同栈不得拼接）"],
+     False, "2026-11-17"),
 ]
 
 

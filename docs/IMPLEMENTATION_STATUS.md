@@ -1,5 +1,31 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
+## 2026-11-18 R30 审查整改：从原件重建与遗留缺口
+
+PR #26 审查（[报告](validation/ascend-profile-audit-r30-review.md)，历史记录）指出的
+P1 已整改：**2026-11-18 在本机原件上**用修复后的 `tools/import_ascend_profiles.py`
+重新导入 6 个 run（未运行 NPU），重建包 manifest `958cb6c4…`：
+
+- 每个 run 登记 **7 个已消费源文件 SHA256**（`profiler_info`、`profiler_metadata`、
+  profiler DB、`kernel_details.csv`、`op_statistic.csv`、`step_trace_time.csv`、
+  `analysis.db`；共 42 条），未消费文件不冒充来源；`--check` 只校验产物字节；
+- 逐调用 `(OP Type, shape, 两操作数 dtype)` 联合分组，不再把 dtype 并集套到所有 shape；
+  passes/MTP K 未知时显式 unknown、不做行级分摊；GEMM 计数严格相等才 matched；
+- 未分摊组按"组实测量−已分摊量"列全：GroupedMoE 3,402,028.207 µs、KV write
+  14,337.618 µs、dense 剩余 452,630.116 µs 等；不再硬编码排除；
+- `split_qkv_rmsnorm_mrope` 只认领 `q_norm/k_norm/rope`，不认领投影 GEMM
+  （vllm-ascend @baa023a 只读参考，不冒充采集栈）；
+- 几何：Qwen3.6 两个 run 因 TP 域未知 `verification_passed=false`
+  （unknown `tp_for_global_heads/vocab`），Qwen3-8B（tp=2）通过；
+- row-level 数值标注 `width/count-derived-assumption`，**不是 measured 归属**。
+
+重建审查（[报告](validation/ascend-profile-audit-r30-rebuild-20261118.md)，
+[review.json](evidence/ascend-profile-audit-r30-rebuild/review.json)）结论为
+**approve-audit-only**：来源哈希与组级剩余量可追溯；生产校准/排名仍 blocked
+（A-N4 设备/官方规格、#28 身份元数据、#29 ownership pin、#30 实现成本缺口、
+#31 离线模型边界）。历史审查 record（旧包缺源哈希）按 commit 保留，不改写。
+本轮无 NPU 执行；全量测试结果见"运行"行。
+
 ## 2026-11-18 成本组与统一选用路径
 
 新增 CostSession，移除条件记录的二次全量求值；一次计数/lowering/容量/解析定价，缓存阶段成本
@@ -25,6 +51,41 @@ R29 双 rank 五类 collective 曲线与 R28 14 个独立 GEMM 形状分别接�
 本轮仅在 Windows 审查既有 NPU 产物、阅读源码并执行离线回归，没有新做硬件测量。以 [审查报告](validation/ascend-910b3-r29-review.md) 与 [派生 review.json](evidence/ascend-910b3-r29/review.json) 为准，下节是采集时记录。原始 23 个声明产物保留，22 个匹配 manifest，forward 日志原哈希不符单列；未重写原 manifest。外部原报告固定 LF，避免 Windows 检出改变其原哈希。
 
 修正 AllGather 分子漏 world（rank0/256MiB busbw 8.863→17.725 GB/s）、逐头 MRoPE 伪通过、TP1 产 token 的范围、权重 0.32 GiB 与 OOM 分配量混淆、EP2 CPU 玩具专家/路由元数据检查、graph 差分和 ACL 粒度断言。来源不足继续披露；生产计数/成本/设备/资格零改动，全部 not-admitted。新增 7 项离线证据回归，规划调整见 ROADMAP 与 ascend-validation-plan。本轮全量 `py -3.12 -m pytest tests -q`：**550 passed**（54.43s）；审查回放 `--check`、JavaScript 静态检查、默认 `simverse.cli run-v2` 与 fixture dry-run 均退出 0。远端 required check 以 PR #23 的最终提交为准。
+## 2026-11-17 R30 Ascend profiling 离线审计（A-N5 第一阶段）
+
+把外部 Ascend NPU profiler 产物（Qwen3.6-35B-A3B MTP/minidraft + Qwen3-8B 类
+dense baseline/DFlash/DSpark/minidraft 共 6 run）离线导入为仓内自包含审计包
+[assets/profile_audit/ascend_910b_profile_audit_v1](../assets/profile_audit/ascend_910b_profile_audit_v1/manifest.json)，
+入口 `tools/import_ascend_profiles.py`（`--check` 可重放）、只读加载器
+`simverse/cost/profile_audit.py`、CLI `simverse ascend-audit`、工作台只读抽屉
+（`/api/v2/catalog.profile_audit` + `GET /api/v2/profile-audit/<set_id>`）与
+证据 `ev-ascend-profile-audit-v1`（executed=False）。
+结论与边界见 [审计报告](validation/ascend-profile-audit-20261117.md)：交付原始
+trace 审核/映射/差异表与身份缺口；**`calibration_admission=not-admitted`**，
+无 `selected_ms`、不进入 PROFILE_SETS/CalibratedPricer，未改变 DEVICES、
+模型执行状态与部署排名，未解除 R17/R18/G-D7/R02b。
+设备域说明：本仓已有 `ascend_910b3` 解析档，但其 spec 为 assumed 旧仓映射
+（model-verse H3 → ascend_910B_64G，未官方核验），profile 无 npu-smi board/SKU/
+驱动，不能据此声称同 SKU/驱动；A-N4 官方规格与设备身份仍是校准前置。
+模型身份：owner 声明 `qwen3_6_mtp_domino`→Qwen3.6-35B-A3B、`qwen3-8b-0811`→
+Qwen3-8B，mtp/dflash/dspark 为三种现有草稿模型；minidraft（自研）按声明排除
+（2 个 run 标记 `excluded_by_owner`）。并用**具体算子输入/输出 shape** 核对
+维度：Qwen3.6 hidden 2048（norm 末维众数+GEMM K）、vocab 248320（lm_head N）、
+256 专家（router N/topk8）；Qwen3-8B hidden 4096、vocab 151936（N=75968×TP2）、
+intermediate 12288——均为形状一致，权重 revision/引擎 commit 仍未验证。
+另交付 row-level 候选提取（`ledger_rows.json`）：由 GEMM shape 签名 + 调用计数
+反解 passes=96/MTP K=3，融合核按输出宽度、同形核按计数方程分摊；Qwen3.6 MTP run
+的 12 个 GEMM/注意力签名行中 9 行可分摊（占候选时间 79.8%），lm_head 计数残差
+显式 `ambiguous`，非 GEMM 融合组列为 `unallocated`（不填 0）。
+数据事实：`op_statistic` 与 `kernel_details` 非 hcom 行计数/总时长对账一致
+（相对差≤6e-9）；Qwen3.6 runs 非通信设备时间中账本组覆盖 57.7%/45.9%，
+未建模主要为 MoE permute（14.9%）/数据搬运（12.0%）/chunked-prefill GDN（7.8%）；
+mtp run 75.3% 设备时间为 HCCL 通信（EP alltoall）。生产校准准入仍依赖 A-N4
+设备/实现身份与匹配采数（按 [计划 §3](ascend-validation-plan.md)）。
+新增测试 25 项（`tests/test_ascend_profile_audit_r30.py` 19 +
+`tests/test_ascend_profile_audit_ui.py` 6），hermetic 合成 fixture 覆盖导入/映射/
+覆盖/回退/哈希拒绝/跨模型/设备/TP/隔离，另含 owner 声明、minidraft 排除、
+shape 维度验证（含反例）与 row-level 计数分摊；无 NPU 执行。
 
 ## 2026-11-17 R29 昇腾 910B3（物理卡 5/6）验证重采
 
@@ -123,7 +184,7 @@ norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fm
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #15（R23）、#16/#17（R26）、#18（R25）已合入 main；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
 运行：R27 在 ZCode 会话（干净 HEAD 1196510 + 本轮改动的独立 worktree `../nv-r27-verify`，隔离并行工作台任务在主工作树的在途编辑）执行 `py -3.12 -m pytest tests -q`：**495 passed，exit 0**（含 G6 计数门禁）；`tools/replay_cost_integrity_r27.py --check`（新，活性入口）、`tools/replay_v41_csa2_core.py --check`（重基后）、`replay_v41_swiglu/quant/moe --check`、`tools/replay_qwen36_mrope.py --check`、`tools/replay_qwen36_mtp.py --check`、`py -3.12 -m simverse.cli run-v2`（status=completed）均 exit 0。主工作树同期 `pytest tests` 有 2 项 CSV 导出失败 + G6 计数差，全部来自并行工作台任务对 simverse/cli.py/tests/test_consistency.py 的未提交在途修改（本轮未触碰；对方落地时自会更新）。历史回执（非本次执行）：R25 在 ZCode 会话 469 passed；R26 在 ZCode 会话 442 passed；R23 验收修复在 Codex 宿主 425 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
-**pytest 收集数：580**（2026-11-18 新增成本组回归 11 项）；历史收集说明：（`py -3.12 -m pytest --collect-only -q tests`，2026-11-17 R29 审查：543→550 = 离线证据回归7项；此前 R28 路径移植542→543；516→542 = 证据5 + forward21；此前两项任务集成516。469→495 = R27 cost-integrity 26 项（tests/test_cost_integrity_fixes.py 回归 20：路由/元数据/期望字节/chain/警告保留/身份/隔离/计数不变；tests/test_v41_quant_numeric_r27.py 数值 fixture 6：e4m3/e2m1/e8m0/MXFP4 打包双解码器/W8A16 反量化 GEMM 等价/SwiGLU 随机模糊）。2026-11-16 R25+R26 合并时为 469；442→469 = R25 注意力核本体 27 项（tests/test_v41_csa2_core.py：pin 1、调度器锚点/独立重演/负例/块公式 7、decode 手算绝对 5、prefill 手算 3、守恒/瞬态/设备 3、device_sms 拒绝 1、replay 冻结 1、门禁事实 2）；425→442 = R26 文本 MRoPE 语义 17 项（tests/test_qwen36_mrope_r26.py）；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项；367→399 = R24 SwiGLU/尾部 oracle 32 项；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
+**pytest 收集数：618**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-18：R30 重建审查后 618；此前 PR #26 审查 594→606（新增 12 项），main 成本组 580；R30 原审计 569→594（25 项）；R29 审查 543→550=离线证据 7；R28 路径移植 542→543；516→542=证据 5+forward21；469→495=R27 26；2026-11-16 R25+R26=469；442→469=R25 27；425→442=R26 17；424→425=草稿位宽 1；399→424=R23 MTP 25；367→399=R24 32；365→367=R22 回归 2；334→365=R22 量化 31）
 R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。

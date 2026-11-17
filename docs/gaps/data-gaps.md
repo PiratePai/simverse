@@ -9,6 +9,11 @@
 > G-C13/G-C16/G-C18。AllReduce 派生指标已纠正；ReduceScatter、graph、MRoPE、
 > launch 和代理映射需重采或补来源。容量快照/组合算子执行不等于整模 forward。
 > [审查报告](../validation/ascend-910b3-20261117.md)列明保留范围与问题；后续按新 run 独立验收。
+> 2026-11-17 R30 增补：A-N5 第一阶段**离线** profiling 审计工装已交付
+> （[报告](../validation/ascend-profile-audit-20261117.md)，
+> `assets/profile_audit/ascend_910b_profile_audit_v1`，`calibration_admission=not-admitted`）；
+> 只完成原始 trace 审核/映射/差异表与身份缺口清单，**未解除** R17/R18/G-D7/R02b，
+> 也未提供可准入 measured profile（缺设备 SKU/引擎 commit/权重哈希/warmup/step 边界）。
 
 
 与 [能力缺口清单](capability-gaps.md) 分开维护：本页只列**数据**缺口（需要采集/提供

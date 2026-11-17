@@ -1,0 +1,16 @@
+{
+  "config": {
+    "common_config": {
+      "activities": ["ProfilerActivity.CPU", "ProfilerActivity.NPU"],
+      "record_shapes": false
+    },
+    "experimental_config": {
+      "_profiler_level": "Level1",
+      "_aic_metrics": "ACL_AICORE_PIPE_UTILIZATION",
+      "_data_simplification": true
+    }
+  },
+  "torch_npu_version": "2.10.0.post2",
+  "cann_version": "9.1.0",
+  "rank_id": 0
+}
