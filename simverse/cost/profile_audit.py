@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -44,6 +46,8 @@ AUDIT_EVIDENCE = {
 }
 # 审计包当前一律未准入；此常量存在是为了让"准入"必须改代码+测试，不能靠数据字段漂移
 NOT_ADMITTED = "not-admitted"
+REQUIRED_FILES = frozenset({"README.md", "identity.json", "census.json",
+                            "mapping.json", "diff.json", "shape_costs.json", "ledger_rows.json"})
 
 
 class AuditIntegrityError(ValueError):
@@ -147,6 +151,8 @@ class AuditPack:
 
 
 def _check_manifest(manifest: dict, set_id: str) -> None:
+    if not isinstance(manifest, dict):
+        raise AuditIntegrityError("manifest 必须是对象")
     if manifest.get("schema_version") != SCHEMA:
         raise AuditIntegrityError(
             f"审计包 schema 不符：{manifest.get('schema_version')}")
@@ -165,6 +171,47 @@ def _check_manifest(manifest: dict, set_id: str) -> None:
     for key in ("distill_files", "source", "domain", "admission", "limits"):
         if key not in manifest:
             raise AuditIntegrityError(f"manifest 缺关键字段 {key}")
+    files = manifest["distill_files"]
+    if not isinstance(files, dict) or set(files) != REQUIRED_FILES:
+        raise AuditIntegrityError("manifest 产物清单必须完整且仅包含已登记文件")
+    if any(not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)
+           for sha in files.values()):
+        raise AuditIntegrityError("manifest 含无效 SHA256")
+    if manifest.get("admitted") is not False or not isinstance(manifest["source"], dict):
+        raise AuditIntegrityError("manifest admitted/source 结构不符")
+
+
+def validate_audit_directory(directory: Path, set_id: str) -> dict:
+    """One integrity boundary shared by the loader and importer --check."""
+    manifest = _load_json(directory / "manifest.json")
+    _check_manifest(manifest, set_id)
+    for name, sha in sorted(manifest["distill_files"].items()):
+        path = directory / name
+        try:
+            actual = _sha256(path)
+        except OSError as exc:
+            raise AuditIntegrityError(f"缺产物或不可读 {name}") from exc
+        if actual != sha:
+            raise AuditIntegrityError(f"产物哈希不符 {name}（拒绝加载）")
+    def check(value):
+        if isinstance(value, dict):
+            if value.get("admitted", False) or value.get("calibration_admission", NOT_ADMITTED) != NOT_ADMITTED:
+                raise AuditIntegrityError("审计产物不得标记为已准入")
+            if value.get("selected_ms") is not None:
+                raise AuditIntegrityError("审计产物 selected_ms 必须为 null")
+            for child in value.values():
+                check(child)
+        elif isinstance(value, list):
+            for child in value:
+                check(child)
+        elif isinstance(value, float) and not math.isfinite(value):
+            raise AuditIntegrityError("审计产物含非有限数值")
+    for name in REQUIRED_FILES - {"README.md"}:
+        payload = _load_json(directory / name)
+        if not isinstance(payload, dict) or payload.get("schema_version") != SCHEMA:
+            raise AuditIntegrityError(f"产物 schema 不符 {name}")
+        check(payload)
+    return manifest
 
 
 def load_audit_pack(set_id: str) -> AuditPack:
@@ -173,14 +220,7 @@ def load_audit_pack(set_id: str) -> AuditPack:
             f"未知审计包 {set_id}；可用: {sorted(AUDIT_PACKS)}"
             "（审计包不得当作 profile_set 使用）")
     d = AUDIT_ROOT / AUDIT_PACKS[set_id]
-    manifest = _load_json(d / "manifest.json")
-    _check_manifest(manifest, set_id)
-    for name, sha in sorted((manifest.get("distill_files") or {}).items()):
-        p = d / name
-        if not p.is_file():
-            raise AuditIntegrityError(f"缺产物 {name}")
-        if _sha256(p) != sha:
-            raise AuditIntegrityError(f"产物哈希不符 {name}（拒绝加载）")
+    manifest = validate_audit_directory(d, set_id)
     return AuditPack(
         set_id=set_id, manifest=manifest,
         identity=_load_json(d / "identity.json"),
@@ -224,8 +264,9 @@ def _domain_reasons(pack: AuditPack, model_id: Optional[str],
             "本仓 ascend_910b3 档为 assumed 旧仓映射，不能据此宣称同 SKU/驱动，"
             "A-N4 官方规格与设备身份仍是校准前置")
     if tp is not None:
-        hints = {r.get("tp_hint_from_groups") for r in ident.values()}
-        if hints == {None}:
+        hints = {r.get("tp_hint_from_groups") for r in ident.values()
+                 if model_id is None or r.get("candidate_model_id") == model_id}
+        if not hints or None in hints:
             reasons.append("TP 域未知：profile 未记录 tp 并行组大小，无法与场景 TP 比对")
         elif tp not in hints:
             reasons.append(f"TP 不符：场景 TP{tp} ∉ profile TP 域 {sorted(h for h in hints if h)}")
@@ -306,12 +347,17 @@ def audit_report_json(set_id: str, model_id: Optional[str] = None,
         reasons.append(f"审计包内没有 {model_id} 对应的 run（不跨模型借用）")
     limits = list(pack.limits)
     if model_id is not None and runs:
-        geometry = [r.get("identity", {}).get("geometry_check") for r in runs]
-        bad = [g for g in geometry if g and g.get("checked")
-               and not g.get("shape_consistent")]
+        ids = {r["run_id"] for r in runs}
+        geometry = [r.get("geometry_verification", {}) for r in pack.identity.get("runs", [])
+                    if r["run_id"] in ids]
+        bad = [g for g in geometry if g.get("failures")]
         if bad:
             reasons.append("形状域不匹配：" + "; ".join(
                 f"{g['model_id']}: {g['failures']}" for g in bad))
+        if any(g.get("unknown") or not g.get("checked") for g in geometry) or any(
+                r.get("tp_hint_from_groups") is None for r in pack.identity.get("runs", [])
+                if r["run_id"] in ids):
+            reasons.append("形状域证据不完整：存在未知维度或 TP；不能将无冲突视为全部验证通过")
     return {
         "schema_version": SCHEMA,
         "set_id": pack.set_id,

@@ -1,0 +1,415 @@
+{
+  "source_pr": "https://github.com/PiratePai/simverse/pull/26",
+  "source_commit": "89803d0a09c13bcd237049c2c2ccefe7ec381f4d",
+  "source_manifest_sha256": "165cfed78fc5400e5fed3ae401160357409f1ff2c2af1483754a443c98e33fe5",
+  "verification": "committed derived artifacts + source reading + offline tests; no raw-profile replay or NPU run",
+  "decision": "hold-merge: corrected importer must regenerate source-bound artifacts before approval",
+  "missing_consumed_source_hashes": {
+    "qwen3-8b-0811/baseline-t=0.6-tp2-bs32-8k": [
+      "kernel_details.csv",
+      "op_statistic.csv",
+      "step_trace_time.csv",
+      "analysis.db"
+    ],
+    "qwen3-8b-0811/dflash-t=0.6-tp2-bs64-4k": [
+      "kernel_details.csv",
+      "op_statistic.csv",
+      "step_trace_time.csv",
+      "analysis.db"
+    ],
+    "qwen3-8b-0811/dspark-t=0.6-tp2-bs64-4k": [
+      "kernel_details.csv",
+      "op_statistic.csv",
+      "step_trace_time.csv",
+      "analysis.db"
+    ],
+    "qwen3-8b-0811/minidraft-t=0.6-tp2-bs64-4k": [
+      "kernel_details.csv",
+      "op_statistic.csv",
+      "step_trace_time.csv",
+      "analysis.db"
+    ],
+    "qwen3_6_mtp_domino/minidraft_4k_bs64": [
+      "kernel_details.csv",
+      "op_statistic.csv",
+      "step_trace_time.csv",
+      "analysis.db"
+    ],
+    "qwen3_6_mtp_domino/mtp_4k_bs64": [
+      "kernel_details.csv",
+      "op_statistic.csv",
+      "step_trace_time.csv",
+      "analysis.db"
+    ]
+  },
+  "geometry_recheck": [
+    {
+      "run_id": "qwen3-8b-0811/baseline-t=0.6-tp2-bs32-8k",
+      "original_verification_passed": true,
+      "revised": {
+        "model_id": "qwen3_8b_dense",
+        "checked": true,
+        "tp_hint_from_groups": 2,
+        "fields": {
+          "hidden_size": {
+            "expected": 4096,
+            "observed_norm_candidates": [
+              4096
+            ],
+            "observed_gemm_k_candidates": [
+              2048,
+              4096,
+              6144
+            ],
+            "hidden_dim_mode": 4096,
+            "match": true,
+            "evidence": {
+              "4096": {
+                "count": 5329,
+                "op_types": {
+                  "AddRmsNormBias": 5256,
+                  "RmsNorm": 73
+                }
+              }
+            }
+          },
+          "vocab_size": {
+            "expected": 151936,
+            "observed_lm_head_N": [
+              75968
+            ],
+            "tp_hint": 2,
+            "match": true
+          },
+          "intermediate_size": {
+            "expected": 12288,
+            "observed_gemm_N": [
+              3072,
+              12288
+            ],
+            "match": true
+          }
+        },
+        "failures": [],
+        "basis": "shape 维度核对（hidden/heads/kv/head_dim/experts/vocab/intermediate）；仍是形状一致，不等于权重身份",
+        "unknown": [],
+        "observed_compatible": true,
+        "verification_passed": true
+      }
+    },
+    {
+      "run_id": "qwen3-8b-0811/dflash-t=0.6-tp2-bs64-4k",
+      "original_verification_passed": true,
+      "revised": {
+        "model_id": "qwen3_8b_dense",
+        "checked": true,
+        "tp_hint_from_groups": 2,
+        "fields": {
+          "hidden_size": {
+            "expected": 4096,
+            "observed_norm_candidates": [
+              128,
+              4096
+            ],
+            "observed_gemm_k_candidates": [
+              2048,
+              4096,
+              6144,
+              20480
+            ],
+            "hidden_dim_mode": 4096,
+            "match": true,
+            "evidence": {
+              "4096": {
+                "count": 3485,
+                "op_types": {
+                  "AddRmsNormBias": 3362,
+                  "RmsNorm": 123
+                }
+              }
+            }
+          },
+          "vocab_size": {
+            "expected": 151936,
+            "observed_lm_head_N": [
+              75968
+            ],
+            "tp_hint": 2,
+            "match": true
+          },
+          "intermediate_size": {
+            "expected": 12288,
+            "observed_gemm_N": [
+              3072,
+              5120,
+              12288
+            ],
+            "match": true
+          }
+        },
+        "failures": [],
+        "basis": "shape 维度核对（hidden/heads/kv/head_dim/experts/vocab/intermediate）；仍是形状一致，不等于权重身份",
+        "unknown": [],
+        "observed_compatible": true,
+        "verification_passed": true
+      }
+    },
+    {
+      "run_id": "qwen3-8b-0811/dspark-t=0.6-tp2-bs64-4k",
+      "original_verification_passed": true,
+      "revised": {
+        "model_id": "qwen3_8b_dense",
+        "checked": true,
+        "tp_hint_from_groups": 2,
+        "fields": {
+          "hidden_size": {
+            "expected": 4096,
+            "observed_norm_candidates": [
+              128,
+              4096
+            ],
+            "observed_gemm_k_candidates": [
+              256,
+              2048,
+              4096,
+              6144,
+              20480
+            ],
+            "hidden_dim_mode": 4096,
+            "match": true,
+            "evidence": {
+              "4096": {
+                "count": 3740,
+                "op_types": {
+                  "AddRmsNormBias": 3608,
+                  "RmsNorm": 132
+                }
+              }
+            }
+          },
+          "vocab_size": {
+            "expected": 151936,
+            "observed_lm_head_N": [
+              75968
+            ],
+            "tp_hint": 2,
+            "match": true
+          },
+          "intermediate_size": {
+            "expected": 12288,
+            "observed_gemm_N": [
+              3072,
+              5120,
+              12288
+            ],
+            "match": true
+          }
+        },
+        "failures": [],
+        "basis": "shape 维度核对（hidden/heads/kv/head_dim/experts/vocab/intermediate）；仍是形状一致，不等于权重身份",
+        "unknown": [],
+        "observed_compatible": true,
+        "verification_passed": true
+      }
+    },
+    {
+      "run_id": "qwen3-8b-0811/minidraft-t=0.6-tp2-bs64-4k",
+      "original_verification_passed": true,
+      "revised": {
+        "model_id": "qwen3_8b_dense",
+        "checked": true,
+        "tp_hint_from_groups": 2,
+        "fields": {
+          "hidden_size": {
+            "expected": 4096,
+            "observed_norm_candidates": [
+              2560,
+              4096
+            ],
+            "observed_gemm_k_candidates": [
+              256,
+              1024,
+              2048,
+              4096,
+              6144
+            ],
+            "hidden_dim_mode": 4096,
+            "match": true,
+            "evidence": {
+              "4096": {
+                "count": 3552,
+                "op_types": {
+                  "AddRmsNormBias": 3456,
+                  "RmsNorm": 96
+                }
+              }
+            }
+          },
+          "vocab_size": {
+            "expected": 151936,
+            "observed_lm_head_N": [
+              75968
+            ],
+            "tp_hint": 2,
+            "match": true
+          },
+          "intermediate_size": {
+            "expected": 12288,
+            "observed_gemm_N": [
+              256,
+              3072,
+              12288
+            ],
+            "match": true
+          }
+        },
+        "failures": [],
+        "basis": "shape 维度核对（hidden/heads/kv/head_dim/experts/vocab/intermediate）；仍是形状一致，不等于权重身份",
+        "unknown": [],
+        "observed_compatible": true,
+        "verification_passed": true
+      }
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/minidraft_4k_bs64",
+      "original_verification_passed": true,
+      "revised": {
+        "model_id": "qwen36_35b_a3b",
+        "checked": true,
+        "tp_hint_from_groups": null,
+        "fields": {
+          "hidden_size": {
+            "expected": 2048,
+            "observed_norm_candidates": [
+              128,
+              1536,
+              2048
+            ],
+            "observed_gemm_k_candidates": [
+              256,
+              512,
+              1024,
+              1536,
+              2048,
+              4096
+            ],
+            "hidden_dim_mode": 2048,
+            "match": true,
+            "evidence": {
+              "2048": {
+                "count": 5312,
+                "op_types": {
+                  "AddRmsNormBias": 5120,
+                  "GemmaRmsNorm": 64,
+                  "RmsNorm": 128
+                }
+              }
+            }
+          },
+          "vocab_size": {
+            "expected": 248320,
+            "observed_lm_head_N": [
+              248320
+            ],
+            "tp_hint": 1,
+            "match": true
+          },
+          "num_experts": {
+            "expected": 256,
+            "observed": [
+              256
+            ],
+            "match": true
+          }
+        },
+        "failures": [],
+        "basis": "shape 维度核对（hidden/heads/kv/head_dim/experts/vocab/intermediate）；仍是形状一致，不等于权重身份",
+        "unknown": [
+          "tp_for_global_heads/vocab"
+        ],
+        "observed_compatible": true,
+        "verification_passed": false
+      }
+    },
+    {
+      "run_id": "qwen3_6_mtp_domino/mtp_4k_bs64",
+      "original_verification_passed": true,
+      "revised": {
+        "model_id": "qwen36_35b_a3b",
+        "checked": true,
+        "tp_hint_from_groups": null,
+        "fields": {
+          "hidden_size": {
+            "expected": 2048,
+            "observed_norm_candidates": [
+              128,
+              2048
+            ],
+            "observed_gemm_k_candidates": [
+              512,
+              2048,
+              4096
+            ],
+            "hidden_dim_mode": 2048,
+            "match": true,
+            "evidence": {
+              "2048": {
+                "count": 9216,
+                "op_types": {
+                  "AddRmsNormBias": 8256,
+                  "GemmaRmsNorm": 960
+                }
+              }
+            }
+          },
+          "vocab_size": {
+            "expected": 248320,
+            "observed_lm_head_N": [
+              248320
+            ],
+            "tp_hint": 1,
+            "match": true
+          },
+          "num_experts": {
+            "expected": 256,
+            "observed": [
+              256
+            ],
+            "match": true
+          }
+        },
+        "failures": [],
+        "basis": "shape 维度核对（hidden/heads/kv/head_dim/experts/vocab/intermediate）；仍是形状一致，不等于权重身份",
+        "unknown": [
+          "tp_for_global_heads/vocab"
+        ],
+        "observed_compatible": true,
+        "verification_passed": false
+      }
+    }
+  ],
+  "unallocated_group_gaps": [
+    {
+      "run_id": "qwen3_6_mtp_domino/mtp_4k_bs64",
+      "groups_missing_from_unallocated": [
+        {
+          "group": "gemm_grouped_moe",
+          "observed_us": 3402028.207
+        },
+        {
+          "group": "attention_kv_write",
+          "observed_us": 14337.618
+        }
+      ],
+      "allocation_warning": "K/N 按 OP Type dtype 并集聚合，M/逐调用角色未分离；宽度/调用数分摊不证明 target/draft 耗时相同，原数值只能是候选假设"
+    }
+  ],
+  "reference": {
+    "repo": "https://github.com/vllm-project/vllm-ascend",
+    "commit": "baa023ada41a5b889cac6249845a688aab130892",
+    "sha256": "a9a71634ed138f590fbc3ad0de277a5f56a06451522fd091b2657d6daf6084b0",
+    "path": "vllm_ascend/patch/worker/patch_qwen3_5.py",
+    "finding": "qkv_proj runs before split_qkv_rmsnorm_mrope; the split kernel does not own projection GEMM",
+    "limit": "reference source only; collection engine commit remains unknown"
+  }
+}

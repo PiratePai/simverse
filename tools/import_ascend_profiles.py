@@ -156,9 +156,10 @@ _GROUP_RULES: List[Tuple[str, Tuple[str, ...], str, Tuple[str, ...], str, str]] 
     ("attn_qkv_norm_rope_fused",
      ("split_qkv_rmsnorm_rope_kernel", "split_qkv_rmsnorm_mrope_kernel"),
      "fused_group",
-     ("q_proj", "k_proj", "v_proj", "q_norm", "k_norm", "rope"),
+     ("q_norm", "k_norm", "rope"),
      "device-kernel",
-     "QKV 投影 + QK-Norm + RoPE 融合核（dense 路径）；一个核覆盖 6 行。"),
+     "已投影 QKV 的 split + QK-Norm + RoPE；不含投影 GEMM。参考源码中 qkv_proj "
+     "先执行；采集栈 commit 未知，当前仅是语义候选，不能重复认领 q/k/v 投影行。"),
     ("norm_add_fused",
      ("AddRmsNormBias",),
      "mapped",
@@ -676,7 +677,7 @@ def _step_trace_consistency(csv_rows: List[dict], db_rows: List[dict]) -> dict:
         "csv_stage_us": [_round(v) for v in csv_stage if isinstance(v, (int, float))],
         "db_stage_us": [_round(v) for v in db_stage if isinstance(v, (int, float))],
         "stage_values_match": (
-            csv_stage and db_stage and
+            bool(csv_stage) and len(csv_stage) == len(db_stage) and
             all(isinstance(a, (int, float)) and isinstance(b, (int, float)) and
                 abs(a - b) / max(a, 1.0) < 1e-4
                 for a, b in zip(csv_stage, db_stage))),
@@ -685,7 +686,7 @@ def _step_trace_consistency(csv_rows: List[dict], db_rows: List[dict]) -> dict:
         "csv_communication_us": [_round(r.get("Communication")) for r in csv_rows],
         "db_communication_us": [_round(r.get("communication")) for r in db_rows],
         "computing_field_equal": (
-            bool(csv_rows) and bool(db_rows) and all(
+            bool(csv_rows) and len(csv_rows) == len(db_rows) and all(
                 csv_rows[i].get("Computing") is not None and
                 db_rows[i].get("computing") is not None and
                 abs(csv_rows[i]["Computing"] - db_rows[i]["computing"]) < 1e-3
@@ -696,8 +697,9 @@ def _step_trace_consistency(csv_rows: List[dict], db_rows: List[dict]) -> dict:
             if csv_rows[i].get("Computing") is not None and
             db_rows[i].get("computing") is not None],
         "overlapped_communication_delta_us": [
-            _round((db_rows[i].get("overlapped") or 0.0) -
-                   (csv_rows[i].get("Overlapped") or 0.0))
+            (_round(db_rows[i]["overlapped"] - csv_rows[i]["Overlapped"])
+             if db_rows[i].get("overlapped") is not None and
+             csv_rows[i].get("Overlapped") is not None else None)
             for i in range(min(len(csv_rows), len(db_rows)))],
         "note": "CSV 与 analysis.db 的 computing/communication 归类不一致时记录"
                 "两侧原值，不做换算；step 节点为空 → 无逐步窗口。",
@@ -771,15 +773,13 @@ def _parse_kernels(out: Path) -> dict:
     """
     path = out / "kernel_details.csv"
     if not path.is_file():
-        return {"present": False, "op_stats": {}, "shape_stats": {},
-                "dtypes": {}, "streams": {}, "total_us": 0.0, "rows": 0,
-                "comm_us": 0.0, "hcom_us": 0.0, "comm_rows": 0,
-                "compute_us": 0.0, "token_buckets": {}}
+        raise ValueError(f"缺必需源文件 {path}")
     per_op: Dict[str, dict] = {}
     shape_vals: Dict[str, Dict[str, List[float]]] = {}
     dtypes: Dict[str, set] = {}
     streams: Dict[str, List[Tuple[float, float]]] = {}
     buckets: Dict[str, dict] = {}
+    gemm_samples = {}
     total_us = 0.0
     comm_us = 0.0
     hcom_us = 0.0
@@ -792,8 +792,8 @@ def _parse_kernels(out: Path) -> dict:
             if not op:
                 continue
             dur = _num(row.get("Duration(us)"))
-            if dur is None:
-                continue
+            if dur is None or dur < 0:
+                raise ValueError(f"kernel 时长无效：{path.name}，行 {rows + 2}")
             rows += 1
             total_us += dur
             is_comm = _classify(op)[2] == "communication"
@@ -817,6 +817,8 @@ def _parse_kernels(out: Path) -> dict:
             dt = _split(row.get("Input Data Types"))
             if dt:
                 dtypes.setdefault(op, set()).update(x for x in dt if x)
+            if key and op in _GEMM_TYPES:
+                gemm_samples.setdefault((op, key, tuple(dt[:2])), []).append(dur)
             start = _num(row.get("Start Time(us)"))
             stream = (row.get("Stream ID") or "").strip()
             if start is not None and stream:
@@ -832,7 +834,7 @@ def _parse_kernels(out: Path) -> dict:
             "streams": streams, "total_us": total_us, "rows": rows,
             "comm_us": comm_us, "hcom_us": hcom_us,
             "comm_rows": comm_rows, "hcom_rows": hcom_rows,
-            "compute_us": total_us - comm_us,
+            "compute_us": total_us - comm_us, "gemm_samples": gemm_samples,
             "token_buckets": {k: {"kernel_count": v["kernel_count"],
                                   "total_us": _round(v["total_us"])}
                               for k, v in sorted(buckets.items())}}
@@ -1097,15 +1099,25 @@ def _gemm_observed(kernels: dict) -> Dict[Tuple[int, int, str], dict]:
     """从 shape 统计提取观测 GEMM 签名 (K,N,dtype)：[T,K] @ [N,K] → [T,N]。"""
     gemm_ops = ("MatMulV2", "MatMulV3", "QuantBatchMatmulV3",
                 "WeightQuantBatchMatmulV2", "BatchMatMulV2", "BatchMatMulV3")
-    dtypes = {op: " ".join(dts) for op, dts in kernels.get("dtypes", {}).items()}
     out: Dict[Tuple[int, int, str], dict] = {}
     for op in gemm_ops:
         table = kernels["shape_stats"].get(op)
         if not table:
             continue
-        bucket = ("int8" if "INT8" in dtypes.get(op, "") else
-                  "int4" if "INT4" in dtypes.get(op, "") else "bf16")
-        for key, vals in table.items():
+        samples = kernels.get("gemm_samples")
+        if samples is None:
+            items = []  # No joint shape/dtype observations: do not infer from class unions.
+        else:
+            items = []
+            for (sample_op, key, pair), vals in samples.items():
+                if sample_op != op:
+                    continue
+                dtype = ";".join(pair).upper()
+                bucket = ("int4" if "INT4" in dtype else "int8" if "INT8" in dtype
+                          else "bf16" if len(pair) == 2 and all("BF16" in p.upper() or
+                               "BFLOAT16" in p.upper() for p in pair) else "unknown")
+                items.append((key, vals, bucket))
+        for key, vals, bucket in items:
             parts = key.split(";")
             if len(parts) < 2:
                 continue
@@ -1181,8 +1193,6 @@ def _shape_geometry_candidates(kernels: dict) -> dict:
                 bump("vocab_candidates", N, op, len(vals))
             if hidden_mode and K == hidden_mode and 64 <= N <= 65_536:
                 bump("intermediate_candidates", N, op, len(vals))
-    for op, table in (shapes.get("GroupedMatmul") or {}).items():
-        pass
     for key, vals in (shapes.get("GroupedMatmul") or {}).items():
         parts = key.split(";")
         if len(parts) < 2:
@@ -1271,13 +1281,42 @@ def _geometry_verify(geom: dict, model_id: Optional[str],
         if exps and expected["num_experts"] not in exps:
             out["failures"].append(f"num_experts {exps} 不含 "
                                    f"{expected['num_experts']}")
-    out["verification_passed"] = out["checked"] and not out["failures"]
+    core = _geometry_check(geom, model_id, tp_hint)
+    out["failures"].extend(core.get("failures", []))
+    out["unknown"] = list(core.get("unknown", []))
+    if tp_hint is None:
+        out["unknown"].append("tp_for_global_heads/vocab")
+    for name, field in out["fields"].items():
+        if field.get("match") is None:
+            out["unknown"].append(name)
+    out["observed_compatible"] = not out["failures"]
+    out["verification_passed"] = out["checked"] and not out["failures"] and not out["unknown"]
     return out
+
+
+def _unallocated_groups(groups: List[dict], rows: List[dict]) -> List[dict]:
+    allocations = {}
+    for row in rows:
+        group = {"MatMul/QuantBatchMatmul": "gemm_dense_quant",
+                 "FusedInferAttentionScore": "attention_core"}.get(row["kernel_class"])
+        if group:
+            allocations[group] = allocations.get(group, 0.0) + sum(
+                x["allocated_us"] for x in row.get("allocated_to", []))
+    result = []
+    for group in groups:
+        if group["coverage"] not in ("mapped", "fused_group"):
+            continue
+        remaining = _round(max(0.0, group["observed_us"] - allocations.get(group["group"], 0.0)))
+        if remaining and remaining > .001:
+            result.append({"group": group["group"], "observed_us": group["observed_us"],
+                           "unallocated_us": remaining, "coverage": group["coverage"],
+                           "reason": "无逐调用 ownership，或候选签名/计数未匹配；保留全部未分摊时间"})
+    return result
 
 
 def _ledger_row_match(run_id: str, run_label: str, owner: dict,
                       kernels: dict, groups: List[dict]) -> dict:
-    """A-N5 离线 row-level 提取：shape 签名 + 计数方程 → 账本行 measured 表。
+    """A-N5 离线 row-level 提取：shape 签名 + 计数方程 → 假设分摊候选表。
 
     只对活跃模型 Qwen3.6-35B-A3B 的目标 run 做；minidraft 按 owner 声明排除。
     输出仍是 audit-only：不产生 selected_ms，不改变任何账本；融合/同形核的
@@ -1329,6 +1368,11 @@ def _ledger_row_match(run_id: str, run_label: str, owner: dict,
                    "混合时 pass 语义是近似）" if passes and mtp_k is not None
                    else "unknown（计数不可整除，不做行级分摊）"),
     }
+    if not passes or mtp_k is None or mtp_k < 0 or (result["draft_method"] == "mtp" and mtp_k == 0):
+        result["pass_structure"]["status"] = "unknown（不能证明正整数 passes/MTP K；不做行级分摊）"
+        result["reason"] = "调用数无法确定合法 pass 结构；保留全部未分摊组"
+        result["unallocated_groups"] = _unallocated_groups(groups, [])
+        return result
     K = mtp_k
     rows = [dict(r) for r in exp["rows"]]
     for r in rows:
@@ -1398,7 +1442,7 @@ def _ledger_row_match(run_id: str, run_label: str, owner: dict,
         residual = None
         if predicted is not None:
             residual = item["count"] - predicted
-            if abs(residual) <= max(1, round(0.02 * item["count"])):
+            if residual == 0:
                 total_w = sum(_w(c[3]) if alloc_mode == "width" else c[2]
                               for c in cand)
                 for op, role, mult, width in cand:
@@ -1425,6 +1469,8 @@ def _ledger_row_match(run_id: str, run_label: str, owner: dict,
             "count_residual": residual,
             "status": status,
             "allocation_basis": basis,
+            "allocation_evidence": "width/count-derived-assumption; not source-pinned",
+            "signature_scope": "K/N/dtype 聚合；M/阶段/角色关联仍未知，非逐调用实测归属",
             "allocated_to": alloc,
         })
     # ---- 注意力核：同一 FusedInferAttentionScore 内按计数分 target/draft ----
@@ -1454,17 +1500,7 @@ def _ledger_row_match(run_id: str, run_label: str, owner: dict,
             "allocated_to": alloc,
         })
     # ---- 未做行级分摊的组（融合/实现分解，显式列出） ----
-    allocated_groups = {"gemm_dense_quant", "gemm_grouped_moe", "attention_core",
-                        "attention_kv_write"}
-    for g in groups:
-        if g["group"] in allocated_groups:
-            continue
-        if g["coverage"] in ("mapped", "fused_group"):
-            result["unallocated_groups"].append({
-                "group": g["group"], "observed_us": g["observed_us"],
-                "coverage": g["coverage"],
-                "reason": "融合核/实现分解与账本行非 1:1；行级归属需按源码 pin "
-                          "或 correlation id，本审计不猜"})
+    result["unallocated_groups"] = _unallocated_groups(groups, result["rows"])
 
     target_rows = sorted({r["op"] for r in rows if r["role"] == "target"})
     measured_ops = sorted({a["op"] for r in result["rows"] for a in r["allocated_to"]
@@ -1591,6 +1627,10 @@ def build_pack(src_roots: List[Path]) -> Tuple[Dict[str, bytes], dict]:
         step_trace = _parse_step_trace(out)
         analysis_db = _parse_analysis_db(out)
         op_stat = _parse_op_statistic(out)
+        for name in ("kernel_details.csv", "op_statistic.csv", "step_trace_time.csv", "analysis.db"):
+            source_file = out / name
+            if source_file.is_file():
+                ident["source_files_sha256"]["ASCEND_PROFILER_OUTPUT/" + name] = _sha256(source_file)
 
         # op_statistic（msprof 聚合，**不含 hcom_* 通信核**）与 kernel_details
         # 非通信行逐行求和的一致性核对
@@ -2007,21 +2047,11 @@ def main(argv=None) -> int:
 
     out = _out_dir(ROOT, args.out)
     if args.check:
-        man_path = out / "manifest.json"
-        if not man_path.is_file():
-            print(f"FAIL 缺 manifest：{man_path}", file=sys.stderr)
-            return 1
-        man = json.loads(man_path.read_text(encoding="utf-8"))
-        for name, sha in sorted(man.get("distill_files", {}).items()):
-            p = out / name
-            if not p.is_file():
-                print(f"FAIL 缺产物 {name}", file=sys.stderr)
-                return 1
-            if _sha256(p) != sha:
-                print(f"FAIL 哈希不符 {name}", file=sys.stderr)
-                return 1
-        if man.get("calibration_admission") != "not-admitted":
-            print("FAIL 审计包不得被标记为已准入", file=sys.stderr)
+        from simverse.cost.profile_audit import validate_audit_directory
+        try:
+            man = validate_audit_directory(out, SET_ID)
+        except ValueError as exc:
+            print(f"FAIL {exc}", file=sys.stderr)
             return 1
         print(f"OK 审计包哈希一致：{man['profile_set_id']}（"
               f"{len(man['distill_files'])} 个产物，{man['run_count']} 个 run）")

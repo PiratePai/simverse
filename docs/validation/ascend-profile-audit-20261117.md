@@ -1,5 +1,7 @@
 # R30 Ascend profiling 离线审计（A-N5 第一阶段）
 
+> 2026-11-17 审查更新：本 PR 暂缓合入。下文为原导入报告，部分来源与归属声明有误，以 [PR #26 审查](ascend-profile-audit-r30-review.md) 为准。已消费的三个 CSV 与 analysis.db 实际未入源哈希；未知 TP 被误判完整几何通过；部分未分摊组漏列。代码已修复若干入口与校验缺陷，原审计包字节保留、尚未由修复后的导入器从原件重建，不能据下文数字宣称已完成可追溯性验收。
+
 更新：2026-11-17。数据：外部 Ascend NPU profiler 产物
 `D:\github\qwen3_6_mtp_domino`、`D:\github\qwen3-8b-0811`（未入仓的约 400 MB 采集）；
 蒸馏/审计包入册 [assets/profile_audit/ascend_910b_profile_audit_v1](../../assets/profile_audit/ascend_910b_profile_audit_v1/manifest.json)。
