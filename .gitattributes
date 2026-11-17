@@ -33,3 +33,7 @@ docs/evidence/csa2-core/*.json binary
 assets/identity/vllm_qwen36_mrope_pin/* text eol=lf
 # R26 replay 快照（同 mtp-map/swiglu-tail 先例）：保留捕获字节防行尾转换。
 docs/evidence/mrope-map/*.json binary
+
+# R28 Ascend 910B3 实测快照（同 R05/R20-R26 先例）：整目录保留捕获字节，
+# manifest.json 对产物与脚本逐个锚定 SHA256，行尾转换会破坏校验。
+docs/evidence/ascend-910b3/** binary

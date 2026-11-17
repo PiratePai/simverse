@@ -1,0 +1,49 @@
+{
+  "kind": "r02b_runtime_pools",
+  "captured_at": "2026-11-17T10:44:58+0800",
+  "ascend_rt_visible_devices": "6,7",
+  "torch": "2.9.0+cpu",
+  "torch_npu": "2.9.0.post9",
+  "timing_boundary": "runtime-api",
+  "probes": {
+    "allocator_padding": [
+      {
+        "requested_bytes": 1073741824,
+        "allocated_bytes": 1073742336,
+        "reserved_bytes": 1075838976,
+        "padding_bytes": 2097152
+      },
+      {
+        "requested_bytes": 2147483648,
+        "allocated_bytes": 2147484160,
+        "reserved_bytes": 2149580800,
+        "padding_bytes": 2097152
+      },
+      {
+        "requested_bytes": 4294967296,
+        "allocated_bytes": 4294967808,
+        "reserved_bytes": 4297064448,
+        "padding_bytes": 2097152
+      }
+    ],
+    "gemm_workspace": {
+      "shape": [
+        4096,
+        4096,
+        4096
+      ],
+      "dtype": "bfloat16",
+      "input_bytes": 67109888,
+      "output_bytes": 33554432,
+      "peak_allocated_bytes": 121637376,
+      "workspace_bytes": 20973056
+    },
+    "npu_graph_pool": {
+      "ok": true,
+      "free_before_capture": 65013706752,
+      "free_after_capture": 64978055168,
+      "graph_pool_bytes": 35651584,
+      "baseline_delta": 35651584
+    }
+  }
+}

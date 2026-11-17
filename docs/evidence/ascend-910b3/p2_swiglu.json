@@ -1,0 +1,199 @@
+{
+  "kind": "gc18_swiglu_clamp_device_semantics",
+  "captured_at": "2026-11-17T10:47:50+0800",
+  "device": "Ascend910B3",
+  "ascend_rt_visible_devices": "6,7",
+  "dtype": "float32",
+  "swiglu_limit": 10.0,
+  "alpha": 1.0,
+  "beta": 0.0,
+  "timing_boundary": "device-executed",
+  "cases": [
+    {
+      "case": "neg_gate_passes_through",
+      "rows": [
+        {
+          "i": 0,
+          "npu": 0.0,
+          "oracle": 3.720075976020836e-41,
+          "abs": 3.720075976020836e-41,
+          "rel": 3.720075976020836e-11,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "pos_gate_clamped",
+      "rows": [
+        {
+          "i": 0,
+          "npu": -99.9954605102539,
+          "oracle": -99.99546021312977,
+          "abs": 2.971241315208317e-07,
+          "rel": 2.9713762093553347e-09,
+          "ok": true
+        },
+        {
+          "i": 1,
+          "npu": 99.9954605102539,
+          "oracle": 99.99546021312977,
+          "abs": 2.971241315208317e-07,
+          "rel": 2.9713762093553347e-09,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "at_limit",
+      "rows": [
+        {
+          "i": 0,
+          "npu": 99.9954605102539,
+          "oracle": 99.99546021312977,
+          "abs": 2.971241315208317e-07,
+          "rel": 2.9713762093553347e-09,
+          "ok": true
+        },
+        {
+          "i": 1,
+          "npu": -99.9954605102539,
+          "oracle": -99.99546021312977,
+          "abs": 2.971241315208317e-07,
+          "rel": 2.9713762093553347e-09,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "beyond_limit_up",
+      "rows": [
+        {
+          "i": 0,
+          "npu": 0.0,
+          "oracle": 0.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "ok": true
+        },
+        {
+          "i": 1,
+          "npu": -0.0,
+          "oracle": -0.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "eps_below_limit",
+      "rows": [
+        {
+          "i": 0,
+          "npu": 99.99544525146484,
+          "oracle": 99.99544020949917,
+          "abs": 5.041965678742599e-06,
+          "rel": 5.04219559229825e-08,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "zero",
+      "rows": [
+        {
+          "i": 0,
+          "npu": 0.0,
+          "oracle": 0.0,
+          "abs": 0.0,
+          "rel": 0.0,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "negative_both",
+      "rows": [
+        {
+          "i": 0,
+          "npu": 0.09438516944646835,
+          "oracle": 0.09438516719953637,
+          "abs": 2.2469319876927685e-09,
+          "rel": 2.3805986198473415e-08,
+          "ok": true
+        },
+        {
+          "i": 1,
+          "npu": -4.1223074731533416e-07,
+          "oracle": -4.1223072363804065e-07,
+          "abs": 2.3677293504347966e-14,
+          "rel": 5.743699376744617e-08,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "nan_gate",
+      "rows": [
+        {
+          "i": 0,
+          "npu": "nan",
+          "oracle": "nan",
+          "ok": true,
+          "abs": null
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "nan_up",
+      "rows": [
+        {
+          "i": 0,
+          "npu": "nan",
+          "oracle": "nan",
+          "ok": true,
+          "abs": null
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "inf_gate",
+      "rows": [
+        {
+          "i": 0,
+          "npu": 9.99954605102539,
+          "oracle": 9.999546021312977,
+          "abs": 2.9712413862625908e-08,
+          "rel": 2.9713762804128344e-09,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    },
+    {
+      "case": "neg_inf_up",
+      "rows": [
+        {
+          "i": 0,
+          "npu": -7.310585975646973,
+          "oracle": -7.310585786300049,
+          "abs": 1.8934692391781027e-07,
+          "rel": 2.5900376447622592e-08,
+          "ok": true
+        }
+      ],
+      "all_ok": true
+    }
+  ],
+  "all_cases_ok": true,
+  "worst_rel_diff": 5.743699376744617e-08
+}

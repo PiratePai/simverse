@@ -1,0 +1,9 @@
+torch 2.9.0+cpu | torch_npu 2.9.0.post9
+npu count: 2
+device name: Ascend910B3
+torch.npu.mem_get_info: total=60.96 GiB free=60.59 GiB
+matmul  2048 bfloat16 0.160 ms  -> 107.4 TFLOPS
+matmul  4096 bfloat16 1.058 ms  -> 129.9 TFLOPS
+matmul  8192 bfloat16 4.075 ms  -> 269.8 TFLOPS
+matmul  4096 float16  1.194 ms  -> 115.1 TFLOPS
+NPU_COMPUTE_OK

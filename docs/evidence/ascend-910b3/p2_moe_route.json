@@ -1,0 +1,140 @@
+{
+  "kind": "gc13_moe_route_device_semantics",
+  "captured_at": "2026-11-17T10:47:59+0800",
+  "device": "Ascend910B3",
+  "ascend_rt_visible_devices": "6,7",
+  "dtype": "float32",
+  "experts": 256,
+  "top_k": 6,
+  "routed_scaling_factor": 1.5,
+  "timing_boundary": "device-executed",
+  "cases": [
+    {
+      "case": "random_normal",
+      "oracle_ids": [
+        82,
+        209,
+        40,
+        225,
+        145,
+        18
+      ],
+      "npu_ids": [
+        82,
+        209,
+        40,
+        225,
+        145,
+        18
+      ],
+      "ids_match": true,
+      "weights_sum": 1.5000000447034836,
+      "oracle_weights_sum": 1.5,
+      "max_abs_w_diff": 1.6574385808265646e-08,
+      "max_rel_w_diff": 6.614411354368052e-08,
+      "weights_ok": true
+    },
+    {
+      "case": "all_tie",
+      "oracle_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "npu_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "ids_match": true,
+      "weights_sum": 1.5,
+      "oracle_weights_sum": 1.5,
+      "max_abs_w_diff": 0.0,
+      "max_rel_w_diff": 0.0,
+      "weights_ok": true
+    },
+    {
+      "case": "nan_logit_huge_bias",
+      "oracle_ids": [
+        209,
+        82,
+        40,
+        225,
+        145,
+        163
+      ],
+      "npu_ids": [
+        209,
+        82,
+        40,
+        225,
+        145,
+        163
+      ],
+      "ids_match": true,
+      "weights_sum": 1.5000000447034836,
+      "oracle_weights_sum": 1.5,
+      "max_abs_w_diff": 2.4603364595643384e-08,
+      "max_rel_w_diff": 9.922999206333087e-08,
+      "weights_ok": true
+    },
+    {
+      "case": "underflow_all_zero",
+      "oracle_ids": [
+        4,
+        17,
+        30,
+        43,
+        56,
+        69
+      ],
+      "npu_ids": [
+        4,
+        17,
+        30,
+        43,
+        56,
+        69
+      ],
+      "ids_match": true,
+      "weights_sum": 0.0,
+      "oracle_weights_sum": 0.0,
+      "max_abs_w_diff": 0.0,
+      "max_rel_w_diff": 0.0,
+      "weights_ok": true
+    },
+    {
+      "case": "guard_gt20",
+      "oracle_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "npu_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "ids_match": true,
+      "weights_sum": 1.5,
+      "oracle_weights_sum": 1.5,
+      "max_abs_w_diff": 0.0,
+      "max_rel_w_diff": 0.0,
+      "weights_ok": true
+    }
+  ],
+  "all_ids_match": true,
+  "all_weights_ok": true
+}

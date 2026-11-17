@@ -1,0 +1,64 @@
+{
+  "kind": "gd7_budget_acl",
+  "captured_at": "2026-11-17T10:45:16+0800",
+  "ascend_rt_visible_devices": "6,7",
+  "timing_boundary": "runtime-api",
+  "devices": [
+    {
+      "logical_dev": 0,
+      "soc": "Ascend910B3",
+      "total_bytes": 65452113920,
+      "free_after_init": 65060319232,
+      "reserved_bytes": 391794688,
+      "alloc_steps": [
+        {
+          "requested_gib": 1,
+          "ok": true,
+          "free_bytes": 63984480256,
+          "delta_bytes": 1075838976
+        },
+        {
+          "requested_gib": 4,
+          "ok": true,
+          "free_bytes": 59687399424,
+          "delta_bytes": 5372919808
+        },
+        {
+          "requested_gib": 8,
+          "ok": true,
+          "free_bytes": 51095367680,
+          "delta_bytes": 13964951552
+        }
+      ],
+      "free_after_release": 65060302848
+    },
+    {
+      "logical_dev": 1,
+      "soc": "Ascend910B3",
+      "total_bytes": 65452113920,
+      "free_after_init": 65058172928,
+      "reserved_bytes": 393940992,
+      "alloc_steps": [
+        {
+          "requested_gib": 1,
+          "ok": true,
+          "free_bytes": 63982333952,
+          "delta_bytes": 1075838976
+        },
+        {
+          "requested_gib": 4,
+          "ok": true,
+          "free_bytes": 59685269504,
+          "delta_bytes": 5372903424
+        },
+        {
+          "requested_gib": 8,
+          "ok": true,
+          "free_bytes": 51093237760,
+          "delta_bytes": 13964935168
+        }
+      ],
+      "free_after_release": 65058086912
+    }
+  ]
+}
