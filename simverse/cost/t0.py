@@ -92,10 +92,23 @@ def price_row(row: OpRow, device: DeviceSpec, gemm_dtype: str = "fp8",
                      if engram_lookup_host and row.op == "engram_lookup" else 0.0)
     bytes_expected = (row.weight_read_expected or 0.0) - host_expected
     dtype = row_dtype(row, gemm_dtype, ew_dtype)
+    if device.backend == "ascend":
+        # 仅纯向量行使用旧表 Vector 档；矩阵/混合 attention 行仍为 Cube
+        # 解析近似，不把 CUDA kernel 配方冒充 Ascend 实现。
+        vector_ops = {"q_norm", "k_norm", "rope", "q_rope", "k_rope", "o_rope",
+                      "attn_norm", "mlp_norm", "attn_add", "mlp_add", "v_norm_gated",
+                      "q_a_norm", "shared_gate", "moe_act", "moe_shared_act"}
+        if dtype != "fp16":
+            raise ValueError("910B3 旧仓解析档仅支持 BF16/FP16；无 FP8/量化执行配方")
+        dtype = "fp32" if row.op in vector_ops else "fp16"
     est = roofline_ms(row.flops, bytes_exact + bytes_expected, device,
                       dtype=dtype)
     basis = ((ew_basis or _BASIS_ELEMENTWISE) if row.op in _ELEMENTWISE
              else (gemm_basis or _BASIS_GEMM_HEURISTIC))
+    if device.backend == "ascend":
+        basis = ("T0 旧仓解析假设；Cube 249T / Vector 31T，MFU=0.20，"
+                 "HBM 1.6TB/s×MBU=0.20；矩阵/混合核未按 Ascend 实现 lowering，"
+                 "launch/融合/运行时池未校准；非实测性能")
     if host_expected:
         basis += ("；Engram host 表期望读字节未计价（UVA 时延 unknown，"
                   "不套 GPU HBM 带宽）")
@@ -107,7 +120,7 @@ def price_row(row: OpRow, device: DeviceSpec, gemm_dtype: str = "fp8",
     est["compute_dtype"] = dtype
     est["peak_tflops"] = peak / 1e12
     est["effective_peak_tflops"] = peak * device.mfu_cap / 1e12
-    est["bandwidth_tb_s"] = device.hbm_bw / 1e12
+    est["bandwidth_tb_s"] = device.hbm_bw * device.mbu_cap / 1e12
     est["cost_basis"] = basis
     return est
 

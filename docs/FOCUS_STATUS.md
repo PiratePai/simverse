@@ -1,5 +1,7 @@
 # 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06、2026-11-16 R25 增补）
 
+2026-11-17 910B3：目标/DT 草稿下拉框已接入旧仓参数的 BF16 解析档，见 [迁移说明](validation/ascend-910b3-device.md)。Qwen3.6 可做解析研究；V4.1 Ascend 配方与 FP8/量化仍拒绝，NPU 成本/容量/排名资格不升级为实测支持。
+
 2026-11-17 R29 / PR #23：[昇腾审查](validation/ascend-910b3-r29-review.md)保留 TP1 随机少层 fixture 产 token 与局部切片观测，纠正 AllGather、MRoPE 和容量/来源结论。实际模型数值、TP2/EP2 集成、运行时容量和生产校准未验收，模型执行状态与部署排名保持原门禁；卡 5/6 可见不等于 forward 使用两卡。下一批以 [昇腾计划](ascend-validation-plan.md) 为准。
 
 2026-11-16 R25（V4.1 稀疏 MLA 注意力核本体）：14 文件 pin（csa2-core-pin.json：

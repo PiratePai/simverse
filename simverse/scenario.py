@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
 from .contracts import RngScheme, digest
-from .devices import V41_DEVICE_FAMILY
+from .devices import DEVICES, V41_DEVICE_FAMILY
 from .draft_quant import FUSED_RAW, UNKNOWN, normalize_ctx_kv_path
 from .lowering.memory import ENGRAM_TABLE_PLACEMENTS
 
@@ -206,6 +206,17 @@ class ScenarioV2:
         if self.workload.batch < 1 or self.workload.ctx_tokens < 1:
             raise ValueError("batch/ctx 必须为正")
         dep = self.deployment
+        active_roles = [("target", dep.target_device, self.quant)]
+        if self.method_id != "baseline":
+            active_roles.append(("draft", dep.target_device if dep.mode == "colocated"
+                                 else dep.draft_device, self.draft_quant))
+        for role, device_id, quant in active_roles:
+            device = DEVICES.get(device_id)
+            if device is not None and device.backend == "ascend":
+                if self.model_id == "deepseek_v41_flash":
+                    raise ValueError("910B3 尚无 V4.1 Ascend KV/量化/注意力配方；不能套用 CUDA FlashMLA")
+                if any(quant.get(key) != 16 for key in ("dense_w", "expert_w", "act", "kv")):
+                    raise ValueError(f"{role} 910B3 旧仓解析档仅支持 BF16/FP16（权重/激活/KV 均 16bit）；不支持 FP8/量化档")
         if dep.target_tp < 1 or dep.target_ep < 1 or dep.draft_tp < 1:
             raise ValueError("tp/ep 必须为正整数")
         if dep.target_ep not in (1, dep.target_tp):

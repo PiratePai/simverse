@@ -379,7 +379,11 @@ def test_devices_sm_count_registered_with_source():
     assert DEVICES["h200_sxm"].sm_count == 132
     assert DEVICES["l40"].sm_count == 142
     for dev in DEVICES.values():
-        assert dev.sources["sm_count"].startswith("spec:"), dev.id
+        if dev.backend == "cuda":
+            assert dev.sources["sm_count"].startswith("spec:"), dev.id
+        else:
+            assert dev.sm_count is None, dev.id
+            assert "不适用" in dev.sources["sm_count"], dev.id
 
 
 # ---------------------------------------------------------------------------

@@ -80,7 +80,7 @@ def _device_snapshot(dep) -> dict:
     （数值快照引入），兼容方式见 docs/validation/cost-integrity-review-fixes.md。
     """
     def dev_snapshot(d):
-        return {"id": d.id,
+        value = {"id": d.id,
                 "peak_by_dtype": dict(d.peak_by_dtype),
                 "hbm_bw": d.hbm_bw,
                 "mem_capacity": d.mem_capacity,
@@ -89,6 +89,10 @@ def _device_snapshot(dep) -> dict:
                 "launch_overhead_ms": d.launch_overhead_ms,
                 "card_count": d.card_count,
                 "sources": dict(d.sources)}
+        if d.backend != "cuda" or d.mbu_cap != 1.0:
+            value.update(backend=d.backend, mbu_cap=d.mbu_cap,
+                         support_level=d.support_level)
+        return value
 
     lk = LINKS[dep.link]
     return {
@@ -137,6 +141,16 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         cat = {**cat, "models": {**cat["models"], **{
             k: v for k, v in internal["models"].items() if k.startswith("tiny_")}}}
     cap = CapabilityReport()
+    dep = scenario.deployment
+    active_device_ids = [dep.target_device]
+    if scenario.method_id != "baseline" and dep.mode.startswith("dt_"):
+        active_device_ids.append(dep.draft_device)
+    if any(DEVICES[key].backend == "ascend" for key in active_device_ids):
+        cap.add("ascend_device_recipe", "unknown",
+                "910B3 仅沿用 model-verse 参数做解析假设；Ascend kernel/分片/通信/"
+                "运行时池与当前模型未联合验证；通信使用场景通用链路假设，未绑定实际拓扑。"
+                "不能继承 CUDA 源码核对结论或实测排名",
+                affected_metrics=["M01 耗时", "M02 部署排名", "M06 可部署性"])
 
     # ---- 模型解析 + 能力检查 ----
     model = cat["models"].get(scenario.model_id)
@@ -338,6 +352,13 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 "@1b2870d 对照；dt 无实现（拒绝）。source-checked ≠ 已部署"
                 "实测",
                 affected_metrics=["部署矩阵 served 标记"])
+
+    if "ascend_device_recipe" in cap.checks:
+        for check_id in ("dflash_serving_integration", "mtp_serving_integration"):
+            if check_id in cap.checks:
+                cap.add(check_id, "unknown", "当前仅为 Ascend 解析研究；CUDA 服务栈源码证据"
+                        "不能证明 910B3 后端集成，等待匹配数值与服务 trace",
+                        affected_metrics=["部署矩阵 served 标记", "M02 部署排名"])
 
     # ---- 计数与计价 ----
     quant, dquant = scenario.quant, scenario.draft_quant
@@ -819,6 +840,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 statistic=Statistic.EXPECTATION,
                 result_kind=ResultKind.ANALYTICAL_ESTIMATE,
                 support=Support.APPROXIMATED,
+                feasibility=prev.feasibility,
                 evidence_refs=list(prev.evidence_refs),
                 formula_ref=prev.formula_ref or FR.F_ROOFLINE,
                 input_refs=list(prev.input_refs),
@@ -1195,6 +1217,14 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
         "gpu_measurement": model.evidence.gpu_measurement,
         "result_kind": "analytical-estimate",
     }
+    ascend = cap.checks.get("ascend_device_recipe")
+    if ascend:
+        for key in ("M01_tpot_analytical", "M01_tpot_baseline", "M04_round_ms"):
+            metric = m.get(key)
+            if isinstance(metric, Metric) and metric.value is not None:
+                metric.support = Support.APPROXIMATED
+                metric.feasibility = Feasibility.UNKNOWN
+                metric.reason = "; ".join(filter(None, [metric.reason, str(ascend["reason"])]))
     return m
 
 
@@ -1211,7 +1241,7 @@ def _eligibility_issues(cap: CapabilityReport) -> list[str]:
                    "model_forward_evidence", "draft_forward_evidence",
                    "method_recipe_ready", "stage_cost_complete",
                    "model_cpu_forward", "model_gpu_measurement",
-                   "deployment_ranking_evidence") \
+                   "deployment_ranking_evidence", "ascend_device_recipe") \
                 and chk["status"] != "supported":
             issues.append(str(chk["reason"]))
         elif cid.startswith("memory_") and chk["status"] in (
