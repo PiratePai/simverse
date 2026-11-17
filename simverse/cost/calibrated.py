@@ -25,7 +25,7 @@ kernel 间隙政策（2026-11-10 修正，修复重复计费）：CUDA_EVENT 逐
   （B8 全模型 673 kernel vs 433 区间，重复 ~0.32ms/步）。kernel_gap.csv 的 eager
   值为 host-ahead 条件下的纯设备间隙，用作边界间隙是低估（launch-bound 边界更长），
   作为显式估计披露，不外推。
-铁律：只产出 CostEstimate，不改任何 OpRow 原始计数（G7 重放保证）。
+铁律：仅提供组级成本摘要，由 CostSession 统一选择与执行；不改任何 OpRow 原始计数。
 """
 from __future__ import annotations
 
@@ -90,6 +90,7 @@ class CalibratedPricer:
         self.scenario = scenario
         self.tp = scenario.deployment.target_tp
         self.domain_reasons: List[str] = []
+        self.stage_groups = {}  # exact ownership/cost units for the unified session
         dep = scenario.deployment
         if dep.target_device != pset.device:
             self.domain_reasons.append(
@@ -136,6 +137,7 @@ class CalibratedPricer:
         regions = 0                    # 计时区间边界数（间隙补贴基数；见模块 docstring）
         covered: set = set()          # 被 measured 组占有的 (layer, op)
         groups_out: List[dict] = []
+        owned_groups: List[dict] = []
 
         for gname, ops in LINEAR_GROUPS.items():
             layers = [li for li, m in by_layer.items() if all(o in m for o in ops)]
@@ -159,7 +161,14 @@ class CalibratedPricer:
             kc = self.pset.lookup_linear_kc(gname, T, tp=self.tp)
             kernels += kc * len(layers)
             regions += len(layers)     # 每组实例 = 1 个 CUDA_EVENT 计时区间
-            covered.update((li, o) for li in layers for o in ops)
+            owned = {(li, o) for li in layers for o in ops}
+            if covered & owned:
+                raise ValueError(f"profile 组重复拥有同一计价项：{gname}")
+            covered.update(owned)
+            owned_groups.append(dict(group=gname,
+                members=[f"{stage}:{li}:{o}" for li in layers for o in ops],
+                analytic_ms=analytic_g, selected_ms=per_layer_t * len(layers),
+                source="measured", record_refs=[f"{self.pset.set_id}#{gname}"]))
             groups_out.append({
                 "group": gname, "layers": len(layers), "source": "measured",
                 "profile_ref": f"{self.pset.set_id}#{gname}",
@@ -178,6 +187,10 @@ class CalibratedPricer:
                 kernels += kc * len(attn_layers)
                 regions += DECODE_BLOCK_REGIONS * len(attn_layers)  # 4 op 各自计时
                 covered.update((li, "attention_core") for li in attn_layers)
+                owned_groups.append(dict(group="attn_decode_block",
+                    members=[f"{stage}:{li}:attention_core" for li in attn_layers],
+                    analytic_ms=analytic_a, selected_ms=blk * len(attn_layers), source="measured",
+                    record_refs=[f"{self.pset.set_id}#attn_decode(B={B},kv={S})"]))
                 groups_out.append({
                     "group": "attn_decode_block", "layers": len(attn_layers),
                     "source": "measured",
@@ -202,6 +215,7 @@ class CalibratedPricer:
         gap_us = self.pset.eager_gap_us(tp=self.tp)
         gap_ms = regions * gap_us * 1e-3
         selected = measured_ms + fallback_ms + gap_ms
+        self.stage_groups[stage] = dict(groups=owned_groups, fallback_ms=fallback_ms, gap_ms=gap_ms)
         return {
             "stage": stage, "domain_ok": True, "reasons": [],
             "analytic_ms": round(analytic_total, 6),

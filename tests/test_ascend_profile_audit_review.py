@@ -130,12 +130,53 @@ def test_step_comparison_rejects_missing_rows_and_unknown_is_null():
     assert result["overlapped_communication_delta_us"] == [None]
 
 
-def test_review_replay_retains_source_blockers():
-    spec = importlib.util.spec_from_file_location("audit_review_tool", ROOT / "tools/review_ascend_profile_audit_r30.py")
+def test_historical_review_recorded_and_superseded():
+    """历史审查（旧包缺源哈希）保留为记录；不再对当前包重放。"""
+    import subprocess
+    import sys
+    old_tool = ROOT / "tools/review_ascend_profile_audit_r30.py"
+    result = subprocess.run([sys.executable, "-X", "utf8", str(old_tool),
+                             "--check"], cwd=ROOT, capture_output=True,
+                            text=True, encoding="utf-8", timeout=60)
+    assert result.returncode == 0, result.stderr
+    review = json.loads((ROOT / "docs/evidence/ascend-profile-audit-r30-review/"
+                         "review.json").read_text(encoding="utf-8"))
+    assert review["decision"].startswith("hold-merge")
+    assert review["source_commit"] == "89803d0a09c13bcd237049c2c2ccefe7ec381f4d"
+    assert len(review["missing_consumed_source_hashes"]) == 6
+    assert all(len(files) == 4
+               for files in review["missing_consumed_source_hashes"].values())
+
+
+def test_rebuild_review_replays_and_clears_source_hashes():
+    """重建包的审查：消费文件哈希齐全、组级剩余量守恒、几何 unknown 保留。"""
+    spec = importlib.util.spec_from_file_location(
+        "audit_rebuild_review",
+        ROOT / "tools/review_ascend_profile_audit_r30_rebuild.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     result = mod.review()
-    assert result["decision"].startswith("hold-merge")
-    assert len(result["missing_consumed_source_hashes"]) == 6
-    assert all(len(files) == 4 for files in result["missing_consumed_source_hashes"].values())
+    assert result["decision"].startswith("approve-audit-only")
+    assert result["missing_consumed_source_hashes"] == {}
+    assert result["consumed_source_files_per_run"] == 7
+    assert result["rebuilt_pack"]["manifest_sha256"] == hashlib.sha256(
+        (PACK / "manifest.json").read_bytes()).hexdigest()
     assert result == json.loads(mod.OUT.read_text(encoding="utf-8"))
+    # 组级剩余量：每个 mapped/fused 组都有去向；GroupedMoE 与 KV write 必须列入
+    mtp = next(r for r in result["group_remaining"]
+               if r["run_id"].endswith("mtp_4k_bs64"))
+    groups = {g["group"]: g for g in mtp["groups"]}
+    assert groups["gemm_grouped_moe"]["remaining_us"] > 3_000_000
+    assert groups["gemm_grouped_moe"]["listed_unallocated_us"] == \
+        groups["gemm_grouped_moe"]["remaining_us"]
+    assert groups["attention_kv_write"]["remaining_us"] > 0
+    assert groups["attention_kv_write"]["listed_unallocated_us"] == \
+        groups["attention_kv_write"]["remaining_us"]
+    # ownership：split kernel 不认领投影 GEMM
+    assert result["ownership"]["attn_qkv_norm_rope_fused_ledger_rows"] == [
+        "q_norm", "k_norm", "rope"]
+    # 几何：Qwen3.6 两个 run 因 TP 未知不得给完整通过
+    q36 = [g for g in result["geometry_recheck"]
+           if g["run_id"].startswith("qwen3_6_mtp_domino/")]
+    assert q36 and all(g["verification_passed"] is False for g in q36)
+    assert all("tp_for_global_heads/vocab" in g["unknown"] for g in q36)

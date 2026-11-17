@@ -8,6 +8,13 @@ census、OP Type→账本行组映射、算子 shape 维度验证、账本覆盖
 不产生成本/排名结论、不改 DEVICES/PROFILE_SETS/模型执行状态，Qwen3.6/V4.1 的部署
 排名限制不变；生产校准准入仍依赖 A-N4 设备/实现身份与匹配采数。见
 [报告](validation/ascend-profile-audit-20261117.md)。
+**2026-11-18 重建**：已在本机原件上用修复后导入器重导入，补齐每 run 7 个消费源文件
+哈希、逐调用 dtype 联合分组、组级剩余量列全与 split ownership 修正；重建审查
+`approve-audit-only`，生产校准仍未准入。见
+[重建审查](validation/ascend-profile-audit-r30-rebuild-20261118.md)。
+2026-11-18 建模简化：解析、条件记录和历史 profile 共用一次计数与成本选用路径，默认展示成本组；
+逐行计数/诊断折叠保留，融合组不分摊伪造逐行实测。KPI/扫描/时间轴/导出使用统一选用口径，
+零命中明确回到解析；原数值锚点、unknown 与部署资格保留。详见[说明](validation/cost-group-simplification-20261118.md)。
 
 2026-11-17 逐记录成本：已提供 R29 双卡通信 / R28 独立 GEMM 两个互斥条件对照档，显示精确/插值命中、分阶段覆盖、解析回退与自动补采清单，详见 [说明](validation/ascend-record-costs.md)。部分成本开始使用归档数值，但缺完整来源与独立留出仍不能升格生产 profile；原解析指标、计数/容量、模型执行与排名资格保持原边界。
 

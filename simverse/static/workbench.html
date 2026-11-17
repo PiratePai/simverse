@@ -262,7 +262,12 @@
         <div class="k-sub" id="kpi-ev-sub">结构/容量/来源逐项</div></div>
     </div>
 
-    <details class="drawer" id="cost-records-panel" open hidden>
+    <details class="drawer" id="cost-groups-panel" open hidden>
+      <summary>阶段与成本组</summary>
+      <div class="body" id="cost-groups-body">运行后显示。</div>
+      <button type="button" id="btn-export-groups">导出成本组 CSV</button>
+    </details>
+    <details class="drawer" id="cost-records-panel" hidden>
       <summary>记录成本、覆盖与解析回退</summary>
       <div class="body" id="cost-records-body">运行后显示。</div>
     </details>
@@ -282,14 +287,14 @@
             不参与排名；失败与 unsupported 格不显示成功数值。</div>
         </div>
       </div>
-      <div class="wb-pane">
-        <div class="wb-pane-head"><span>② 算子账本（target decode）</span>
-          <span class="tag na" id="op-count-tag">–</span></div>
+      <details class="wb-pane" id="count-detail-panel">
+        <summary class="wb-pane-head"><span>细粒度计数（target decode）</span>
+          <span class="tag na" id="op-count-tag">–</span></summary>
         <div class="wb-pane-body"><div class="dag-list" id="dag-list"></div></div>
-      </div>
-      <div class="wb-pane">
-        <div class="wb-pane-head"><span id="inspector-title">③ 算子七维透视</span>
-          <span class="tag ok" id="op-bound-tag">–</span></div>
+      </details>
+      <details class="wb-pane" id="row-detail-panel">
+        <summary class="wb-pane-head"><span id="inspector-title">计数与解析诊断</span>
+          <span class="tag ok" id="op-bound-tag">–</span></summary>
         <div class="wb-pane-body"><div id="inspector"></div>
           <div style="margin-top:8px;border:1px solid var(--line);border-radius:8px;
             padding:6px;background:#fcfdff">
@@ -301,7 +306,7 @@
               style="width:100%;height:auto;display:block"></svg>
           </div>
         </div>
-      </div>
+      </details>
     </div>
 
     <div class="wb-timeline-pane">

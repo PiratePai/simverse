@@ -3,7 +3,7 @@
 # eol=lf 保证任意平台 checkout 后字节不变（refs 内文件本就以 LF 入库）。
 docs/rebuild-20261106/references/** text eol=lf
 assets/identity/** text eol=lf
-assets/config/qwen36_35b_a3b_main__config.json text eol=lf
+assets/config/*.json text eol=lf
 assets/identity/hf_transformers/*.py text eol=lf
 tests/fixtures/qwen36_r06_numeric_oracle.json text eol=lf
 
@@ -55,3 +55,7 @@ assets/profile_audit/** -text diff
 # 工具重放结果与手算期望一致（不依赖原始 400MB 采集）。
 tests/fixtures/ascend_profile_audit_tiny/** text eol=lf
 docs/evidence/ascend-profile-audit-r30-review/** -text diff
+
+# R30 重建审查（2026-11-18）：review.json 绑定重建包 manifest/source 字节哈希。
+docs/evidence/ascend-profile-audit-r30-rebuild/** -text diff
+docs/evidence/cost-groups/*.json text eol=lf

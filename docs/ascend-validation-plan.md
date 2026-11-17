@@ -1,12 +1,29 @@
 # 昇腾优先：少卡 forward、测试与 profiling 校对计划
 
-更新：2026-11-17；本文件补充 [ROADMAP](../ROADMAP.md) 的 C/D 组与 R02b/R03。
+更新：2026-11-18；本文件补充 [ROADMAP](../ROADMAP.md) 的 C/D 组与 R02b/R03。
 **新增设备与采数投入先昇腾、后 NVIDIA**。先用已有 910B3 双卡建立可信闭环，再逐
 SKU 接 910C/950DT/950PR；后几款没有匹配规格/实现证据时保持候选。H100/H200/L40
 已交付功能继续回归；NVIDIA 新卡和新 profile 后排，不作为昇腾工作的前置条件。
 910B3、910C、A2/A3 系统和 950 的能力不能相互继承，尤其不能把 CUDA SM 数填作 NPU 核数。
 
 ## 1. 已有证据与下一批交付
+
+### 成本组简化后的验收顺序（2026-11-18）
+
+已有解析、条件记录和归档 profile 已统一成本路径，见[简化说明](validation/cost-group-simplification-20261118.md)。
+细粒度计数保留；耗时优先按有依据的融合/模块组验收，不要求为每个逻辑行采时。
+
+| 对应事项 | 调整后交付 | 仍需满足的边界 |
+|---|---|---|
+| PR #26 / #28，P0 | 先归档并哈希实际消费的 kernel_details/op_statistic/step/analysis 数据，恢复 batch/M/阶段/角色关联；可恢复的元数据不重测 | 六个 run 的来源闭环，原始包不覆盖；未分配 GroupedMoE/KV-write 不能从核总时长静默排除；摘要不是原始证据 |
+| #29，P1 | 接入可核验的投影融合组总耗时和成员集合，核对 split/norm/rope 归属 | 不按 K/N 汇总、宽度或调用数拆成伪逐行实测；组域不能混 dtype、prefill/decode/verify、目标/草稿 |
+| #30，P1 | 单列 graph/host/sync/拷贝等边界开销组，保留未解析项 | 一个时间区间只收费一次，已含在事件括号内的间隙不再相加；不靠核时间百分比推 E2E/launch |
+| #27，独立推进 | 实际设备/软件栈指纹与官方 dense 规格分别收集 | 910B3 继承解析档继续可用；实际组审计不等待官方峰值，正式成本适用域仍需匹配硬件与实现 |
+| #31，P2 | 历史三模型包只作显式离线归档、parser/回放回归 | 不扩活跃模型目录，不将历史 profile 迁给两款重点模型 |
+
+补采按组的解析回退权重、真实原语与未知原因排序。优先来源修复、实际 MoE/GDN/attention、
+链路启动与运行时边界；TP4/8 继续等待匹配资源。只有当前元数据无法恢复或统计目标改变时
+新建采集 run，不要求重新铺满全部形状网格。后续硬件运行仍需设备与窗口授权。
 
 910B3 可选解析档已先行交付，来源、单位与边界见 [旧仓参数迁移](validation/ascend-910b3-device.md)。目标与 DT 草稿选择器可选，Qwen3.6 使用 BF16；不支持的 V4.1/量化路径明确拒绝。设备可选不等待整模验证；A-N4 仍需补官方 SKU/后端配方，A-N1–3/5–6 的验收条件不变。
 
@@ -30,7 +47,7 @@ PR #21（R28）与 PR #23（R29）均作为局部、未准入采集归档。R29 
 | P0 / A-N2 昇腾 forward 路径（R06/R08） | 固定 vLLM + vLLM-Ascend + CANN/torch_npu 组合；逐一核对模型注册、config、GDN/attention/MoE/量化/KV 路径；提供预检与显式执行入口 | 少层随机权重与完整 checkpoint 两种身份分开；无匹配 kernel/型号立即拒绝。源码映射/离线接线不冒称 NPU 已运行 |
 | P0 / A-N3 1–2 卡正确性与容量（R02b/R03/G-D7） | 先做下表无权重/局部层测试；同一进程分阶段快照，实际 serving 栈 budget + workspace/graph/HCCL | 数值 oracle、分片重组、状态守恒；每 rank 已知峰值及未知项分栏。小样例可分配不代表整模 feasible |
 | P1（昇腾第一顺位）/ A-N4 设备与实现档（R15/R16） | 独立 Ascend 设备身份、官方 dense 规格及能力；NPU 核/引擎字段与 CUDA sm_count 分离；平台特定量化/lowering recipe | 来源与不支持精度负例；不得复用 Marlin/FlashMLA SM90 调度器为 Ascend 实现，也不得用实测峰值填 spec |
-| P1（昇腾第一顺位）/ A-N5 profiling 校对与局部校准（R17/R18） | 先提供原始 trace 审核、映射与差异表；只有设备/实现/形状域匹配后才接 CalibratedPricer | 行数/时间双覆盖、去重留出、域外回退、原账本不变；可独立交付局部校对，无需等待整模。**R30 已交付离线审计**（[报告](validation/ascend-profile-audit-20261117.md)，`assets/profile_audit/ascend_910b_profile_audit_v1`，含 owner 声明/minidraft 排除、算子 shape 维度验证与 row-level 计数分摊候选；未准入）；准入未变 |
+| P1（昇腾第一顺位）/ A-N5 profiling 校对与局部校准（R17/R18） | 先提供原始 trace 审核、映射与差异表；只有设备/实现/形状域匹配后才接 CalibratedPricer | 行数/时间双覆盖、去重留出、域外回退、原账本不变；可独立交付局部校对，无需等待整模。**R30 已交付离线审计**（[报告](validation/ascend-profile-audit-20261117.md)，`assets/profile_audit/ascend_910b_profile_audit_v1`，含 owner 声明/minidraft 排除、算子 shape 维度验证与 row-level 假设诊断；未准入）；**2026-11-18 已从原件重导入**（消费源文件哈希/组级剩余量/ownership 修正，见[重建审查](validation/ascend-profile-audit-r30-rebuild-20261118.md)）；准入未变 |
 | P1 / A-N6 匹配 E2E（R07b/R09） | 权重、显存、后端集成条件满足后，固定 workload 实测 prefill/decode/verify 与接受长度分布 | 按 TTFT/ITL/吞吐/显存误差验收；没有真实配对和请求轨迹时保持缺口。DFlash/MTP 单独核对 |
 
 本轮 A-N2 已交付 `tools/ascend_forward_probe.py` 的 Qwen3.6 fixture/本地权重入口与离线门禁；R29 有 TP1、物理卡 5 的 fixture 成功记录，来源仍有限，数值正确性、TP2 集成和完整权重身份未验收。V4.1 仅交付明确阻断的部署计划，没有将 V4 或双 910B3 代理冒充整模。

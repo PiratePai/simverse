@@ -1,6 +1,13 @@
 # R30 Ascend profiling 离线审计（A-N5 第一阶段）
 
-> 2026-11-17 审查更新：本 PR 暂缓合入。下文为原导入报告，部分来源与归属声明有误，以 [PR #26 审查](ascend-profile-audit-r30-review.md) 为准。已消费的三个 CSV 与 analysis.db 实际未入源哈希；未知 TP 被误判完整几何通过；部分未分摊组漏列。代码已修复若干入口与校验缺陷，原审计包字节保留、尚未由修复后的导入器从原件重建，不能据下文数字宣称已完成可追溯性验收。
+> 2026-11-17 审查更新：本 PR 曾暂缓合入。下文为原导入报告，部分来源与归属声明有误，
+> 以 [PR #26 审查](ascend-profile-audit-r30-review.md) 为准。已消费的三个 CSV 与
+> analysis.db 当时未入源哈希；未知 TP 被误判完整几何通过；部分未分摊组漏列。
+>
+> **2026-11-18 重建更新**：已在本机用修复后的导入器从原件重导入，补齐每 run 7 个
+> 消费源文件哈希、逐调用 dtype 联合分组、组级剩余量列全与 split ownership 修正。
+> 下列数字对应重建包（manifest `958cb6c4…`）；仍未准入。证据与旧→新差异见
+> [重建审查](ascend-profile-audit-r30-rebuild-20261118.md)。
 
 更新：2026-11-17。数据：外部 Ascend NPU profiler 产物
 `D:\github\qwen3_6_mtp_domino`、`D:\github\qwen3-8b-0811`（未入仓的约 400 MB 采集）；
@@ -26,7 +33,7 @@ A-N5 的"原始 trace 审核、映射与差异表"已交付；生产校准准入
 | 并行组 | Qwen3.6 runs：`ep` 与 `mc2` 组 8 ranks；Qwen3-8B runs：`tp` 组 2 ranks；PP/DP 未记录 |
 | 会话窗口 | 36.5–69.1 s（`SESSION_TIME_INFO`）；step 节点为空 → **无逐步/阶段窗口** |
 | AICore 时钟 | 1800/800 MHz 两档（仅记录，不作设备规格） |
-| 源哈希 | 每 run 的 `profiler_info_0.json`、`profiler_metadata.json`、`kernel_details.csv`、`op_statistic.csv`、`step_trace_time.csv`、`ascend_pytorch_profiler_0.db` 逐文件 SHA256 在 `manifest.source.files_sha256`；`trace_view.json`/`operator_details.csv`/`communication.json` 未消费、未入哈希 |
+| 源哈希 | 每 run 的 7 个**已消费**源文件（`profiler_info_0.json`、`profiler_metadata.json`、`ascend_pytorch_profiler_0.db`、`kernel_details.csv`、`op_statistic.csv`、`step_trace_time.csv`、`analysis.db`）逐文件 SHA256 在 `manifest.source.files_sha256`（重建后共 42 条）；`trace_view.json`/`operator_details.csv`/`communication.json` 未消费、未入哈希 |
 
 **缺失身份（`identity.json.identity_gap_summary`，不补造）**：设备 SKU/board/驱动与固件；
 vLLM / vllm-ascend commit；模型 repo/revision/config/checkpoint 哈希；量化配方声明
@@ -66,11 +73,11 @@ owner 声明：`qwen3_6_mtp_domino` → **Qwen3.6-35B-A3B**，`qwen3-8b-0811` �
 | vocab | **248320** = `lm_head` 输出宽 N | **151936** = N 75968 × TP2 |
 | MoE | `MoeGatingTopK [T,256]` + top-8 输出；grouped 权重 E=32/rank → EP8 | 无 MoE |
 | intermediate | MoE 512/shared 512（grouped/shared GEMM N） | **12288**（hidden-K GEMM N） |
-| 判定 | `geometry_verification.verification_passed = true` | 同左（形状一致） |
+| 判定 | `observed_compatible=true`，但 **`verification_passed=false`**（unknown `tp_for_global_heads/vocab`：未记录 TP 组，global heads/vocab 缩放不能证明） | `verification_passed=true`（tp=2 已知） |
 
 结论：hidden/heads/vocab/专家维度都可从算子 shape 交叉验证，且与 owner 声明一致；
-但这仍是**形状一致**（不是权重身份）；minidraft run 的 shape 候选额外出现 1536/128
-等自研头维度，正是按声明排除它的原因之一。
+但这仍是**形状一致**（不是权重身份）；Qwen3.6 run 因 TP 域未知不得给"完整验证通过"，
+minidraft run 的 shape 候选额外出现 1536/128 等自研头维度，正是按声明排除它的原因之一。
 
 ## 3. 方法与对账（可重放）
 
@@ -158,12 +165,18 @@ Qwen3.6 decode 账本 27 行中 **25 行**有组级归属（`ledger_row_coverage
   `in_proj_z` 324.2/972.7 ms；MTP `qkv+gate`(9216) 按 8192:512:512；
 - 同形核按**计数方程**分摊：`(4096→2048)` 4416 次 = o_proj 10 + out_proj 30 + MTP o 3 +
   mtp_fc 3（×96），精确匹配；router/shared/shared_gate 同样由 (40 层+MTP 步) 方程对上。
-- 结果：12 个 GEMM/注意力签名行中 **9 行**得到候选 measured 值（`attention_core` 按
-  10:3 计数分 target/draft）；候选时间覆盖 2,064.8/2,588.0 ms = **79.8%**（仅 2D GEMM +
-  注意力核分母）；`lm_head` 观测 357 次 vs 预测 384 次（残差 27）显式
-  `ambiguous_count_residual` 不分摊；非 GEMM 融合组（norm_add、GDN core/conv、
-  qkv+norm+rope 融合、router topk 等）列入 `unallocated_groups`，**不填 0**。
-- 用途：这是未来接 `CalibratedPricer` 的候选查表数据；**准入仍被 A-N4 设备身份与
+- 结果：12 个 GEMM/注意力签名行中 **9 行**得到候选值（`attention_core` 按 10:3 计数分
+  target/draft）；候选时间覆盖 2,064.8/2,588.0 ms = **79.8%**（仅 2D GEMM + 注意力核
+  分母）；`lm_head` 观测 357 次 vs 预测 384 次（残差 27）显式
+  `ambiguous_count_residual` 不分摊。重建后每行标注
+  `allocation_evidence=width/count-derived-assumption`、`signature_scope=K/N/dtype 聚合；
+  M/阶段/角色未知`——**不是 measured 归属**。
+- 未分摊时间按"组实测量−已分摊量"列全：GroupedMoE 3,402,028.207 µs、KV write
+  14,337.618 µs、dense 剩余 452,630.116 µs，以及 norm_add/GDN core/conv/
+  qkv+norm+rope/router topk 等；**不填 0、不静默排除**。
+- ownership 修正：`split_qkv_rmsnorm_mrope` 只列 `q_norm/k_norm/rope`，不认领投影 GEMM
+  （参考 vllm-ascend forward 中 qkv_proj 先执行；该 commit 只作只读参考，不冒充采集栈）。
+- 用途：这是未来接 `CalibratedPricer` 的候选/诊断数据；**准入仍被 A-N4 设备身份与
   权重/引擎身份阻断**，且融合分摊未按源码 ownership pin，不能直接作为 measured 校准。
 
 ## 5. 准入裁决（`admission`）
@@ -200,7 +213,9 @@ py -3.12 -m pytest tests/test_ascend_profile_audit_r30.py \
 - 工作台：`/api/v2/catalog.profile_audit` 索引 + `GET /api/v2/profile-audit/<set_id>`
   （只读详情，`js_safe`）；前端抽屉展示准入/覆盖并可导出 JSON；`profile_sets` 仍为空。
 - 测试：hermetic 合成 fixture 覆盖导入/映射/覆盖/回退/哈希拒绝/跨模型/设备/TP/隔离；
-  真实 6-run 包只读小 JSON 资产。新增 21 项（本文件 15 + 工作台 6）。
+  真实 6-run 包只读小 JSON 资产。R30 相关测试见
+  `tests/test_ascend_profile_audit_{r30,ui,review}.py`（计数以 pytest 收集数为准；
+  2026-11-18 重建后全量 618 collected / 613 passed / 5 skipped）。
 
 ## 7. 本审计能/不能宣称
 

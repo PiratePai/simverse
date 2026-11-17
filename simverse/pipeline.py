@@ -17,9 +17,8 @@ from .devices import DEVICES, LINKS  # v0.1 设备注册表（v0.2 沿用数值+
 from .draft_quant import MXFP8_CONTEXT_PROJ
 from .cost.t0 import (dtype_route, ew_cost_basis, gemm_cost_basis, price_row,
                       price_rows, stage_total)
-from .cost.calibrated import CalibratedPricer
-from .cost.profile_store import load_profile_set, profile_model_id
-from .execute.serial import build_serial_round
+from .cost.session import CostSession
+from .execute.serial import evaluate_execution
 from .lowering import (DeviceBudget, LinkLike, colocated_rank_memory,
                        kv_shard_note, model_collectives, validate_parallel)
 from .methods import build_method_plan, acceptance_summary
@@ -127,70 +126,6 @@ def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
 
 def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
            allow_internal_methods: bool = False) -> ResultBundle:
-    """Evaluate T0 and optionally the same pipeline with conditional record costs.
-
-    Both evaluations use the same counting/lowering/execution implementation.
-    The original analytical metrics and ledgers remain unchanged.
-    """
-    analytic = _evaluate_v2(scenario, catalog, allow_internal_methods)
-    if not scenario.cost_records or analytic.manifest.status != "completed":
-        return analytic
-    from .cost.records import RecordPricer
-    models = (catalog or build_catalog())["models"]
-    records = RecordPricer(scenario, models[scenario.model_id])
-    selected = _evaluate_v2(scenario, catalog, allow_internal_methods, records)
-    report = records.report()
-    report["unpriced_components"] = [
-        {"id": key, "time_ms": None, "reason": value["reason"]}
-        for key, value in analytic.capability["checks"].items()
-        if key == "stage_cost_complete" and value["status"] != "supported"]
-    if report["unpriced_components"]:
-        report["prerequisites"].append(
-            "未计价方法阶段仍为unknown，不在覆盖分母内：先确认Ascend实现，再采接受/回退/hidden提取，不按0ms忽略")
-    analytic.cost["record_cost"] = report
-    report["selected_row_prices"] = selected.cost.get("row_prices", [])
-    report["selected_roofline_points"] = selected.cost.get("roofline_points", [])
-    report["selected_execution"] = selected.execution
-    if selected.cost.get("pipeline_sim"):
-        report["selected_pipeline_sim"] = selected.cost["pipeline_sim"]
-    note = (f"{report['label']}：{report['matched']}/{report['total']} 成本实例命中；"
-            "其余按原解析回退；记录含host/sync且身份不完备，仅作条件对照，不是生产校准或E2E实测")
-    if report["unpriced_components"]:
-        note += "；仅包含已计价阶段，方法运行时阶段尚缺时长"
-    analytic.capability["checks"]["archived_cost_records"] = {
-        "status": "approximated" if report["matched"] else "unknown", "reason": note,
-        "affected_metrics": ["M01_record_tpot", "M02_record_speedup", "M04_record_round_ms"]}
-    if "M07_support_summary" in analytic.metrics:
-        analytic.metrics["M07_support_summary"]["capability_checks"]["archived_cost_records"] = (
-            "approximated" if report["matched"] else "unknown")
-    analytic.assumption_dict["archived_cost_records"] = note
-    analytic.formula_dict["record-cost:" + scenario.cost_records] = {
-        "expr": "selected = matching archived latency + unchanged analytical fallback; same execution plan",
-        "source": "sha256:" + records.content_digest, "applies": "conditional archived cost experiment",
-        "version": "1"}
-    if report["matched"]:
-        for dst, src in {"M01_record_tpot": "M01_tpot_analytical",
-                         "M01_record_baseline": "M01_tpot_baseline",
-                         "M02_record_speedup": "M02_speedup_vs_baseline",
-                         "M04_record_round_ms": "M04_round_ms"}.items():
-            old = selected.metrics.get(src)
-            if not isinstance(old, Metric):
-                continue
-            analytic.metrics[dst] = Metric(
-                old.value, old.unit, scope=old.scope, statistic=old.statistic,
-                support=Support.APPROXIMATED if old.value is not None else Support.UNKNOWN,
-                feasibility=Feasibility.UNKNOWN, result_kind=ResultKind.ANALYTICAL_ESTIMATE,
-                reason="；".join(filter(None, [old.reason, note])),
-                evidence_refs=[Evidence.ASSUMED], formula_ref="record-cost:" + scenario.cost_records,
-                input_refs=["sha256:" + records.content_digest])
-    analytic.manifest.cost_digest = digest({"base": analytic.manifest.cost_digest,
-                                          "cost_records": records.content_digest})
-    analytic.manifest.compute_run_id()
-    return analytic
-
-
-def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
-                 allow_internal_methods: bool = False, _records=None) -> ResultBundle:
     """生产入口：默认只解析活跃目录（两款主模型 + DFlash）。
 
     catalog 仅允许离线测试显式注入 archive/fixture 目录；CLI/API 不暴露该参数。
@@ -200,16 +135,12 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     scenario.validate()
     def priced_rows(rows, device, *args, **kwargs):
         prices = price_rows(rows, device, *args, **kwargs)
-        if not _records:
-            return prices
         quant = scenario.draft_quant if rows and rows[0].role == "draft" else scenario.quant
-        return _records.rows(rows, prices, device, quant)
+        return costs.rows(rows, prices, device, quant)
 
     def priced_row(row, device, *args, **kwargs):
         price = price_row(row, device, *args, **kwargs)
-        if not _records:
-            return price
-        return _records.rows([row], [price], device,
+        return costs.rows([row], [price], device,
                              scenario.draft_quant if row.role == "draft" else scenario.quant)[0]
     cat = catalog if catalog is not None else build_catalog()
     if allow_internal_methods and "tiny_gqa" not in cat["models"]:
@@ -336,23 +267,8 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 affected_metrics=["M01 TPOT", "M02 加速比", "M06 显存"])
     acc = acceptance_summary(plan)
 
-    # ---- 实测 profile 校准（可选；MERGE_CRITERIA §3：只改成本不改计数）----
-    pricer = None
-    if scenario.cost_profile:
-        pset = load_profile_set(scenario.cost_profile)  # 完整性不符即抛错
-        bound = profile_model_id(pset.set_id)
-        if bound != model.id:
-            raise ValueError(
-                f"profile {pset.set_id} 绑定历史模型 {bound}，禁止用于 "
-                f"{model.id}（跨模型误用；该资产为历史归档）")
-        pricer = CalibratedPricer(pset, model, scenario)
-        if pricer.applicable:
-            cap.add("cost_profile_domain", "supported",
-                    f"{scenario.cost_profile}：设备/精度/TP/形状域匹配")
-        else:
-            cap.add("cost_profile_domain", "approximated",
-                    f"{scenario.cost_profile} 域不匹配：{'；'.join(pricer.domain_reasons)}",
-                    affected_metrics=["M01_tpot_profile_calibrated"])
+    costs = CostSession(scenario, model)
+    costs.checks(cap)
 
     # ---- 部署合法性（R01：统一 ParallelPlan；非法组合显式拒绝）----
     dep = scenario.deployment
@@ -453,13 +369,6 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     work: Dict[str, Any] = {}
     cost: Dict[str, Any] = {}
     tp_link = _link_like(dep.link)
-    calibration: Dict[str, Any] = {
-        "profile_set": scenario.cost_profile,
-        "stages": {},
-        "note": "selected=域内实测+域外解析(差额)+kernel间隙；原始计数不变（G7）"
-                "；草稿阶段无匹配域不校准",
-    } if pricer else None
-
     base_rows = build_model_work(model, "target_decode", B, ctx, 1, quant,
                                  dep.target_tp, role="target", ep=dep.target_ep,
                                  plan=pplan,
@@ -473,12 +382,8 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     roofline_points = _roofline_points(base_rows, base_prices)
     # 通信（R01 按层配方：attn allreduce 恒有；MLP 段 TP allreduce 或 EP all2all）
     col_base = _collectives_cost(model, pplan, B, quant, tp_link,
-                                 records=_records, device=target_dev, stage="target_decode")
+                                 records=costs, device=target_dev, stage="target_decode")
     t_base += col_base["t_ms"]
-    if pricer:
-        cal = pricer.price_stage("target_decode", base_rows, base_prices, B, ctx, 1)
-        cal["collectives_ms"] = col_base["t_ms"]
-        calibration["stages"]["target_decode"] = cal
     work["target_decode"] = _rows_json(base_rows)
     cost["target_decode"] = {"t_ms": t_base, "collectives": col_base["detail"]}
     cost["roofline_points"] = roofline_points
@@ -490,7 +395,6 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     if scenario.method_id == "baseline":
         stage_costs["decode"] = t_base
         e_n = 1.0
-        round_obj = build_serial_round(plan, stage_costs, 1.0)
         draft_rows: List = []
         msg_bytes = {"d2t": 0, "t2d": 0}
     else:
@@ -514,7 +418,7 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                    method_digest=digest(plan.to_json()),
                                    code_revision=code_revision())
             manifest.compute_run_id()
-            return ResultBundle(
+            bundle = ResultBundle(
                 manifest=manifest, scenario_snapshot=scenario.to_json(),
                 model_ref={"id": model.id,
                            "structure_complete": model.structure_complete,
@@ -532,6 +436,7 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                     model, draft, scenario.method_id, scenario.cost_profile),
                 formula_dict=FR.formulas_json()["formulas"],
                 assumption_dict=_assumptions(scenario, plan))
+            return costs.finish(bundle, plan, {}, None, _roofline_points)
         if scenario.method_id == "dflash_v1":
             # 草稿与 target 同 TP 组（vLLM load_dflash_model pin；dt_serial
             # 独立设备时草稿组 TP1 全量副本——无共享配方，见 memory）
@@ -556,7 +461,7 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             col_d = _collectives_cost(draft_model, draft_plan,
                                       B * plan.block_size, dquant, tp_link,
                                       lm_head_tokens=B * (plan.block_size - 1),
-                                      records=_records, device=d_dev, stage="draft_block")
+                                      records=costs, device=d_dev, stage="draft_block")
             t_draft += col_d["t_ms"]
             verify_rows = build_model_work(model, "verify_block", B, ctx,
                                            plan.block_size, quant, dep.target_tp,
@@ -568,17 +473,9 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                   engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices)
             col_v = _collectives_cost(model, pplan, B * plan.block_size,
-                                      quant, tp_link, records=_records,
+                                      quant, tp_link, records=costs,
                                       device=target_dev, stage="verify_block")
             t_verify += col_v["t_ms"]
-            if pricer:
-                calibration["stages"]["verify_block"] = pricer.price_stage(
-                    "verify_block", verify_rows, v_prices, B, ctx, plan.block_size)
-                calibration["stages"]["verify_block"]["collectives_ms"] = col_v["t_ms"]
-                calibration["stages"]["draft_block"] = {
-                    "stage": "draft_block", "domain_ok": False,
-                    "reasons": ["草稿模型（DFlash 6L dense GQA）无匹配 profile 域"],
-                    "selected_ms": None}
             blk = plan.block_size
             greedy = scenario.acceptance.get("kind") == "geometric"  # 概率随采样策略
             # 草稿/验收消息按整批 B 计一次（不重复乘 target/通信）。
@@ -662,15 +559,15 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 # fc gather_output=True all-gather + lm_head logits gather
                 #（每步 B 行候选；TP1 全零）
                 col_j = _collectives_cost(mtp_model, mtp_plan, B, mtp_quant,
-                                          tp_link, lm_head_tokens=B, records=_records,
+                                          tp_link, lm_head_tokens=B, records=costs,
                                           device=target_dev, stage=stage)
                 fc_gather = engram_gather(
                     B, model.hidden, dep.target_tp, mtp_quant["act"] / 8,
                     tp_link, "mtp_fc_allgather",
                     "MTP fc ColumnParallelLinear gather_output=True → "
                     "[B,h/tp] all-gather 为 [B,h]（qwen3_5_mtp.py L99-104）")
-                if _records:
-                    _records.collective(fc_gather, dep.target_tp, "bfloat16",
+                if costs:
+                    costs.collective(fc_gather, dep.target_tp, "bfloat16",
                                         target_dev, stage)
                 col_j["t_ms"] += fc_gather.t_ms
                 col_j["detail"]["counts_by_kind"]["mtp_fc_allgather"] = (
@@ -689,19 +586,9 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                     engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices_m)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
-                                      quant, tp_link, records=_records,
+                                      quant, tp_link, records=costs,
                                       device=target_dev, stage="verify")
             t_verify += col_v["t_ms"]
-            if pricer:
-                calibration["stages"]["verify"] = pricer.price_stage(
-                    "verify", verify_rows, v_prices_m, B, ctx,
-                    plan.k_effective + 1)
-                calibration["stages"]["verify"]["collectives_ms"] = col_v["t_ms"]
-                for j in range(plan.k_effective):
-                    calibration["stages"][f"draft_step_{j}"] = {
-                        "stage": f"draft_step_{j}", "domain_ok": False,
-                        "reasons": ["草稿阶段（MTP 微头）无匹配 profile 域"],
-                        "selected_ms": None}
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
                          # R27：t2d 期望字节保留浮点（E[N] 推导；同 DFlash 修复）
                          "t2d": float(B * e_n * model.hidden
@@ -751,14 +638,9 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                     engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices_c)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
-                                      quant, tp_link, records=_records,
+                                      quant, tp_link, records=costs,
                                       device=target_dev, stage="verify")
             t_verify += col_v["t_ms"]
-            if pricer:
-                calibration["stages"]["verify"] = pricer.price_stage(
-                    "verify", verify_rows, v_prices_c, B, ctx,
-                    plan.k_effective + 1)
-                calibration["stages"]["verify"]["collectives_ms"] = col_v["t_ms"]
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
                          "t2d": int(B * 256)}
             stage_costs = {f"draft_step_{j}": t_draft / max(1, plan.k_effective)
@@ -778,72 +660,10 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             t_d2t = t_t2d = 0.0
         step_map = {"d2t": t_d2t, "t2d": t_t2d}
         stage_costs.update(step_map)
-        if _records and dep.mode in ("dt_serial", "dt_pipeline_sim"):
+        if costs and dep.mode in ("dt_serial", "dt_pipeline_sim"):
             for direction, ms in step_map.items():
-                _records.point_to_point(direction, dep.link, msg_bytes[direction], ms)
+                costs.point_to_point(direction, dep.link, msg_bytes[direction], ms)
         cost["link"] = {"t_d2t_ms": t_d2t, "t_t2d_ms": t_t2d, "bytes": msg_bytes}
-        if dep.mode == "dt_pipeline_sim":
-            # M3 资源事件核：真实调度（互斥资源+半双工链路），周期≠请求延迟
-            from .execute.resource_core import dt_pipeline_schedule
-            draft_time = sum(v for k, v in stage_costs.items()
-                             if k == "draft_block" or k.startswith("draft_step_"))
-            sim = dt_pipeline_schedule(
-                draft_time,
-                t_d2t, stage_costs.get("verify_block", stage_costs.get("verify", 0.0)),
-                t_t2d, rounds=dep.pipeline_rounds,
-                microbatches=dep.pipeline_microbatches)
-            if sim.violations:
-                cap.add("pipeline_schedule_valid", "unsupported",
-                        "; ".join(v[2] for v in sim.violations[:2]),
-                        affected_metrics=["M18 周期/利用率"])
-            else:
-                cap.add("pipeline_schedule_valid", "supported",
-                        "事件流通过 validate_trace（依赖/互斥/消息序）")
-            round_obj = build_serial_round(plan, stage_costs, e_n)
-            cost["pipeline_sim"] = sim.to_json()
-        else:
-            round_obj = build_serial_round(plan, stage_costs, e_n)
-        # 串行时间线补 link 事件（计划步骤已含 d2t/t2d）
-
-    # ---- 校准摘要与 selected 轮成本（不改 stage_costs 解析值与原始计数）----
-    calibrated_tpot = None
-    calibrated_baseline = None
-    if pricer and calibration is not None:
-        cost["calibration"] = calibration
-        cov_rows = sum(s.get("coverage_rows", [0, 0])[0]
-                       for s in calibration["stages"].values())
-        tot_rows = sum(s.get("coverage_rows", [0, 0])[1]
-                       for s in calibration["stages"].values())
-        calibration["coverage"] = {
-            "rows_covered": cov_rows, "rows_total": tot_rows,
-            "holdout_error_report": pricer.pset.manifest["holdout"]["error_report"],
-            "environment": pricer.pset.manifest["environment"],
-            "source_head": pricer.pset.manifest["source"]["git_head"]}
-        if scenario.method_id == "baseline":
-            cal0 = calibration["stages"]["target_decode"]
-            if cal0.get("selected_ms") is not None:
-                sel = cal0["selected_ms"] + col_base["t_ms"]
-                calibrated_tpot = sel
-                calibrated_baseline = sel
-        else:
-            sel_costs = dict(stage_costs)
-            repl = {}
-            for stname, cal in calibration["stages"].items():
-                if cal.get("selected_ms") is None or not cal.get("domain_ok"):
-                    continue
-                base_t = cal["analytic_ms"]
-                extra = (cal.get("collectives_ms") or 0.0)
-                # collectives 已在 stage_costs 内（t_verify 含 col_v）→ 差额替换
-                repl[stname] = cal["selected_ms"] + extra
-                sel_costs[stname] = repl[stname]
-            if repl:
-                round_sel = build_serial_round(plan, sel_costs, e_n)
-                if round_sel.tpot_ms is not None:
-                    calibrated_tpot = round_sel.tpot_ms
-                cal0 = calibration["stages"].get("target_decode")
-                if cal0 and cal0.get("selected_ms") is not None:
-                    calibrated_baseline = cal0["selected_ms"] + col_base["t_ms"]
-
     # ---- 容量（R02a/b：per-rank 对象账本 + 生命周期峰值；R03：预算判定）----
     mtp_mem_model = (_mtp_mem_model(model) if scenario.method_id == "mtp"
                      and (model.extras or {}).get("mtp") else None)
@@ -858,6 +678,14 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
 
     cost["memory"] = memory       # R02a：per-rank 对象清单与判定入册（导出/UI 共用）
 
+    round_obj, simulation = evaluate_execution(plan, stage_costs, e_n, dep)
+    if simulation is not None:
+        cost["pipeline_sim"] = simulation
+        violations = simulation.get("violations", [])
+        cap.add("pipeline_schedule_valid", "unsupported" if violations else "supported",
+                "; ".join(str(v) for v in violations[:2]) if violations else
+                "事件流通过 validate_trace（依赖/互斥/消息序）", affected_metrics=["M18 周期/利用率"] if violations else [])
+
     # ---- 指标 ----
     metrics = _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                              base_rows, memory, cap, model, draft)
@@ -868,30 +696,6 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 metric.support = Support.APPROXIMATED
                 metric.reason = ("仅 GPU 侧解析耗时下界；Engram host 表查找与预取"
                                  "时延未计，不能作为完整 TPOT")
-    if calibrated_tpot is not None:
-        metrics["M01_tpot_profile_calibrated"] = metric_from(
-            calibrated_tpot, "ms", "profile:" + scenario.cost_profile,
-            statistic=Statistic.EXPECTATION,
-            result_kind=ResultKind.MEASURED_COMPOSITE,
-            support=Support.APPROXIMATED,
-            evidence=(Evidence.MEASURED, Evidence.ASSUMED),
-            scope=Scope(role="target", phase="steady-decode",
-                        time_basis=TimeBasis.COMMITTED.value),
-            assumptions=[
-                "算子级实测 median 组合（域内查表/插值），非整步实测；"
-                "组合含 eager kernel 间隙估计",
-                "域外部分（MoE/router/lm_head/草稿/verify 注意力）仍为解析估算",
-                f"留出误差见 cost.calibration.coverage（来源 "
-                f"{scenario.cost_profile}）"])
-    if calibrated_baseline is not None:
-        metrics["M01_tpot_baseline_calibrated"] = metric_from(
-            calibrated_baseline, "ms", "profile:" + scenario.cost_profile,
-            statistic=Statistic.EXPECTATION,
-            result_kind=ResultKind.MEASURED_COMPOSITE,
-            support=Support.APPROXIMATED, evidence=(Evidence.MEASURED,),
-            scope=Scope(role="target", phase="steady-decode",
-                        time_basis=TimeBasis.COMMITTED.value),
-            assumptions=["同 M01_tpot_profile_calibrated 口径"])
     # M18 周期/利用率/流水（dt_pipeline_sim；周期≠单请求 TPOT，分列）
     if cost.get("pipeline_sim"):
         ps = cost["pipeline_sim"]
@@ -971,7 +775,7 @@ def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         formula_dict=FR.formulas_json()["formulas"],
         assumption_dict=_assumptions(scenario, plan),
     )
-    return bundle
+    return costs.finish(bundle, plan, stage_costs, e_n, _roofline_points)
 
 
 def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,

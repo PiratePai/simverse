@@ -348,7 +348,12 @@ def test_geometry_verification_from_operator_shapes():
     pack = load_audit_pack(SET_ID)
     by_run = {r["run_id"]: r for r in pack.identity["runs"]}
     mtp = by_run["qwen3_6_mtp_domino/mtp_4k_bs64"]["geometry_verification"]
-    assert mtp["checked"] and mtp["verification_passed"] is True
+    # Qwen3.6 run 未记录 tp 并行组：形状维度可核对，但 global heads/vocab 缩放
+    # 无法证明 → 整体不得给"完整验证通过"（review 修复）；可用维度仍须给出证据。
+    assert mtp["checked"] is True
+    assert mtp["observed_compatible"] is True
+    assert mtp["verification_passed"] is False
+    assert "tp_for_global_heads/vocab" in mtp["unknown"]
     f = mtp["fields"]
     assert f["hidden_size"]["match"] is True
     assert 2048 in f["hidden_size"]["observed_norm_candidates"]
@@ -356,7 +361,7 @@ def test_geometry_verification_from_operator_shapes():
     assert f["hidden_size"]["evidence"], "hidden 证据必须来自具体算子 shape"
     assert 248320 in f["vocab_size"]["observed_lm_head_N"]
     assert f["num_experts"]["match"] is True
-    # Qwen3-8B（owner 声明）：hidden 4096、TP2 下 lm_head N=75968 → vocab 151936
+    # Qwen3-8B（owner 声明）：tp=2 已知 → hidden 4096、vocab 151936 可完整核对
     b8 = by_run["qwen3-8b-0811/baseline-t=0.6-tp2-bs32-8k"][
         "geometry_verification"]
     assert b8["checked"] and b8["verification_passed"] is True
