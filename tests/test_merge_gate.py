@@ -27,7 +27,8 @@ def test_g1_device_sources_complete_and_dense_labeled():
                                               "sm_count"]:
             assert key in dev.sources or f"peak_{key}" in dev.sources, \
                 f"{dev.id}: 数值 {key} 无来源"
-        for dt, src_key in [("fp16", "peak_fp16"), ("fp8", "peak_fp8")]:
+        for dt in dev.peak_by_dtype:
+            src_key = f"peak_{dt}"
             src = dev.sources.get(src_key, "")
             assert "dense" in src.lower(), f"{dev.id}.{dt} 峰值来源未标注 dense 口径"
 

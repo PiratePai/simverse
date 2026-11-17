@@ -8,6 +8,8 @@ SKU 接 910C/950DT/950PR；后几款没有匹配规格/实现证据时保持候�
 
 ## 1. 已有证据与下一批交付
 
+910B3 可选解析档已先行交付，来源、单位与边界见 [旧仓参数迁移](validation/ascend-910b3-device.md)。目标与 DT 草稿选择器可选，Qwen3.6 使用 BF16；不支持的 V4.1/量化路径明确拒绝。设备可选不等待整模验证；A-N4 仍需补官方 SKU/后端配方，A-N1–3/5–6 的验收条件不变。
+
 PR #21（R28）与 PR #23（R29）均作为局部、未准入采集归档。R29 已补 ACL 返回码/context 和 ReduceScatter list 形状，并记录 TP1 少层 fixture 产出 token；但 AllGather 规范化、逐头 MRoPE、来源完整性、实际后端数值与容量仍有缺口。以 [R29 审查](validation/ascend-910b3-r29-review.md) 与派生 review.json 为准，采集时报告保留作历史材料；不把原 manifest 的「A-N3 未执行」或原文「7/7」当作整体状态。
 
 **下一批按以下可独立验收的小项推进，不重新跑已无问题的全部网格，也不因误读 OOM 先缩小 fixture。** 本轮审查没有执行硬件任务；后续 NPU 执行仍需明确设备与运行窗口。

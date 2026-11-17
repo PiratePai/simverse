@@ -57,7 +57,7 @@ def _num(value: Any, name: str, lo: float, hi: float, integer: bool = False) -> 
 
 @dataclass(frozen=True)
 class DeviceSpec:
-    """统一设备口径（GPU；NPU 换算属 M3 vllm-ascend 包，本切片不含）。
+    """统一设备口径；NPU 解析档与实际后端验证分立。
 
     peak_by_dtype: 各精度峰值算力 (FLOP/s)；hbm_bw: 聚合有效带宽 (B/s)；
     mem_capacity: HBM 容量 (B)；launch_overhead_ms: 单 kernel launch 估计（T0）；
@@ -77,6 +77,9 @@ class DeviceSpec:
     card_count: int = 1  # 0 表示由场景的 tp 决定
     # R25：SM 数（FlashMLA split-KV 调度器的 num_sm_parts 输入；spec 来源）
     sm_count: Optional[int] = None
+    backend: str = "cuda"
+    mbu_cap: float = 1.0
+    support_level: str = "analytical"
 
     def peak(self, dtype: str) -> float:
         if dtype not in self.peak_by_dtype:

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "repository": "https://gitee.com/liliyongqi/model-verse",
+  "commit": "6a8acce825b19591a6331c20a3b16bf6b7d01661",
+  "source_key": "ascend_910B_64G",
+  "target_id": "ascend_910b3",
+  "source_kind": "inherited-assumption",
+  "mapping_evidence": "h3_pipeline_sim.py: 910B3 real-log scenario explicitly selects ascend_910B_64G; source reviewed, not executed in this migration",
+  "files": [
+    {
+      "path": "npu_params.py",
+      "upstream_path": "LLM-Viewer-main/hardwares/npu_params.py",
+      "sha256": "cbc9b53b132025de794d52e80d53ba805f2005aa07b49cd6b00cfb3ed62e23ef"
+    },
+    {
+      "path": "h3_pipeline_sim.py",
+      "upstream_path": "LLM-Viewer-main/scenarios/h3_pipeline_sim.py",
+      "sha256": "a5d6bcef54caa10e0166f1e40376dc23f263dfe1574693266714a19e2a98325b"
+    }
+  ],
+  "excluded": [
+    "FP8/INT8 not specified in this entry",
+    "interconnect_bw=50e9 is effective collective bandwidth of unspecified topology, not a generic point-to-point HCCS spec",
+    "onchip_buffer=0 is unknown, not a measured zero",
+    "no calibration or deployment admission"
+  ]
+}

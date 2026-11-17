@@ -40,7 +40,7 @@ def roofline_ms(flops: int, bytes_total: int, device: DeviceSpec, dtype: str = "
         raise ValueError("roofline 输入必须非负")
     peak_eff = device.peak(dtype) * device.mfu_cap
     t_comp_ms = (flops / peak_eff * 1e3) if flops else 0.0
-    t_mem_ms = (bytes_total / device.hbm_bw * 1e3) if bytes_total else 0.0
+    t_mem_ms = (bytes_total / (device.hbm_bw * device.mbu_cap) * 1e3) if bytes_total else 0.0
     t_ms = max(t_comp_ms, t_mem_ms) + overlap_tail * min(t_comp_ms, t_mem_ms)
     bound = "compute" if t_comp_ms >= t_mem_ms else ("memory" if t_mem_ms else "none")
     return {"t_ms": t_ms, "t_comp_ms": t_comp_ms, "t_mem_ms": t_mem_ms, "bound": bound,

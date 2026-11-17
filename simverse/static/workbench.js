@@ -186,9 +186,24 @@
     var prec = $('sel-prec');
     prec.disabled = model === 'deepseek_v41_flash';
     if (model === 'deepseek_v41_flash') hints.push(COMBO.v41QuantFrozen);
+    var targetSpec = state.catalog && state.catalog.devices[$('sel-target-dev').value];
+    var targetAscend = targetSpec && targetSpec.backend === 'ascend';
+    if (targetAscend) {
+      if (model === 'deepseek_v41_flash') {
+        hints.push('910B3 尚无 V4.1 后端配方；请选择 Qwen3.6，或切回支持该配方的设备。');
+      } else {
+        prec.value = 'bf16';
+        prec.disabled = true;
+        hints.push('910B3：沿用 model-verse 的 BF16 解析档，未校准；容量与部署资格仍需验证。');
+      }
+    }
     // 草稿设备：colocated/baseline 与 target 同组（不生效）
     var draftDev = $('sel-draft-dev');
     var dtMode = mode.indexOf('dt_') === 0;
+    var draftSpec = state.catalog && state.catalog.devices[draftDev.value];
+    if (dtMode && draftSpec && draftSpec.backend === 'ascend') {
+      hints.push('910B3 草稿端使用 BF16 解析档；跨后端服务集成与通信未验证。');
+    }
     draftDev.disabled = !dtMode;
     if (!dtMode) hints.push(COMBO.draftDevShared);
     // DT 两端预算：仅 DT 生效
@@ -196,7 +211,9 @@
     // 块长：仅 DFlash
     $('inp-blk').disabled = method !== 'dflash_v1';
     // 当前组合支持状态
-    if (method === 'dflash_v1') {
+    if (targetAscend || (dtMode && draftSpec && draftSpec.backend === 'ascend')) {
+      hints.push('当前仅做解析研究；Ascend 的投机方法、分片、通信和服务集成尚未联合验证。');
+    } else if (method === 'dflash_v1') {
       hints.push(dtMode ? COMBO.dflashDtResearch : COMBO.dflashColocated);
     } else if (method === 'mtp') {
       hints.push(COMBO.mtpColocated);
@@ -249,7 +266,10 @@
       quant: ($('sel-model').value === 'deepseek_v41_flash')
         ? V41_QUANT
         : QUANT_PRESETS[$('sel-prec') ? $('sel-prec').value : 'w8a8_fp4e'],
-      draft_quant: { dense_w: 8, expert_w: 8, act: 8, kv: 8, state: 32 },
+      draft_quant: (state.catalog && state.catalog.devices[
+        mode === 'colocated' ? $('sel-target-dev').value : $('sel-draft-dev').value
+      ].backend === 'ascend') ? QUANT_PRESETS.bf16
+        : { dense_w: 8, expert_w: 8, act: 8, kv: 8, state: 32 },
       // 显式实现路径（活跃草稿无 quantization_config → raw 融合副本）；
       // dense_w 只是计价位宽，不决定该分支。
       draft_ctx_kv_path: 'fused_raw',

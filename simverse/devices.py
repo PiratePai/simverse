@@ -93,6 +93,28 @@ DEVICES = {
             "mfu_cap": "锚:同 h100_sxm",
         },
     ),
+    "ascend_910b3": DeviceSpec(
+        id="ascend_910b3", label="昇腾 910B3 64GB（旧仓解析档，未校准）",
+        peak_by_dtype={"fp16": 249e12, "fp32": 31e12},
+        hbm_bw=1.6e12, mem_capacity=64e9,
+        launch_overhead_ms=0.0, mfu_cap=0.20, mbu_cap=0.20,
+        card_count=8, sm_count=None, backend="ascend",
+        support_level="inherited-analytical-unmeasured",
+        sources={
+            "peak_fp16": "assumed:沿用 model-verse ascend_910B_64G cube_ops=249e12，"
+                         "dense 矩阵计算档（旧表 cube/vector 按 8:1 拆分，非官方 SKU 规格核验）",
+            "peak_fp32": "assumed:沿用旧表 vector_ops=31e12，dense Vector 解析档；非实测",
+            "hbm_bw": "assumed:沿用 model-verse 64GB 档 bandwidth=1.6e12 B/s，聚合单向解析输入",
+            "mem_capacity": "assumed:沿用旧表 memory_capacity=64e9 B（十进制）；不是 R29 free/total 快照",
+            "mfu_cap": "assumed:沿用旧表 mfu=0.20，未由当前模型实测校准",
+            "mbu_cap": "assumed:沿用旧表 mbu=0.20；有效访存带宽 1.6e12×0.20 B/s",
+            "launch_overhead_ms": "assumed:0 为未计价占位，不表示 launch 已测为零；T0 不逐核收取",
+            "sm_count": "assumed:不适用，NPU 不提供 CUDA SM 数，不复用 FlashMLA 调度器",
+            "card_count": "assumed:旧表 num_npus=8 默认组规模；实际卡数由场景 TP 指定，非八卡执行证据",
+            "provenance": "assets/identity/devices/ascend_910b3/manifest.json；"
+                          "旧仓 H3 场景明确把 910B3 映射到 ascend_910B_64G",
+        },
+    ),
 }
 
 # V4.1 packed KV record family by registered device. Source: pinned
