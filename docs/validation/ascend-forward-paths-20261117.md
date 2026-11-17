@@ -26,7 +26,7 @@ forward 是否接通”。
 |---|---|---|
 | R06 探针 | `tools/probe_qwen36_forward_r06.py` L1-19、L104-305：importlib 加载 pin 的 HF `modeling_qwen3_5_moe.py`，32 隐藏维、2 层、随机权重、CPU | HF CPU fixture，不是 Ascend forward |
 | PR21 证据 | `docs/validation/ascend-910b3-20261117.md` （见该报告的重新审查结论）：算子级 ACL/torch 池、HCCL、SwiGLU/MoE/MRoPE 代理 | `torch_npu` 算子代理，不是完整模型 forward |
-| vLLM Qwen3.6 注册 | `D:/Github/vllm/vllm/model_executor/models/registry.py` L203-204（`Qwen3_5MoeForCausalLM`）、L596-599（`Qwen3_5MoeForConditionalGeneration`） | 真实模型类在 vLLM 中，`qwen3_5` 模块 |
+| vLLM Qwen3.6 注册 | `vLLM 仓库内 vllm/model_executor/models/registry.py` L203-204（`Qwen3_5MoeForCausalLM`）、L596-599（`Qwen3_5MoeForConditionalGeneration`） | 真实模型类在 vLLM 中，`qwen3_5` 模块 |
 | vllm-ascend Qwen3.6 插件 | `vllm_ascend/patch/worker/patch_qwen3_5.py` L205 替换 `Qwen3NextAttention.forward`、L206-225 patch GDN；`vllm_ascend/patch/worker/__init__.py` L39 导入 | Ascend 注意力/GDN 路径由插件接管 |
 | Qwen3.6 官方支持 | vllm-ascend `docs/source/tutorials/models/Qwen3.6-35B-A3B.md` L9（v0.18.0rc1 起）、L23-24（A3 16×64GB / A2 8×64GB）、L195-196（TP2 + EP）、L219（W8A8 用 `--quantization ascend`） | 官方文档支持 Qwen3.6-35B-A3B，A2/A3 |
 | Qwen3.6 身份测试 | `tests/e2e/pull_request/two_card/model_runner_v2/test_qwen3_6_mtp.py` L24 使用 `Qwen/Qwen3.6-35B-A3B`，L102 TP2 MTP acceptance | 真实 Qwen3.6-35B-A3B 测试存在 |
@@ -287,3 +287,29 @@ REFUSED [execute_blocked] ...; exit 2
 [Qwen3.6 双卡测试](https://github.com/vllm-project/vllm-ascend/blob/baa023ada41a5b889cac6249845a688aab130892/tests/e2e/pull_request/two_card/model_runner_v2/test_qwen3_6_mtp.py)、
 [V4.1 部署及 host offload](https://github.com/vllm-project/vllm-ascend/blob/baa023ada41a5b889cac6249845a688aab130892/docs/source/tutorials/models/DeepSeek-V4.1-Flash.md)。
 源码阅读没有冒充上游测试运行。实际测试结果以[实施状态](../IMPLEMENTATION_STATUS.md)为准。
+
+
+## 贡献者环境与路径约定（R28 后续修复）
+
+工具不需要作者机器上的参考仓。上游源码身份用仓库 URL + 固定 commit 记录；
+`source_manifest.json` schema 2 的 `hashes[].repository` 指向 `references`，
+`hashes[].path` 是该仓库根目录下的相对路径，文件 SHA256 保持原值。
+需要复核源码时，可在任意目录检出对应仓库的指定提交；这些目录不参与执行器导入。
+
+实际执行使用运行命令所选 Python 环境中安装的 `vllm`、`vllm_ascend` 与 `torch_npu`。
+wheel 或 editable 安装都应按上游配套版本要求配置，不通过硬编码路径或额外
+`sys.path` 注入切换后端。可用同一个解释器核对实际加载位置：
+
+```bash
+python3 -c "import vllm, vllm_ascend; print(vllm.__file__); print(vllm_ascend.__file__)"
+python3 /your/checkout/tools/ascend_forward_probe.py --profile qwen36-local \
+  --model-path /your/local/weights/Qwen3.6-35B-A3B --out /your/output/plan.json
+```
+
+命令中的路径由贡献者自行指定；先 dry-run，再按报告中的要求执行。
+本仓配置与默认 fixture 输出目录通过脚本自身位置定位，不依赖当前工作目录。
+生成的 run/plan 中可保留本次实际模型和输出的绝对路径用于本机重放；它们不是
+其他贡献者必须使用的安装位置。参考源码 commit 仍不冒充已安装运行栈 commit。
+
+新增迁移回归将脚本和三份仓内数据复制到带空格的另一目录，从不同工作目录用
+隔离 Python 子进程生成计划，不附带上游参考仓；核对 URL 身份和新位置解析。
