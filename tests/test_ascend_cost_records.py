@@ -232,7 +232,7 @@ def test_api_cli_json_csv_trace_and_coverage_are_consistent(tmp_path):
     assert "记录成本覆盖" in html.read_text(encoding="utf-8")
     from simverse.experiments.sweep_v2 import sweep_1d
     point = sweep_1d(sc, "workload.batch", [1])["points"][0]
-    assert point["metric_key"] == "M01_record_tpot"
+    assert point["metric_key"] == "M01_tpot_selected"  # canonical selection; legacy alias remains in the bundle
     assert point["tpot_ms"] == expected["metrics"]["M01_record_tpot"]["value"]
 
 

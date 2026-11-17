@@ -47,7 +47,11 @@ def _snapshot(bundle: dict) -> dict:
         "metric_values": {k: v.get("value") for k, v in
                           bundle.get("metrics", {}).items()
                           if isinstance(v, dict) and "value" in v
-                          and k != "M02_speedup_vs_baseline"},
+                          # Explicit additive views introduced after the R26
+                          # freeze; every metric present in R26 still compares.
+                          and k not in ("M02_speedup_vs_baseline", "M01_tpot_selected",
+                                        "M01_baseline_selected", "M02_speedup_selected",
+                                        "M04_round_selected")},
     }
 
 

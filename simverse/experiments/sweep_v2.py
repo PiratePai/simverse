@@ -43,10 +43,10 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
         else:
             raise ValueError(f"未知扫描维度 {field_path}")
         bundle = run_v2(sc)
-        chosen_key = ("M01_record_tpot" if base.cost_records and metric_key == "M01_tpot_analytical"
-                      and "M01_record_tpot" in bundle.metrics else metric_key)
+        chosen_key = ("M01_tpot_selected" if metric_key == "M01_tpot_analytical"
+                      and "M01_tpot_selected" in bundle.metrics else metric_key)
         met = bundle.metrics.get(chosen_key)
-        baseline = bundle.metrics.get("M01_record_baseline") or bundle.metrics.get("M01_tpot_baseline")
+        baseline = bundle.metrics.get("M01_baseline_selected") or bundle.metrics.get("M01_tpot_baseline")
         record = bundle.cost.get("record_cost") or {}
         points.append({
             "value": v,
@@ -62,8 +62,7 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
         })
     return {"schema_version": "0.2", "field": field_path,
             "base_digest": base.scenario_digest(),
-            "metric_key": ("record-cost-if-matched-else-analytical"
-                           if base.cost_records and metric_key == "M01_tpot_analytical" else metric_key),
+            "metric_key": "M01_tpot_selected" if metric_key == "M01_tpot_analytical" else metric_key,
             "points": points}
 
 

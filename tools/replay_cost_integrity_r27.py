@@ -180,7 +180,19 @@ def check() -> None:
             f"{r['stage']}:{r['layer']}:{r['op']}" for r in rows}
         comparable = dict(fresh)
         comparable["cost"] = {k: v for k, v in fresh["cost"].items()
-                              if k != "row_prices"}
+                              if k not in ("row_prices", "groups", "selection")}
+        # Additive cost-selection views (2026-11-18); keep comparing every old
+        # metric and all old cost fields against the immutable R27 artifact.
+        comparable["metrics"] = {k:v for k,v in fresh["metrics"].items() if k not in (
+            "M01_tpot_selected", "M01_baseline_selected", "M02_speedup_selected", "M04_round_selected",
+            "M18_selected_cohort_period_ms")}
+        # HEAD necessarily changes after R27. Verify current identity, then
+        # compare the immutable numerical artifact independently of code identity.
+        from simverse.contracts import RunManifest
+        current_manifest = RunManifest(**fresh["manifest"])
+        assert current_manifest.compute_run_id() == fresh["manifest"]["run_id"]
+        comparable["manifest"] = {k:v for k,v in fresh["manifest"].items() if k not in ("code_revision", "run_id")}
+        committed["manifest"] = {k:v for k,v in committed["manifest"].items() if k not in ("code_revision", "run_id")}
         # ② 当前代码复现已提交 after（确定性）
         if comparable != committed:
             ok = False
@@ -188,6 +200,12 @@ def check() -> None:
     att = build_attribution()
     committed_att = json.loads((FOLDER / "attribution.json").read_text(
         encoding="utf-8"))
+    for report in (att, committed_att):
+        ids = report["v41_chain_pipeline_metric_merge"]
+        assert ids["run_id_before"] != ids["run_id_after"], "执行模式变化必须改变运行身份"
+        # Current run ID is checked above; frozen IDs remain untouched on disk.
+        report["v41_chain_pipeline_metric_merge"].pop("run_id_before", None)
+        report["v41_chain_pipeline_metric_merge"].pop("run_id_after", None)
     if json.dumps(att, sort_keys=True) != json.dumps(
             committed_att, sort_keys=True):
         ok = False
@@ -201,7 +219,6 @@ def check() -> None:
     assert a["M19_t2d_statistic"] == "expectation"
     e = att["v41_chain_pipeline_metric_merge"]
     assert e["host_note_preserved"], "Engram host 警告被流水模式覆盖"
-    assert e["run_id_before"] != e["run_id_after"]
     # ④ V4.1 GEMM 档修正的逐类归因一致性：M01 差 == gemm 类 t 差（elementwise 类 0）
     v = att["v41_dtype_route"]
     cls = v["opclass"]["target_decode"]

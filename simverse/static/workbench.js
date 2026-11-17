@@ -400,22 +400,18 @@
     $('kpi-tpot-sub').textContent = tpotReason
       ? '原因：' + tpotReason.slice(0, 46)
       : 'E[T_round]/E[N] · committed · 解析';
-    var tpotC = val(b, 'M01_tpot_profile_calibrated');
-    if (tpotC !== null) {
-      $('kpi-tpot').textContent = fmt(tpotC, 'ms', 4);
-      $('kpi-tpot-sub').textContent = '实测校准（算子级组合；解析值 '
-        + fmt(tpot, 'ms', 4) + ' 保留在指标区）';
+    var chosen = metric(b, 'M01_tpot_selected') || metric(b, 'M01_tpot_analytical');
+    var selection = (b.cost || {}).selection || {};
+    $('kpi-tpot-label').textContent = 'M01 等效 TPOT（成本组）';
+    if (chosen) {
+      $('kpi-tpot').textContent = fmt(chosen.value, 'ms', 4);
+      $('kpi-tpot-sub').textContent = (selection.source === 'records' ? '记录条件对照' :
+        selection.source === 'profile' ? 'profile 组级组合' : '解析成本组')
+        + '；纯解析 ' + fmt(tpot, 'ms', 4) + ' · 仅含已计价阶段';
     }
-    var recordTpot = val(b, 'M01_record_tpot');
-    $('kpi-tpot-label').textContent = recordTpot !== null
-      ? 'M01 等效 TPOT（记录条件对照）'
-      : (tpotC !== null ? 'M01 等效 TPOT（算子校准组合）' : 'M01 等效 TPOT（解析）');
-    if (recordTpot !== null) {
-      $('kpi-tpot').textContent = fmt(recordTpot, 'ms', 4);
-      $('kpi-tpot-sub').textContent = '记录条件对照；纯解析 ' + fmt(tpot, 'ms', 4) + '（原值保留）';
-    }
-    var base = val(b, 'M01_tpot_baseline');
-    var sp = metric(b, 'M02_record_speedup') || metric(b, 'M02_speedup_vs_baseline');
+    var base = val(b, 'M01_baseline_selected');
+    if (base === null) base = val(b, 'M01_tpot_baseline');
+    var sp = metric(b, 'M02_speedup_selected') || metric(b, 'M02_speedup_vs_baseline');
     $('kpi-speedup').textContent = sp && sp.value !== null
       ? fmt(sp.value, '×', 3) : '未知';
     $('kpi-speedup-sub').textContent = sp && sp.reason
@@ -427,7 +423,7 @@
       + ' / K=' + (val(b, 'M03_K') || 0) : '未知';
     $('kpi-en-sub').textContent = reason(b, 'M03_E_N')
       ? '原因：' + reason(b, 'M03_E_N').slice(0, 40) : '假设输入（Q8）';
-    var round = val(b, 'M04_record_round_ms');
+    var round = val(b, 'M04_round_selected');
     if (round === null) round = val(b, 'M04_round_ms');
     $('kpi-round').textContent = round !== null ? fmt(round, 'ms', 3) : '未知';
     var br = b.metrics['M04_stage_breakdown_ms'] || {};
@@ -436,8 +432,8 @@
         return k.replace('_block', '').replace('draft_', 'd:') +
           ' ' + fmt(br[k].value, '', 2);
       }).join(' + ').slice(0, 60) : '—';
-    if (val(b, 'M04_record_round_ms') !== null)
-      $('kpi-round-sub').textContent = '条件记录成本；纯解析 ' + fmt(val(b, 'M04_round_ms'), 'ms', 3);
+    if (selection.source && selection.source !== 'analytic')
+      $('kpi-round-sub').textContent = '组级选用成本；纯解析 ' + fmt(val(b, 'M04_round_ms'), 'ms', 3);
     var moe = metric(b, 'M05_moe_union');
     $('kpi-moe').textContent = moe ? fmtBytes(moe.value) + '/层' : '–';
     renderMemory(b);
@@ -459,6 +455,7 @@
     renderTimeline(b);
     renderEvidence(b);
     renderRecordCosts(b);
+    renderCostGroups(b);
   }
 
   // ---------- M06 显存（逐端；target/draft 不合并；detail 非 Metric） ----------
@@ -610,6 +607,7 @@
         '">' + (a.flops / 1e6).toFixed(1) + ' MF</span></div>';
       var activate = function () {
         state.selectedRowKey = a.op;
+        $('row-detail-panel').open = true;
         renderInspector(a);
         list.querySelectorAll('.dag-node').forEach(function (n2) {
           n2.classList.remove('active');
@@ -856,7 +854,7 @@
   // ---------- timeline（事件来自 execution.rounds，含依赖） ----------
   function renderTimeline(b) {
     var rc = (b.cost || {}).record_cost;
-    var execution = rc && rc.matched ? rc.selected_execution : b.execution;
+    var execution = ((b.cost || {}).selection || {}).execution || b.execution;
     var rounds = (execution && execution.rounds) || [];
     var evs = (rounds[0] && rounds[0].events) || [];
     var el = $('timeline');
@@ -898,6 +896,37 @@
   }
 
   // ---------- evidence drawer ----------
+  function renderCostGroups(b) {
+    var groups = (b.cost || {}).groups || [], panel = $('cost-groups-panel');
+    panel.hidden = !groups.length;
+    var labels = {attention:'注意力', gdn:'GDN', moe:'MoE', embedding_head:'嵌入与输出头',
+      norm_residual:'归一化与残差', cache_index:'缓存与索引', engram:'Engram',
+      communication:'通信', point_to_point:'点到点传输', runtime_other:'其他运行时', unpriced_runtime:'未计价运行时',
+      analytic_fallback:'解析回退', profile_boundary_gap:'采样区间边界间隙'};
+    var html = '<p>默认按成本组查看耗时，逻辑计数仍可展开。解析组汇总已有计价项，不额外假设融合；'
+      + '融合组实测不分摊成逐行实测值。独立基线和投机轮分列，不能把全表相加当成单轮耗时。</p>'
+      + '<div style="overflow-x:auto"><table class="plain"><tr><th>阶段 / 成本组</th><th>拥有项</th>'
+      + '<th>解析 ms</th><th>选用 ms</th><th>来源与边界</th></tr>';
+    groups.forEach(function (g) {
+      html += '<tr><td>' + esc(g.stage) + ' / ' + esc(labels[g.group] || g.group)
+        + (g.primitive ? ' · ' + esc(g.primitive) : '') + '</td><td>' + (g.members || []).length
+        + '</td><td>' + fmt(g.analytic_ms, '', 4) + '</td><td>' + fmt(g.selected_ms, '', 4)
+        + '</td><td>' + esc(g.source === 'analytic' ? '解析汇总' : g.source === 'unknown' ? '未知' :
+          g.source === 'measured' ? '实测组总时间' : g.source === 'assumed' ? '显式假设' : '条件记录 + 解析回退')
+        + '<details><summary>查看边界与归属</summary><p>' + esc(g.reason || g.basis || '')
+        + '</p><pre>' + esc(JSON.stringify({members:g.members, record_refs:g.record_refs,
+          fallback_reasons:g.fallback_reasons, ownership:g.ownership}, null, 2)) + '</pre></details></td></tr>';
+    });
+    $('cost-groups-body').innerHTML = html + '</table></div>';
+  }
+
+  function exportGroups() {
+    if (!state.bundle) return;
+    var cols = ['stage','role','group','primitive','analytic_ms','selected_ms','source','timing_boundary','basis'];
+    var rows = ((state.bundle.cost || {}).groups || []);
+    download('simverse-cost-groups.csv', window.simverseCsv.toCsv(cols, rows), 'text/csv');
+  }
+
   function renderRecordCosts(b) {
     var rc = (b.cost || {}).record_cost, panel = $('cost-records-panel');
     if (!panel) return;
@@ -1094,9 +1123,9 @@
         return;
       }
       state.matrixRuns[deploy + '-' + method] = b;
-      var tpot = val(b, 'M01_record_tpot');
+      var tpot = val(b, 'M01_tpot_selected');
       if (tpot === null) tpot = val(b, 'M01_tpot_analytical');
-      var sp = metric(b, 'M02_record_speedup') || metric(b, 'M02_speedup_vs_baseline');
+      var sp = metric(b, 'M02_speedup_selected') || metric(b, 'M02_speedup_vs_baseline');
       if (tpot === null) {
         td.className = 'mx-cell na';
         td.innerHTML = '未知<div style="font-size:9.5px;font-weight:400">' +
@@ -1248,6 +1277,7 @@
   $('btn-sweep').addEventListener('click', runSweep);
   $('btn-export-json').addEventListener('click', exportJson);
   $('btn-export-csv').addEventListener('click', exportCsv);
+  $('btn-export-groups').addEventListener('click', exportGroups);
   loadCatalog();
 
   // 浏览器验收钩子（仅 ?testhook=1 时暴露；不影响正常运行）

@@ -234,11 +234,15 @@ def _ops_csv_v2(bundle: dict) -> str:
 def _trace_csv_v2(bundle: dict) -> str:
     cols = ["event_id", "round_id", "role", "stage", "t_ms", "start_ms",
             "depends_on", "label"]
-    record = (bundle.get("cost") or {}).get("record_cost") or {}
-    execution = record.get("selected_execution") if record.get("matched") else bundle.get("execution")
+    execution = ((bundle.get("cost") or {}).get("selection") or {}).get("execution") or bundle.get("execution")
     events = [e for rnd in (execution or {}).get("rounds") or []
               for e in rnd.get("events") or []]
     return _csv(cols, events)
+
+
+def _groups_csv_v2(bundle: dict) -> str:
+    cols = ["stage", "role", "group", "primitive", "analytic_ms", "selected_ms", "source", "timing_boundary", "basis"]
+    return _csv(cols, (bundle.get("cost") or {}).get("groups") or [])
 
 
 def _report_html_v2(bundle: dict) -> str:
@@ -282,6 +286,11 @@ def _report_html_v2(bundle: dict) -> str:
         details = "<h3>记录成本覆盖、回退与补采计划</h3><pre>" + escape(
             json.dumps(summary, ensure_ascii=False, indent=2)) + "</pre>"
         html = html.replace("</body>", details + "</body>")
+    groups = (bundle.get("cost") or {}).get("groups")
+    if groups:
+        detail = "<h3>阶段与成本组</h3><p>解析组汇总原有计价项；融合组实测不向逻辑行分摊。未知阶段不计作零。</p><pre>" + escape_html(
+            json.dumps(groups, ensure_ascii=False, indent=2)) + "</pre>"
+        html = html.replace("</body>", detail + "</body>")
     return html
 
 
@@ -303,6 +312,9 @@ def cmd_run_v2(args):
     if args.csv:
         Path(args.csv).write_text(_ops_csv_v2(bundle), encoding="utf-8")
         print(f"已写 {args.csv}")
+    if args.groups_csv:
+        Path(args.groups_csv).write_text(_groups_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.groups_csv}")
     if args.trace:
         Path(args.trace).write_text(_trace_csv_v2(bundle), encoding="utf-8")
         print(f"已写 {args.trace}")
@@ -316,10 +328,8 @@ def _summary_v2(bundle: dict):
     print(f"status={man['status']} run_id={man['run_id'][:19]}... "
           f"code={man['code_revision'][:10]}")
     m = bundle.get("metrics") or {}
-    for key in ("M01_tpot_analytical", "M01_tpot_profile_calibrated",
-                "M01_record_tpot", "M01_record_baseline", "M02_record_speedup",
-                "M01_tpot_baseline", "M02_speedup_vs_baseline", "M03_E_N",
-                "M04_round_ms"):
+    for key in ("M01_tpot_selected", "M01_baseline_selected", "M02_speedup_selected",
+                "M01_tpot_analytical", "M03_E_N", "M04_round_selected"):
         x = m.get(key)
         if not x:
             continue
@@ -358,6 +368,9 @@ def cmd_export_v2(args):
     if args.csv:
         Path(args.csv).write_text(_ops_csv_v2(bundle), encoding="utf-8")
         print(f"已写 {args.csv}")
+    if args.groups_csv:
+        Path(args.groups_csv).write_text(_groups_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.groups_csv}")
     if args.trace:
         Path(args.trace).write_text(_trace_csv_v2(bundle), encoding="utf-8")
         print(f"已写 {args.trace}")
@@ -413,6 +426,7 @@ def main(argv=None):
     p_r2.add_argument("scenario", nargs="?", default=None)
     p_r2.add_argument("-o", "--out", default=None)
     p_r2.add_argument("--csv", default=None)
+    p_r2.add_argument("--groups-csv", default=None, help="默认耗时口径：成本组 CSV；--csv 保留细粒度诊断")
     p_r2.add_argument("--trace", default=None)
     p_r2.add_argument("--html", default=None)
     p_r2.add_argument("--cost-profile", default=None,
@@ -425,6 +439,7 @@ def main(argv=None):
     p_e2 = sub.add_parser("export-v2", help="从 v0.2 ResultBundle 导出四类文件")
     p_e2.add_argument("run")
     p_e2.add_argument("--csv", default=None)
+    p_e2.add_argument("--groups-csv", default=None)
     p_e2.add_argument("--trace", default=None)
     p_e2.add_argument("--html", default=None)
     p_e2.set_defaults(fn=cmd_export_v2)
