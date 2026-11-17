@@ -426,6 +426,19 @@ def test_stub_execution_wiring_is_explicitly_non_hardware(monkeypatch, workdir):
 
 def test_source_manifest_matches_tool_constants():
     manifest = json.loads(SOURCE_MANIFEST.read_text(encoding="utf-8"))
+    from pathlib import PurePosixPath, PureWindowsPath
+    assert manifest["schema_version"] == "2"
+    assert manifest["references"]["vllm"]["url"] == AFP.VLLM_REPO
+    assert manifest["references"]["vllm_ascend"]["url"] == AFP.VLLM_ASCEND_REPO
+    for reference in manifest["references"].values():
+        assert reference["url"].startswith("https://github.com/")
+        assert "path" not in reference
+        assert len(reference["commit"]) == 40
+    for item in manifest["hashes"]:
+        assert item["repository"] in manifest["references"]
+        assert not PurePosixPath(item["path"]).is_absolute()
+        assert not PureWindowsPath(item["path"]).drive
+        assert ".." not in PurePosixPath(item["path"]).parts
     assert manifest["references"]["vllm"]["commit"] == AFP.VLLM_COMMIT
     assert manifest["references"]["vllm_ascend"]["commit"] == AFP.VLLM_ASCEND_COMMIT
     assert manifest["verified_pins"]["vllm_main"] == AFP.VLLM_VERIFIED_MAIN
@@ -438,7 +451,7 @@ def test_source_manifest_matches_tool_constants():
     )
     expected_suffix = "assets/config/qwen36_35b_a3b_main__config.json"
     assert any(
-        item["path"].replace("\\", "/").endswith(expected_suffix)
+        item["repository"] == "simverse" and item["path"] == expected_suffix
         and item["sha256"] == AFP._sha256_file(SOURCE_CONFIG)
         for item in manifest["hashes"]
     )
@@ -446,6 +459,30 @@ def test_source_manifest_matches_tool_constants():
         manifest["deepseek_v41"]["vllm_ascend_registration"]["condition"]
         == "not vllm_version_is('0.29.0')"
     )
+
+
+def test_probe_runs_from_relocated_checkout_without_reference_repositories(workdir):
+    import subprocess
+    relocated = workdir / "contributor checkout"
+    # Only the runner and its three in-repo data files; no upstream checkout.
+    for source in (TOOL, SOURCE_CONFIG, FIXTURE_SPEC, SOURCE_MANIFEST):
+        target = relocated / source.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    output = workdir / "relocated-plan.json"
+    result = subprocess.run(
+        [sys.executable, "-I", str(relocated / "tools/ascend_forward_probe.py"),
+         "--profile", "qwen36-fixture", "--out", str(output)],
+        cwd=workdir, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(output.read_text(encoding="utf-8"))
+    assert plan["sources"]["vllm"]["repo"] == "https://github.com/vllm-project/vllm"
+    assert plan["sources"]["vllm_ascend"]["repo"] == "https://github.com/vllm-project/vllm-ascend"
+    assert Path(plan["identity"]["source_config_path"]).is_relative_to(relocated)
+    assert Path(plan["engine"]["args"]["model"]).is_relative_to(relocated)
+    assert not Path(plan["engine"]["args"]["model"]).exists()
+    assert plan["claims"]["hardware_executed"] is False
 
 
 def test_default_factories_use_keyword_parameters(monkeypatch, workdir):

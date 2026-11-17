@@ -55,9 +55,9 @@ DEFAULT_RUNTIME_DIR = ROOT / ".tmp" / "r28" / "ascend_forward"
 # Source pins actually read for this change.  These are intentionally constants
 # (not resolved from the local file system) so the artifact records what was
 # reviewed even when the tool runs on a different machine.
-VLLM_REPO = "D:/Github/vllm"
+VLLM_REPO = "https://github.com/vllm-project/vllm"
 VLLM_COMMIT = "6b858751f6e99c4f33913657dc0c2afd34ff13e6"
-VLLM_ASCEND_REPO = "D:/Github/vllm-ascend-main"
+VLLM_ASCEND_REPO = "https://github.com/vllm-project/vllm-ascend"
 VLLM_ASCEND_COMMIT = "baa023ada41a5b889cac6249845a688aab130892"
 VLLM_VERIFIED_MAIN = "84030bbe3d74d99bad477a3d2e37a973ccd8865c"
 VLLM_RELEASE_TAG = "v0.29.0"
