@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-11-17",
+  "source_commit": "6a16fbed8e6dc0982ed9abdea0ea1df6c006e429",
+  "original_manifest_sha256": "f7a3c31eca12d5e4d55f22b35d6f8ea95c5ccb07d5d67ece29cfe6455f4a72fa",
+  "original_readme_sha256": "a963401ae418275b419d4f6a966044227fa2b1e6520dea7607cc5316d58e26bc",
+  "raw_files_unchanged": {
+    "diag_hccl.log": {
+      "sha256": "57767a39ec71b0d2d1c1567234adf54fcd4e6f5ad0c9fc2b4c18fe56cd08d3ec",
+      "bytes": 727
+    },
+    "env.txt": {
+      "sha256": "36220c49c3a95558a33fffdeeb44d6c132a5ad8051a9cdb3a52f0aed3a0133dc",
+      "bytes": 94
+    },
+    "msprof_by_shape.txt": {
+      "sha256": "251351bcfad8a0a666ab627f76bc5b56a75027b20e19034ae592f53adfcfa4f5",
+      "bytes": 580
+    },
+    "msprof_op_summary.txt": {
+      "sha256": "b28cb1d73ee511224190d303a9fdbedb8d35de31182018c31df9f2d68a0de6a9",
+      "bytes": 375
+    },
+    "p0a_budget_acl.json": {
+      "sha256": "88fb37574cf05cefdebfbc2d204be3bf8edefef84edd6260f4f7f3e7f776763b",
+      "bytes": 1533
+    },
+    "p0b_budget_torch.json": {
+      "sha256": "8e9a60ce93148f16f2db10271e5202c347e898a8736c9009eb6716d2bdffa44f",
+      "bytes": 1851
+    },
+    "p1a_runtime_pools.json": {
+      "sha256": "604f62a43a2e1bac86947418a70b3c1e71d84c98e9cc8833d13e3678acf74ba5",
+      "bytes": 1221
+    },
+    "p1b_hccl_batch_rank0.json": {
+      "sha256": "01cd15521745fddb66af596944e7213057acf0aa29bf21aad4dd03f0cabb1e25",
+      "bytes": 9910
+    },
+    "p1b_hccl_batch_rank1.json": {
+      "sha256": "bf85b0d75be5cf29a1926207175bbe5225de24381792a5d3c22d3e189e495d42",
+      "bytes": 9919
+    },
+    "p2_bench_bw.txt": {
+      "sha256": "49aad0b9a486551f5d2fccac7f44d85e146109f3a1294c56835ecbf2b0979b0a",
+      "bytes": 120
+    },
+    "p2_bench_gemm.txt": {
+      "sha256": "ac941d91d051dc9fe0807e9716d2a05c5653d498eda61197cf850a12c98ed75e",
+      "bytes": 340
+    },
+    "p2_moe_route.json": {
+      "sha256": "a9fcfe2bcd3c5b93411b1b0d60c02011ba352f16f96c87853d741228431b4e61",
+      "bytes": 2506
+    },
+    "p2_mrope.json": {
+      "sha256": "663c59443e3b2d58375aa59923ff8fd15ad48185dcba09cad27e369335e5ded0",
+      "bytes": 1219
+    },
+    "p2_mrope_identity.json": {
+      "sha256": "531375078f5d47f50b7be83f5ae42b3af46a69b443898ede0f0dfb8e1274c82d",
+      "bytes": 240
+    },
+    "p2_swiglu.json": {
+      "sha256": "07fa416edd9c11f96b808c0dc9218f0beab0d0f16e9007aeebdc36a28accd8fa",
+      "bytes": 4214
+    },
+    "p3_per_op_qwen.json": {
+      "sha256": "004249cb6aa2514946b62430b4a8ee20645ef358a576cc3e0bb13881042f877d",
+      "bytes": 10470
+    },
+    "scripts/mini_ops.py": {
+      "sha256": "6c346dfaeecf228b347355dca83c18bba71db349cf177a539d957fc6dc6fe23c",
+      "bytes": 431
+    },
+    "scripts/p0a_budget_acl.py": {
+      "sha256": "d3b3460fdad38bc26bc6ed8d7337206e12a9a5eac54938971bc1f74ce9220965",
+      "bytes": 1484
+    },
+    "scripts/p0b_budget_torch.py": {
+      "sha256": "20b5516609d6540b133ee3c356d7fe9e1196c6982ab7a67c447f2df5f4eaa38e",
+      "bytes": 1483
+    },
+    "scripts/p1a_runtime_pools.py": {
+      "sha256": "7f07422b6ab46bcab2201315977b0244715c26715b122f4c1bfacca751aa7715",
+      "bytes": 2554
+    },
+    "scripts/p1b_hccl.py": {
+      "sha256": "9ba72852e7b08e019627ffcc614102abab54ce655799d0741e917e813d1022fa",
+      "bytes": 3824
+    },
+    "scripts/p1b_hccl_batch.py": {
+      "sha256": "b294e0fd7114ad47da2e610bc60b8ed525df5d8efc837ef62f39be2668e95499",
+      "bytes": 3745
+    },
+    "scripts/p2_bench_bw.py": {
+      "sha256": "3291d5433053f07e3716d962db3336688c834c874a9d0101766fa8557f8bb0a9",
+      "bytes": 1219
+    },
+    "scripts/p2_bench_gemm.py": {
+      "sha256": "d78a4d9d9e859f2dfe9319a91bb0d81e235da8b40fe2660eb0fca59d30ce00f3",
+      "bytes": 1006
+    },
+    "scripts/p2_moe_route.py": {
+      "sha256": "60d852095e9991e693cd74123e7952a52bb03f87d7abdcbd009ed81bba5ead6c",
+      "bytes": 3150
+    },
+    "scripts/p2_mrope.py": {
+      "sha256": "ecda2d273ed703702f80b8f8a27a058e90a3c83ae12ec4a6442c1cebfda7394d",
+      "bytes": 2630
+    },
+    "scripts/p2_swiglu.py": {
+      "sha256": "4c021399178fb731e3f4bfb4515050690e15621288e9dce2148c69e08237b10a",
+      "bytes": 2775
+    },
+    "scripts/p3_per_op.py": {
+      "sha256": "23d2cc2c618ec596071a957d61798c9f2bc6e64c8259fe776927ba6720c6f5a1",
+      "bytes": 7474
+    }
+  },
+  "derivation_kind": "offline-review-not-new-measurement",
+  "calibration_admission": "not-admitted",
+  "deployment_ranking_eligible": false,
+  "blocked_uses": [
+    "production-profile",
+    "pure-launch-cost",
+    "pure-graph-pool",
+    "reduce-scatter-bandwidth",
+    "mrope-identity-proof",
+    "model-forward-proof",
+    "eight-card-topology"
+  ],
+  "reasons": [
+    "Missing raw profiler samples, invocation correlation, source scenario and full environment identity",
+    "Proxy and dtype mismatch; no model-level forward or fused-kernel equivalence",
+    "Archived collector defects require a new run, not edited measurements"
+  ],
+  "allreduce": {
+    "definition": "algbw=bytes/(median_ms*1e6); normalized busbw=algbw*2*(P-1)/P, not measured physical link bandwidth",
+    "world_size": 2,
+    "points": [
+      {
+        "rank": 0,
+        "bytes_per_rank": 1024,
+        "median_ms": 0.161147,
+        "original_busbw_GBps": 0.003,
+        "derived_algbw_GBps": 0.006354446561214295,
+        "derived_busbw_GBps": 0.006354446561214295
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 4096,
+        "median_ms": 0.161204,
+        "original_busbw_GBps": 0.013,
+        "derived_algbw_GBps": 0.025408798789111932,
+        "derived_busbw_GBps": 0.025408798789111932
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 16384,
+        "median_ms": 0.156048,
+        "original_busbw_GBps": 0.052,
+        "derived_algbw_GBps": 0.10499333538398442,
+        "derived_busbw_GBps": 0.10499333538398442
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 65536,
+        "median_ms": 0.154888,
+        "original_busbw_GBps": 0.211,
+        "derived_algbw_GBps": 0.42311864056608645,
+        "derived_busbw_GBps": 0.42311864056608645
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 262144,
+        "median_ms": 0.158197,
+        "original_busbw_GBps": 0.829,
+        "derived_algbw_GBps": 1.6570731429799554,
+        "derived_busbw_GBps": 1.6570731429799554
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 1048576,
+        "median_ms": 0.159053,
+        "original_busbw_GBps": 3.296,
+        "derived_algbw_GBps": 6.592620070039547,
+        "derived_busbw_GBps": 6.592620070039547
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 4194304,
+        "median_ms": 0.260601,
+        "original_busbw_GBps": 8.047,
+        "derived_algbw_GBps": 16.09473486287466,
+        "derived_busbw_GBps": 16.09473486287466
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 16777216,
+        "median_ms": 0.945386,
+        "original_busbw_GBps": 8.873,
+        "derived_algbw_GBps": 17.74641892306423,
+        "derived_busbw_GBps": 17.74641892306423
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 67108864,
+        "median_ms": 3.688599,
+        "original_busbw_GBps": 9.097,
+        "derived_algbw_GBps": 18.193591659055375,
+        "derived_busbw_GBps": 18.193591659055375
+      },
+      {
+        "rank": 0,
+        "bytes_per_rank": 268435456,
+        "median_ms": 14.560769,
+        "original_busbw_GBps": 9.218,
+        "derived_algbw_GBps": 18.435527409300978,
+        "derived_busbw_GBps": 18.435527409300978
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 1024,
+        "median_ms": 0.162614,
+        "original_busbw_GBps": 0.003,
+        "derived_algbw_GBps": 0.006297120789107949,
+        "derived_busbw_GBps": 0.006297120789107949
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 4096,
+        "median_ms": 0.161222,
+        "original_busbw_GBps": 0.013,
+        "derived_algbw_GBps": 0.025405961965488583,
+        "derived_busbw_GBps": 0.025405961965488583
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 16384,
+        "median_ms": 0.157173,
+        "original_busbw_GBps": 0.052,
+        "derived_algbw_GBps": 0.10424182270491751,
+        "derived_busbw_GBps": 0.10424182270491751
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 65536,
+        "median_ms": 0.15385,
+        "original_busbw_GBps": 0.213,
+        "derived_algbw_GBps": 0.4259733506662333,
+        "derived_busbw_GBps": 0.4259733506662333
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 262144,
+        "median_ms": 0.158173,
+        "original_busbw_GBps": 0.829,
+        "derived_algbw_GBps": 1.6573245749906749,
+        "derived_busbw_GBps": 1.6573245749906749
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 1048576,
+        "median_ms": 0.159058,
+        "original_busbw_GBps": 3.296,
+        "derived_algbw_GBps": 6.592412830539803,
+        "derived_busbw_GBps": 6.592412830539803
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 4194304,
+        "median_ms": 0.260556,
+        "original_busbw_GBps": 8.049,
+        "derived_algbw_GBps": 16.097514545817408,
+        "derived_busbw_GBps": 16.097514545817408
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 16777216,
+        "median_ms": 0.945562,
+        "original_busbw_GBps": 8.871,
+        "derived_algbw_GBps": 17.743115734346347,
+        "derived_busbw_GBps": 17.743115734346347
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 67108864,
+        "median_ms": 3.690356,
+        "original_busbw_GBps": 9.092,
+        "derived_algbw_GBps": 18.18492958402929,
+        "derived_busbw_GBps": 18.18492958402929
+      },
+      {
+        "rank": 1,
+        "bytes_per_rank": 268435456,
+        "median_ms": 14.559908,
+        "original_busbw_GBps": 9.219,
+        "derived_algbw_GBps": 18.43661759401227,
+        "derived_busbw_GBps": 18.43661759401227
+      }
+    ]
+  },
+  "graph": {
+    "raw_before_minus_after_bytes": 35651584,
+    "raw_before_minus_warmup_baseline_bytes": 35651584,
+    "derived_baseline_minus_after_bytes": 0,
+    "pure_graph_pool_bytes": null
+  },
+  "budget": {
+    "torch_after_init_bytes": [
+      65062248448,
+      65060270080
+    ],
+    "torch_after_release_bytes": [
+      65058054144,
+      65056075776
+    ],
+    "acl_after_init_bytes": [
+      65060319232,
+      65058172928
+    ],
+    "acl_after_release_bytes": [
+      65060302848,
+      65058086912
+    ],
+    "deployment_budget_bytes": null
+  },
+  "mrope": {
+    "archived_script_identity_passed": false,
+    "archived_script_identity_max_abs": 5.45075457596721,
+    "unreproducible_identity_claim": true,
+    "identity_admitted": false
+  },
+  "launch_overhead_us": null,
+  "report": "../../validation/ascend-910b3-20261117.md"
+}

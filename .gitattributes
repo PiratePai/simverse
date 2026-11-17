@@ -36,4 +36,4 @@ docs/evidence/mrope-map/*.json binary
 
 # R28 Ascend 910B3 实测快照（同 R05/R20-R26 先例）：整目录保留捕获字节，
 # manifest.json 对产物与脚本逐个锚定 SHA256，行尾转换会破坏校验。
-docs/evidence/ascend-910b3/** binary
+docs/evidence/ascend-910b3/** -text diff

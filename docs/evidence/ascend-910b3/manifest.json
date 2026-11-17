@@ -23,18 +23,14 @@
     "HCCL plog archive (transport evidence, size)"
   ],
   "limits": [
-    "measured peak != official spec peak; must not be used as DeviceSpec.peak_by_dtype",
-    "2 cards only; not the 8-card HCCS topology; do not extrapolate to 910C/950",
-    "attention_core measured with dense SDPA proxy, not FlashMLA/sparse MLA",
-    "moe_routed measured with bmm proxy, not a fused expert kernel",
-    "no equivalent implementation: gdn_recurrence, attn_output_gate, shared_gate, v_norm_gated",
-    "elementwise/norm numbers reflect composed multi-kernel launch count, not op efficiency",
-    "does not resolve any CUDA execution-variant gap and grants no deployment ranking eligibility"
+    "See review.json and the review report before use; original derived fields include known errors.",
+    "No production profile, model forward, topology or deployment eligibility is granted.",
+    "Source kind describes collection only; metadata and methodology have not passed calibration admission."
   ],
   "files": {
     "README.md": {
-      "sha256": "a963401ae418275b419d4f6a966044227fa2b1e6520dea7607cc5316d58e26bc",
-      "bytes": 3456
+      "sha256": "649363865cac51d01eea5c3360913840206fe41d1760b46c4c8dd7ab33c674c2",
+      "bytes": 2761
     },
     "diag_hccl.log": {
       "sha256": "57767a39ec71b0d2d1c1567234adf54fcd4e6f5ad0c9fc2b4c18fe56cd08d3ec",
@@ -147,6 +143,23 @@
     "scripts/p3_per_op.py": {
       "sha256": "23d2cc2c618ec596071a957d61798c9f2bc6e64c8259fe776927ba6720c6f5a1",
       "bytes": 7474
+    },
+    "review.json": {
+      "sha256": "0348676fb7ec006848616ebe1d175d64ed6878c96f493435e6ad8f1e26ac3257",
+      "bytes": 10730
     }
+  },
+  "calibration_admission": "not-admitted",
+  "review": "review.json",
+  "review_provenance": {
+    "original_commit": "6a16fbed8e6dc0982ed9abdea0ea1df6c006e429",
+    "original_manifest_sha256": "f7a3c31eca12d5e4d55f22b35d6f8ea95c5ccb07d5d67ece29cfe6455f4a72fa",
+    "changed_capture_files": [
+      "README.md"
+    ],
+    "new_files": [
+      "review.json"
+    ],
+    "raw_measurements_and_scripts_unchanged": true
   }
 }
