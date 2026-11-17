@@ -52,27 +52,35 @@ def _dump(obj, path: Path | None):
         print(text)
 
 
+def _csv_field(v) -> str:
+    """RFC 4180 字段转义：含逗号/引号/换行时引号包裹、内部引号翻倍。
+
+    与前端 static/csv.js 同语义；不做字符替换，保留原始字段内容
+    （2026-11-17 工作台审查：旧实现把逗号替换成分号、丢换行，改变字段）。
+    """
+    s = "" if v is None else str(v)
+    if any(ch in s for ch in ',"\r\n'):
+        return '"' + s.replace('"', '""') + '"'
+    return s
+
+
+def _csv(cols, records) -> str:
+    lines = [",".join(cols)]
+    for rec in records:
+        lines.append(",".join(_csv_field(rec.get(c)) for c in cols))
+    return chr(10).join(lines)
+
+
 def _ops_csv(result: dict) -> str:
     cols = ["stage", "layer", "op", "exec_count", "flops", "weight_read", "act_read",
             "act_write", "kv_read", "kv_write", "scope", "formula_id", "t_ms", "bound",
             "shape_note"]
-    lines = [",".join(cols)]
-    for o in result["ops"]:
-        vals = []
-        for c in cols:
-            v = o.get(c, "")
-            v = str(v).replace(",", ";").replace("\n", " ")
-            vals.append(v)
-        lines.append(",".join(vals))
-    return "\n".join(lines)
+    return _csv(cols, result["ops"])
 
 
 def _events_csv(result: dict) -> str:
     cols = ["id", "stage", "lane", "label", "start_ms", "end_ms", "depends_on"]
-    lines = [",".join(cols)]
-    for e in result["timeline"]:
-        lines.append(",".join(str(e.get(c, "")).replace(",", ";") for c in cols))
-    return "\n".join(lines)
+    return _csv(cols, result["timeline"])
 
 
 def _summary(result: dict):
@@ -193,26 +201,32 @@ def _v2_scenario(path):
 
 
 def _ops_csv_v2(bundle: dict) -> str:
+    """v0.2 算子 CSV：与前端导出同列；t_ms/bound 从 cost.roofline_points
+    按 row_id（stage:layer:op）关联，无计价行留空（不伪造）。"""
     cols = ["stage", "layer", "op", "flops", "weight_read", "weight_read_expected",
             "act_read", "act_write", "kv_read", "kv_write", "state_read",
-            "state_write", "weight_capacity", "statistic", "formula", "shape"]
-    lines = [",".join(cols)]
+            "state_write", "weight_capacity", "statistic", "formula", "t_ms",
+            "bound", "shape"]
     rows = ((bundle.get("work") or {}).get("target_decode") or {}).get("rows") or []
+    cost = bundle.get("cost") or {}
+    pts = {p["row_id"]: p for p in
+           (cost.get("row_prices") or cost.get("roofline_points") or [])}
+    records = []
     for o in rows:
-        lines.append(",".join(
-            str(o.get(c, "") if o.get(c) is not None else "").replace(",", ";")
-            for c in cols))
-    return chr(10).join(lines)
+        p = pts.get(f"{o.get('stage')}:{o.get('layer')}:{o.get('op')}") or {}
+        rec = {c: o.get(c) for c in cols}
+        rec["t_ms"] = p.get("t_ms", "")
+        rec["bound"] = p.get("bound", "")
+        records.append(rec)
+    return _csv(cols, records)
 
 
 def _trace_csv_v2(bundle: dict) -> str:
     cols = ["event_id", "round_id", "role", "stage", "t_ms", "start_ms",
             "depends_on", "label"]
-    lines = [",".join(cols)]
-    for rnd in (bundle.get("execution") or {}).get("rounds") or []:
-        for e in rnd.get("events") or []:
-            lines.append(",".join(str(e.get(c, "")) for c in cols))
-    return chr(10).join(lines)
+    events = [e for rnd in (bundle.get("execution") or {}).get("rounds") or []
+              for e in rnd.get("events") or []]
+    return _csv(cols, events)
 
 
 def _report_html_v2(bundle: dict) -> str:

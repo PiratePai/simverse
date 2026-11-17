@@ -15,7 +15,8 @@ from .count import build_model_work, totals
 from .count.draft import chain_step_rows, dflash_round_rows, mtp_step_rows
 from .devices import DEVICES, LINKS  # v0.1 设备注册表（v0.2 沿用数值+分层预算）
 from .draft_quant import MXFP8_CONTEXT_PROJ
-from .cost.t0 import dtype_route, price_row, price_rows, stage_total
+from .cost.t0 import (dtype_route, ew_cost_basis, gemm_cost_basis, price_row,
+                      price_rows, stage_total)
 from .cost.calibrated import CalibratedPricer
 from .cost.profile_store import load_profile_set, profile_model_id
 from .execute.serial import build_serial_round
@@ -62,6 +63,43 @@ def _run_evidence_refs(model, draft, method_id: str,
 def _link_like(link_id: str) -> LinkLike:
     lk = LINKS[link_id]
     return LinkLike(bw=lk.bw, fixed_ms=lk.fixed_ms, label=lk.label)
+
+
+def _device_snapshot(dep) -> dict:
+    """硬件/链路数值快照（R27 运行身份修复）。
+
+    职责分立：
+      * device_snapshot_digest——实际计价消费的硬件/链路**数值与来源**
+        （不只设备 ID：同 ID 下改带宽/峰值 → 快照与 run_id 变化）；
+      * input_digest（scenario.scenario_digest，全量场景）——部署语义参数
+        （target_ep/draft_tp/v41_kv_record/engram_table_placement/budget/
+        接受率等）。两者共同进 run_id，完整身份不遗漏；此处重复携带
+        tp/ep 仅便于独立解读。
+    非语义字段（时间戳等）不入快照；键序经 canonical_json 排序归一，
+    字段排序变化不影响身份。历史证据包不回改——本轮起 run_id 基变更
+    （数值快照引入），兼容方式见 docs/validation/cost-integrity-review-fixes.md。
+    """
+    def dev_snapshot(d):
+        return {"id": d.id,
+                "peak_by_dtype": dict(d.peak_by_dtype),
+                "hbm_bw": d.hbm_bw,
+                "mem_capacity": d.mem_capacity,
+                "sm_count": d.sm_count,
+                "mfu_cap": d.mfu_cap,
+                "launch_overhead_ms": d.launch_overhead_ms,
+                "card_count": d.card_count,
+                "sources": dict(d.sources)}
+
+    lk = LINKS[dep.link]
+    return {
+        "target": dev_snapshot(DEVICES[dep.target_device]),
+        "draft": dev_snapshot(DEVICES[dep.draft_device]),
+        "link": {"id": lk.id, "bw": lk.bw, "fixed_ms": lk.fixed_ms,
+                 "source": lk.source},
+        "target_tp": dep.target_tp,
+        "target_ep": dep.target_ep,
+        "draft_tp": dep.draft_tp,
+    }
 
 
 def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
@@ -303,7 +341,14 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
 
     # ---- 计数与计价 ----
     quant, dquant = scenario.quant, scenario.draft_quant
-    gemm_dt, ew_dt = dtype_route(quant)
+    # R27：模型注册了执行配方（extras["quant"]，R22 source-checked）时，
+    # GEMM 计算档按配方选择（V4.1 Marlin W8A16/W4A16 → BF16 Tensor Core
+    # 档）；无配方模型沿用 dense_w 存储位宽启发（乐观假设档，cost_basis
+    # 披露）。理论峰值路由修正，与实测吞吐校准（profile 路径）分立。
+    quant_recipe = (getattr(model, "extras", None) or {}).get("quant")
+    gemm_dt, ew_dt = dtype_route(quant, quant_recipe)
+    gemm_basis = gemm_cost_basis(quant_recipe)
+    ew_basis = ew_cost_basis()
     target_dev = DEVICES[dep.target_device]
     draft_dev = DEVICES[dep.draft_device]
     B, ctx = scenario.workload.batch, scenario.workload.ctx_tokens
@@ -323,9 +368,11 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                  v41_kv_record=dep.v41_kv_record,
                                  device_sms=target_dev.sm_count)
     base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt,
-                             engram_lookup_host)
+                             engram_lookup_host, gemm_basis, ew_basis)
     t_base = stage_total(base_prices)
-    roofline_points = _roofline_points(base_rows, base_prices, target_dev, gemm_dt)
+    # 元数据（compute_dtype/峰值/带宽/cost_basis）直接取自 base_prices 的
+    # 同一次计价输出（R27；不另建路由，前端不得自行推导物理参数）
+    roofline_points = _roofline_points(base_rows, base_prices)
     # 通信（R01 按层配方：attn allreduce 恒有；MLP 段 TP allreduce 或 EP all2all）
     col_base = _collectives_cost(model, pplan, B, quant, tp_link)
     t_base += col_base["t_ms"]
@@ -336,6 +383,9 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     work["target_decode"] = _rows_json(base_rows)
     cost["target_decode"] = {"t_ms": t_base, "collectives": col_base["detail"]}
     cost["roofline_points"] = roofline_points
+    # 完整逐行计价供透视与 CSV 对账；保留既有 top-40 点以兼容历史证据。
+    cost["row_prices"] = _roofline_points(base_rows, base_prices,
+                                          limit=None, include_zero=True)
 
     stage_costs: Dict[str, float] = {}
     if scenario.method_id == "baseline":
@@ -394,7 +444,10 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 block_size=plan.block_size)  # R07a：与 verify/msg 同块（防 16≠5 双口径）
             d_gemm, d_ew = dtype_route(dquant)
             d_dev = target_dev if dep.mode == "colocated" else draft_dev
-            d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew)
+            # 草稿无 extras.quant 执行配方（DFlash 为场景计价档）→ 启发档
+            d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew,
+                                  gemm_basis=gemm_cost_basis(None),
+                                  ew_basis=ew_cost_basis())
             t_draft = stage_total(d_prices)
             draft_model = _draft_as_model(draft)
             draft_plan = validate_parallel(draft_model, draft_tp, 1)
@@ -412,7 +465,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            v41_kv_record=dep.v41_kv_record,
                                            device_sms=target_dev.sm_count)
             v_prices = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
-                                  engram_lookup_host)
+                                  engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices)
             col_v = _collectives_cost(model, pplan, B * plan.block_size,
                                       quant, tp_link)
@@ -427,11 +480,16 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                     "selected_ms": None}
             blk = plan.block_size
             greedy = scenario.acceptance.get("kind") == "geometric"  # 概率随采样策略
-            # 草稿/验收消息按整批 B 计一次（不重复乘 target/通信）
+            # 草稿/验收消息按整批 B 计一次（不重复乘 target/通信）。
+            # R27：t2d 是 E[N] 推导的**期望字节**——保留浮点与 expectation
+            # 身份，禁止 int() 截断冒充精确（K15/α0.72 锚点：
+            # 58209.08759654315，旧代码截成 58209）；d2t 为协议确定的
+            # 整数消息（6B/token），保持整数。包长取整/对齐/采样实际消息
+            # 与期望值分列，不在本处混算。
             msg_bytes = {
                 "d2t": int(B * (blk - 1) * (4 + (2 if not greedy else 0))),
-                "t2d": int(B * e_n * len(draft.target_layer_ids)
-                           * draft.hidden * (quant["act"] / 8)),
+                "t2d": float(B * e_n * len(draft.target_layer_ids)
+                             * draft.hidden * (quant["act"] / 8)),
             }
             stage_costs = {"draft_block": t_draft, "verify_block": t_verify,
                            "commit_rewind": 0.0, "hidden_extract": 0.0}
@@ -477,6 +535,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             # 同档；共享 lm_head 仍读目标物理对象，按目标位宽计价。
             mtp_quant = {**quant, **dquant}
             mtp_gemm_dt, mtp_ew_dt = dtype_route(mtp_quant)
+            mtp_gemm_basis = gemm_cost_basis(None)   # Qwen3.6 无 extras.quant 配方
+            mtp_ew_basis = ew_cost_basis()
             for j in range(plan.k_effective):
                 stage = f"draft_step_{j}"
                 rows_j = mtp_step_rows(
@@ -487,9 +547,14 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                     rows_j.append(mtp_kv_rewind_row(stage, plan.k_effective,
                                                     e_n, model, mtp_quant,
                                                     dep.target_tp))
+                # draft_lm_head 读目标物理对象 → 目标档与目标 basis；
+                # 其余草稿行用草稿档（计数与计价同源 dquant，R27 一致性修复）
                 p_j = [price_row(r, target_dev,
                                  gemm_dt if r.op == "draft_lm_head" else mtp_gemm_dt,
-                                 ew_dt if r.op == "draft_lm_head" else mtp_ew_dt)
+                                 ew_dt if r.op == "draft_lm_head" else mtp_ew_dt,
+                                 False,
+                                 gemm_basis if r.op == "draft_lm_head" else mtp_gemm_basis,
+                                 ew_basis if r.op == "draft_lm_head" else mtp_ew_basis)
                        for r in rows_j]
                 t_j = stage_total(p_j)
                 # 草稿步通信：MTP 层 attn/mlp allreduce（EP 开为 all2all）+
@@ -516,7 +581,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            v41_kv_record=dep.v41_kv_record,
                                            device_sms=target_dev.sm_count)
             v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
-                                    engram_lookup_host)
+                                    engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices_m)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
                                       quant, tp_link)
@@ -532,24 +597,41 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                         "reasons": ["草稿阶段（MTP 微头）无匹配 profile 域"],
                         "selected_ms": None}
             msg_bytes = {"d2t": int(B * (plan.k_effective + 1) * 6),
-                         "t2d": int(B * e_n * model.hidden
-                                    * (quant["act"] / 8))}
+                         # R27：t2d 期望字节保留浮点（E[N] 推导；同 DFlash 修复）
+                         "t2d": float(B * e_n * model.hidden
+                                      * (quant["act"] / 8))}
             stage_costs["verify"] = t_verify
             cost["verify"] = {"t_ms": t_verify,
                               "collectives": col_v["detail"]}
             work["verify"] = _rows_json(verify_rows)
         else:  # chain_draft / chain_moe_proxy：草稿用 tiny_gqa 结构演示闭环
+            if dep.mode in ("dt_serial", "dt_pipeline_sim") and dep.draft_tp != 1:
+                # R27：chain 草稿计价固定 TP1（tiny_gqa 无分片配方），独立组
+                # draft_tp>1 无实现配方——显式拒绝，不静默按 TP1 计价
+                return _bundle_error(
+                    scenario, cap, "unsupported_combo",
+                    f"chain 草稿计价固定 TP1（tiny_gqa 合成结构，无分片/"
+                    f"独立组配方）；draft_tp={dep.draft_tp} 无实现配方，拒绝")
             draft_model = cat["models"]["tiny_gqa"]
             rows_all = []
             t_draft = 0.0
             p_full = acc["P_full"] or 0.0
+            # R27：草稿计数（chain_step_rows 用 dquant）与计价同源——用
+            # dquant 路由（旧代码误用目标 quant 档）；设备按模式取
+            # colocated=target / DT=草稿设备（旧代码恒用 target 设备）；
+            # 不把目标 Engram Host 开关套到不含 Engram 的 tiny 草稿。
+            c_gemm, c_ew = dtype_route(dquant)
+            c_dev = target_dev if dep.mode == "colocated" else draft_dev
+            c_gemm_basis = gemm_cost_basis(None)   # tiny 无执行配方
+            c_ew_basis = ew_cost_basis()
             for j in range(plan.k_effective):
                 m = 2 if j == 0 else 1
                 weight = (1 - p_full if j == 0 else 1.0)
                 rows = chain_step_rows(f"draft_step_{j}", draft_model, m, ctx,
                                        dquant, 1, batch=B)
-                t = stage_total(price_rows(rows, target_dev, gemm_dt, ew_dt,
-                                           engram_lookup_host))
+                t = stage_total(price_rows(rows, c_dev, c_gemm, c_ew,
+                                           gemm_basis=c_gemm_basis,
+                                           ew_basis=c_ew_basis))
                 t_draft += t * (weight if j == 0 else 1.0) + (
                     p_full * t if j == 0 else 0.0)
                 rows_all += rows
@@ -560,7 +642,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            v41_kv_record=dep.v41_kv_record,
                                            device_sms=target_dev.sm_count)
             v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
-                                    engram_lookup_host)
+                                    engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices_c)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
                                       quant, tp_link)
@@ -720,14 +802,28 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                            scope=Scope(role="system", rank=k),
                            evidence=(Evidence.COUNTED,))
             for k, v in ps["utilization"].items()}
-        metrics["M01_tpot_analytical"] = Metric(
-            value=metrics["M01_tpot_analytical"].value, unit="ms",
-            scope=Scope(role="target", phase="steady-decode"),
-            statistic=Statistic.EXPECTATION, result_kind=ResultKind.ANALYTICAL_ESTIMATE,
-            support=Support.APPROXIMATED, evidence_refs=[], formula_ref=FR.F_ROOFLINE,
-            assumption_refs=[],
-            reason="dt_pipeline_sim：解析串行 TPOT 与流水周期分列（M18）；"
-                   "单请求延迟需请求轨迹（M3 请求级事件）")
+        # R27：模式增补说明不再整体重建 Metric——保留既有 support/reason/
+        # evidence/formula/assumptions（如 Engram host "Host 成本未计"
+        # 下界声明），追加流水口径注记并去重，避免丢字段或堆叠警告。
+        prev = metrics["M01_tpot_analytical"]
+        if isinstance(prev, Metric):
+            pipe_note = ("dt_pipeline_sim：解析串行 TPOT 与流水周期分列"
+                         "（M18）；单请求延迟需请求轨迹（M3 请求级事件）")
+            merged: List[str] = []
+            for r in (prev.reason, pipe_note):
+                if r and r not in merged:
+                    merged.append(r)
+            metrics["M01_tpot_analytical"] = Metric(
+                value=prev.value, unit="ms",
+                scope=Scope(role="target", phase="steady-decode"),
+                statistic=Statistic.EXPECTATION,
+                result_kind=ResultKind.ANALYTICAL_ESTIMATE,
+                support=Support.APPROXIMATED,
+                evidence_refs=list(prev.evidence_refs),
+                formula_ref=prev.formula_ref or FR.F_ROOFLINE,
+                input_refs=list(prev.input_refs),
+                assumption_refs=list(prev.assumption_refs),
+                reason="；".join(merged) if merged else None)
 
     manifest = RunManifest(run_id="", status="completed",
                            input_digest=scenario.scenario_digest(),
@@ -735,9 +831,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                            method_digest=digest(plan.to_json()),
                            cost_digest=digest({"t0": FR.F_ROOFLINE,
                                                "profile": scenario.cost_profile}),
-                           device_snapshot_digest=digest(
-                               {"target": dep.target_device, "tp": dep.target_tp,
-                                "draft": dep.draft_device, "link": dep.link}),
+                           device_snapshot_digest=digest(_device_snapshot(dep)),
                            code_revision=code_revision())
     manifest.compute_run_id()
     bundle = ResultBundle(
@@ -801,26 +895,37 @@ def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,
         "total_t_ms": t}}
 
 
-def _roofline_points(rows, prices, device, gemm_dtype: str, limit: int = 40):
-    """算子 Roofline 坐标（后端算好：AI/attained/bound；前端只画点）。"""
+def _roofline_points(rows, prices, limit: Optional[int] = 40,
+                     include_zero: bool = False):
+    """算子 Roofline 坐标与计价元数据（后端算好；前端只画点）。
+
+    R27：compute_dtype/peak_tflops/effective_peak_tflops/bandwidth_tb_s/
+    cost_basis 直接取自 price_row 同一次计价的输出（t0.price_row 附带），
+    不在绘图层重建路由——避免出现第二套不一致的物理参数推导。单位：
+    TFLOP/s 与十进制 TB/s；peak 为设备规格 dense 口径，effective 为本次
+    计价采用的峰值（×mfu_cap）。row_id 稳定（stage:layer:op）。
+    """
     pts = []
     for row, price in zip(rows, prices):
-        if row.flops <= 0:
+        if not include_zero and row.flops <= 0:
             continue
         total_bytes = price.get("bytes_exact", 0) + price.get("bytes_expected", 0)
-        if total_bytes <= 0:
+        if not include_zero and total_bytes <= 0:
             continue
-        dtype = gemm_dtype if row.op not in __import__(
-            "simverse.cost.t0", fromlist=["_ELEMENTWISE"])._ELEMENTWISE else gemm_dtype
         pts.append({
             "row_id": f"{row.stage}:{row.layer}:{row.op}",
             "layer": row.layer, "op": row.op, "stage": row.stage,
-            "ai_flop_per_byte": row.flops / total_bytes,
+            "ai_flop_per_byte": row.flops / total_bytes if total_bytes else 0.0,
             "attained_tflops": row.flops / (price["t_ms"] * 1e-3) / 1e12 if price["t_ms"] else 0.0,
             "bound": price["bound"], "t_ms": price["t_ms"],
+            "compute_dtype": price.get("compute_dtype"),
+            "peak_tflops": price.get("peak_tflops"),
+            "effective_peak_tflops": price.get("effective_peak_tflops"),
+            "bandwidth_tb_s": price.get("bandwidth_tb_s"),
+            "cost_basis": price.get("cost_basis"),
         })
     pts.sort(key=lambda x: -x["t_ms"])
-    return pts[:limit]
+    return pts[:limit] if limit is not None else pts
 
 
 def _rows_json(rows):
@@ -1131,6 +1236,13 @@ def _assumptions(scenario, plan) -> Dict[str, str]:
     out = {
         "A1_performance": "全部时延为 T0 解析估算（roofline；Q2 首版无实测/拟合）",
         "A2_serial": "串行解析档：阶段和=轮墙钟；无重叠/流水（M3 事件核后扩展）",
+        # R27：把 launch/融合/调度/CUDA Graph 缺口从隐含变为显式登记——
+        # T0 不逐算子加 launch（kernel 映射未建立，加了就是无据双计），
+        # 也不宣称已建模融合收益；实际 eager 执行通常高于解析值。
+        "A2b_kernel_gaps": "逐算子 launch 开销、kernel 融合收益、host 调度与"
+                           " CUDA Graph 捕获均未建模（launch_overhead_ms 仅"
+                           "注册未入 T0 行计价）；解析耗时不含这些项，实际"
+                           " eager 执行通常更高",
         "A3_acceptance": f"接受率为显式假设输入（Q8 hypothesis）：{scenario.acceptance}",
         "A4_routing": "MoE 路由按均匀独立假设；期望并集非精确计数",
         "A5_workload": f"负载假设：B={scenario.workload.batch} ctx={scenario.workload.ctx_tokens}"

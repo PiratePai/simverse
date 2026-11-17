@@ -1251,6 +1251,17 @@ def parse_v41_csa2(config: Dict[str, Any], source: SourceIdentity, model_id: str
         "act_domain": "registered_sm80_sm90_marlin_w8a16_w4a16",
         "act_source": "kernels/linear/__init__.py L569-589/L962-1014 + "
                       "marlin.py L14；oracle/mxfp4.py L461-486",
+        # R27（2026-11-17，cost-integrity）：GEMM 计算档供 cost/t0.dtype_route
+        # 消费——Marlin W8A16/W4A16 为混合精度 GEMM，权重寄存器内反量化后
+        # 走 BF16 Tensor Core（marlin.py L14-26；激活 BF16），未量化类本身
+        # BF16 → 全部 GEMM 计算峰值取 bf16 档（devices peak_by_dtype["fp16"]，
+        # BF16/FP16 同档 dense）。这是理论峰值路由修正（tier 选择），不是
+        # 实测吞吐校准：Marlin 实际吞吐 < bf16 理论峰值，无实测证据不折减。
+        "gemm_compute_dtype": "fp16",
+        "gemm_compute_basis": "Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、"
+                              "激活 BF16（quant-pin @f358f057 marlin.py "
+                              "L14-26/oracle L461-486）；理论峰值路由修正，"
+                              "非实测吞吐校准",
         # Marlin 分配对齐（routed_experts.py L190-203 于 create_weights 前
         # 调 maybe_roundup_sizes；oracle/mxfp4.py L850-858）
         "expert_backend": "marlin_w4a16",

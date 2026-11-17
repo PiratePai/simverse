@@ -1,6 +1,26 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
-更新：2026-11-16（R26：Qwen3.6 文本路径 MRoPE position_ids 语义补齐——vllm_qwen36_mrope_pin 5 文件（@dc74b8cb，blob sha1 校验）+ HF pin 双栈逐行核对：文本退化（三行恒等→交错重组恒等→标准部分 NeoX RoPE，rotary 64/256、[11,11,10]、theta 1e7）、prefill arange/decode 缓存续位、MTP 位置传递（复制/+1/末步不推进/回退 num_rejected/夹紧）；三路 f64 对照 diff=0 + 官方 HF 旋转类实测 4.35e-07 + 6 负例；mrope_section/interleaved 升 mapped、unverified_paths 清空 → forward_source=source-checked、structure_complete=True（不冒充执行/实测）；账本零漂移 replay；17 项新测试；多模态 2D 分支域外，见
+更新：2026-11-17（R27：cost-integrity 轮——计算口径/统计身份/指标元数据/运行身份六项修复：
+①dtype_route 按模型执行配方选 GEMM 计算档（V4.1 Marlin W8A16/W4A16 → bf16 Tensor
+Core 档 989.5 TFLOPS，R22 pin；无配方模型沿用 dense_w 启发档并在 cost_basis 披露；
+理论峰值路由修正 ≠ 实测吞吐校准）；②price_row 同次计价输出行级元数据
+（compute_dtype/peak_tflops/effective_peak_tflops/bandwidth_tb_s/cost_basis，
+TFLOP/s+十进制 TB/s），_roofline_points 重复分支/未用 dtype 修复，前端可选字段兼容；
+③DFlash/MTP t2d 期望字节保浮点（K15/α0.72 锚点 58209.08759654315，旧代码 int() 截
+58209），d2t 协议确定字节保持整数；④内部 chain 计价与计数同源（dquant 路由、
+colocated=target/DT=草稿设备、不套目标 Engram host 开关、draft_tp>1 显式拒绝）；
+⑤pipeline_sim 模式增补 M01 保留既有 reason/support/evidence/formula（Engram host
+警告与流水分列并存不堆叠）；⑥device_snapshot_digest 覆盖硬件/链路数值+来源+拓扑
+（同 ID 改带宽/峰值 → run_id 变化；run_id 基变更，历史证据包未回改）。默认场景
+replay：V4.1 M01 116.33572728→116.33641192（+0.00068ms，GEMM 档修正经 0.15·min
+项进入；远非"2×错误"——decode 行带宽主导）、Qwen3.6+DFlash M01 数值中性
+（t2d 58209→58209.0876），work/memory 逐字段零漂移（evidence/cost-integrity-r27 +
+活性入口 tools/replay_cost_integrity_r27.py --check）；csa2-core after.json 按新成本
+档重基（work 不变，M01/M04 重定价，rebase-r27-provenance 入册）。W8A16/W4A16 语义
+最小数值 fixture（e4m3/e2m1/e8m0/打包/反量化等价，纯 stdlib math-oracle 层，不升格
+模型级 cpu_forward）。Engram Host 成本核对方案与可部署性数据采集方案见
+[修复报告](validation/cost-integrity-review-fixes.md) §五。
+26 项新测试（回归 20 + 数值 fixture 6）。早前 2026-11-16（R26：Qwen3.6 文本路径 MRoPE position_ids 语义补齐——vllm_qwen36_mrope_pin 5 文件（@dc74b8cb，blob sha1 校验）+ HF pin 双栈逐行核对：文本退化（三行恒等→交错重组恒等→标准部分 NeoX RoPE，rotary 64/256、[11,11,10]、theta 1e7）、prefill arange/decode 缓存续位、MTP 位置传递（复制/+1/末步不推进/回退 num_rejected/夹紧）；三路 f64 对照 diff=0 + 官方 HF 旋转类实测 4.35e-07 + 6 负例；mrope_section/interleaved 升 mapped、unverified_paths 清空 → forward_source=source-checked、structure_complete=True（不冒充执行/实测）；账本零漂移 replay；17 项新测试；多模态 2D 分支域外，见
 [报告](validation/qwen36-text-mrope-20261116.md)。早前 2026-11-13（R23：Qwen3.6 原生 MTP forward 证据与仿真映射——vLLM @10a854ed
 `qwen3_5_mtp` 等 8 文件 + SGLang @1b2870d 1 文件双栈逐行核对（SHA256/blob sha1 pin）；
 查明 mtp.* checkpoint 张量/加载重映射/colocated embed-lm_head 物理共享/每轮 K 均匀步+
@@ -38,12 +58,67 @@ norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fm
 矛盾拒绝；场景 V41_QUANT 冻结；known_peak +14.36 GB（Marlin 对齐主导）；Humming/SM100/emulation
 变体登记 G-C14。早前 dtype 域收紧：valid domain 固定 official V4.1 config dtype=bfloat16；full_config 的 float16/float32/缺失 dtype 明确拒绝，无 full_config 仅固定资产 BF16 默认。Gate 修复：GateLinear 权重沿 model loader BF16、输入由 pinned mHC layer_input BF16 证明，均 2B；moe_gate 权重 1,966,080→3,932,160 B/层、输入 5,120→10,240 B/token；新增 linear.py/base_loader.py/layer.py pin（14 文件）；数值见报告 §10。三轮复核：fused EP 只按 mega 断言、共享专家独立相加、ExpertMapManager 未入 pin 读取点登记、证据包 SHA256 自校验，见报告 §9）；2026-11-12（R21：V4.1 MoE scoring/top-k/分组路由按 14 文件 pin source-checked 建模——sqrtsoftplus/noaux_tc 平坦偏置 top-6 无分组、FP32 logits 出口修正、路由偏置对象、EP 保守整除域（仅 mega 断言）；早前 R20：V4.1 CSA2 索引打分/top-k/candidate block 按 21 文件 pin source-checked 建模并修正记录宽度/bf16 权重与激活/主 attention norm 常驻/环形 state/设备 family 校验；R07a：DFlash 服务栈双栈审计（G-C3 核对部分解除）+ ctx 投影跨度基、草稿生效块与 full 层非因果三修正；同日早前 R06：Qwen3.6 GDN+MoE 小尺寸 CPU forward 对照 + attn_output_gate 漏计修正，rebase 到 R05 mHC/Sinkhorn 修正之上；早前 R04/两模型门禁/A 组/校准段落保留为历史记录）。主控会话持续维护；上下文压缩后从本文件恢复。
 代码身份：本仓 git（PR #15（R23）、#16/#17（R26）、#18（R25）已合入 main；远端公开仓库 `PiratePai/simverse`）；包版本 0.2.1（对齐结果协议 v0.2；ModelIR 独立 0.3.0）。
-运行：R25 在 ZCode 会话（new-viewer-csa2mla 工作树）执行 `py -3.12 -m pytest tests -q`：**469 passed，exit 0**（含 R26 文本 MRoPE 17 项合并后再验证）；`tools/replay_v41_csa2_core.py --check`（新，活性入口）、`replay_v41_swiglu/quant/moe --check`（链式改指 csa2-core）、`tools/replay_qwen36_mrope.py --check`、`tools/replay_qwen36_mtp.py --check`、`node --check simverse/static/workbench.js`、`py -3.12 -m simverse.cli run-v2`（status=completed）均 exit 0。历史回执（非本次执行）：R26 在 ZCode 会话 442 passed；R23 验收修复在 Codex 宿主 425 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
-**pytest 收集数：469**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-16 R25+R26 合并；442→469 = R25 注意力核本体 27 项（tests/test_v41_csa2_core.py：pin 1、调度器锚点/独立重演/负例/块公式 7、decode 手算绝对 5、prefill 手算 3、守恒/瞬态/设备 3、device_sms 拒绝 1、replay 冻结 1、门禁事实 2）；425→442 = R26 文本 MRoPE 语义 17 项（tests/test_qwen36_mrope_r26.py）；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项；367→399 = R24 SwiGLU/尾部 oracle 32 项；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
+运行：R27 在 ZCode 会话（干净 HEAD 1196510 + 本轮改动的独立 worktree `../nv-r27-verify`，隔离并行工作台任务在主工作树的在途编辑）执行 `py -3.12 -m pytest tests -q`：**495 passed，exit 0**（含 G6 计数门禁）；`tools/replay_cost_integrity_r27.py --check`（新，活性入口）、`tools/replay_v41_csa2_core.py --check`（重基后）、`replay_v41_swiglu/quant/moe --check`、`tools/replay_qwen36_mrope.py --check`、`tools/replay_qwen36_mtp.py --check`、`py -3.12 -m simverse.cli run-v2`（status=completed）均 exit 0。主工作树同期 `pytest tests` 有 2 项 CSV 导出失败 + G6 计数差，全部来自并行工作台任务对 simverse/cli.py/tests/test_consistency.py 的未提交在途修改（本轮未触碰；对方落地时自会更新）。历史回执（非本次执行）：R25 在 ZCode 会话 469 passed；R26 在 ZCode 会话 442 passed；R23 验收修复在 Codex 宿主 425 passed；R24（PR #14 合入前）399 passed；R22 验收修复 367 passed（Codex 宿主）；dtype 修订提交 `b9a5a0f` 上 334 passed；旧 DSH 沙箱 328 passed + 6 个 `tmp_path` 环境错误（见 §3.9）。
+**pytest 收集数：516**（`py -3.12 -m pytest --collect-only -q tests`，2026-11-17 两项任务集成后收集；469→495 = R27 cost-integrity 26 项（tests/test_cost_integrity_fixes.py 回归 20：路由/元数据/期望字节/chain/警告保留/身份/隔离/计数不变；tests/test_v41_quant_numeric_r27.py 数值 fixture 6：e4m3/e2m1/e8m0/MXFP4 打包双解码器/W8A16 反量化 GEMM 等价/SwiGLU 随机模糊）。2026-11-16 R25+R26 合并时为 469；442→469 = R25 注意力核本体 27 项（tests/test_v41_csa2_core.py：pin 1、调度器锚点/独立重演/负例/块公式 7、decode 手算绝对 5、prefill 手算 3、守恒/瞬态/设备 3、device_sms 拒绝 1、replay 冻结 1、门禁事实 2）；425→442 = R26 文本 MRoPE 语义 17 项（tests/test_qwen36_mrope_r26.py）；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项；367→399 = R24 SwiGLU/尾部 oracle 32 项；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
 R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
 工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
+
+**2026-11-17 两项任务集成审查**：495→515 = 工作台回归 20 项；515→516 = 逐行计价覆盖集成回归 1 项。审查发现原 top-40 仅覆盖 Qwen 27 类中的 4 类及 V4.1 51 类中的 3 类，新增 `cost.row_prices` 全行计价摘要，透视与 CSV 优先使用该字段；原 `cost.roofline_points` 保留 top-40 供历史证据兼容。文档路径锚定改用 `Path.is_relative_to`。全量验收见本轮合入记录。
+
+**2026-11-17 R27：cost-integrity 轮（计算口径/统计身份/指标元数据/运行身份）**
+（主工作树，基线 HEAD 1196510；专属报告
+[docs/validation/cost-integrity-review-fixes.md](validation/cost-integrity-review-fixes.md)）：
+
+- **A 计算峰值路由**：`cost/t0.dtype_route(quant, quant_recipe)` 增加执行配方
+  入参；`model_ir/families` 的 extras.quant 注册 `gemm_compute_dtype="fp16"`
+  + `gemm_compute_basis`（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活
+  BF16；R22 quant-pin @f358f057）。V4.1 全部 GEMM 计算档 fp8(1979)→
+  bf16 档(989.5 TFLOPS dense H100)。**理论峰值路由修正，不是实测吞吐校准**
+  （Marlin 实际吞吐 < bf16 理论峰值，无实测证据不折减；域外变体 Humming/
+  SM100/emulation 不进路由）。无配方模型（Qwen3.6/DFlash/MTP/chain 草稿）
+  沿用 dense_w 存储位宽启发档，cost_basis 披露"存储位宽=计算位宽"为乐观
+  假设；不引入"全看 act"新全局规则。launch/融合/调度/CUDA Graph 缺口显式
+  登记为 assumption A2b_kernel_gaps（不逐算子加 launch）。
+- **B Roofline 元数据**：`price_row` 在同一次计价内附带
+  compute_dtype/peak_tflops（dense 规格）/effective_peak_tflops（×mfu_cap）/
+  bandwidth_tb_s（十进制）/cost_basis；`_roofline_points` 重复分支+未用
+  dtype 代码删除，字段直接取自计价输出；row_id 稳定；旧字段全保留（前端
+  可选字段兼容，未依赖前端任务）。
+- **C 期望通信字节**：DFlash/MTP `t2d` 由 `int()` 改 `float()`（期望身份
+  保持 expectation；契约/序列化/指标/链路成本核对无二次截断；d2t 协议
+  确定字节保持整数；消息包长取整/对齐未混入）。
+- **D 内部 chain 计价**：草稿行计价改用 dquant 路由（与计数同源）；
+  colocated=target 设备、DT=草稿设备（旧恒 target）；不把目标 Engram
+  host 开关套到无 Engram 的 tiny 草稿；dt 模式 draft_tp>1 显式拒绝；
+  chain/tiny 内部研究隔离不变（G8 面补测）。
+- **E 指标警告覆盖**：pipeline_sim 增补 M01 时保留既有 support/reason/
+  evidence/formula/assumptions 并去重合并——"Engram host 表查找与预取时延
+  未计"与"串行 TPOT/流水周期分列"并存；capability 侧 Host 降级检查保留。
+- **F 运行身份**：`_device_snapshot(dep)` 覆盖实际计价消费的设备/链路数值
+  +来源+拓扑（target/draft peak_by_dtype/hbm_bw/sm_count/mfu_cap/…
+  sources、link bw/fixed/source、tp/ep）；同 ID 改带宽/峰值 → 快照与
+  run_id 变化；部署语义参数（target_ep/draft_tp/v41_kv_record/engram_
+  placement/budget）由 input_digest 全量覆盖；时间戳等非语义字段不入；
+  键序 canonical_json 归一。**run_id 基变更：历史 run_id 不再可复现**
+  （证据包未回改，兼容方式见报告 §六）。
+- **数值变化**（evidence/cost-integrity-r27，before=HEAD 1196510）：
+  V4.1 baseline M01 116.33572727816723→116.33641192134922（+0.00068464ms；
+  GEMM 档差仅经 max+0.15·min 的 min 项进入，decode 行带宽主导——修正"选错
+  峰值"≠"整模型 TPOT 错 2 倍"）；M01_baseline/M04 同步；Qwen3.6+DFlash
+  M01 36.859180745326654 不变（t2d 58209→58209.08759654315 对 t_t2d 影响
+  ~4e-10ms，低于该量级双精度分辨率）；work/cost.memory 三场景逐字段零
+  漂移。csa2-core/after.json 重基（work 不变、M01/M04 重定价，
+  rebase-r27-provenance.json 入册；replay_v41_csa2_core 归因改同价复算）。
+- **最小数值 fixture**（tests/test_v41_quant_numeric_r27.py，6 项，纯
+  stdlib math-oracle 层）：e4m3/e2m1 量化-反量化误差界、MXFP4 打包双
+  解码器一致、W8A16 反量化 GEMM 等价（bf16 操作数+fp32 累加 vs f64
+  oracle）、SwiGLU clamp 随机模糊、scale 布局公式对齐。**不升格**：模型级
+  cpu_forward 保持 not-run（G10/G15 不变）。完整 V4.1 CPU fixture 覆盖
+  计划（Engram/mHC/注意力/MoE/SwiGLU）与前置条件见报告 §五。
+- **测试**：+26（test_cost_integrity_fixes.py 20 + test_v41_quant_numeric_
+  r27.py 6）；全套 495 passed（独立 worktree，见"运行"行）。
 
 **2026-11-16 R26：Qwen3.6 文本路径 MRoPE position_ids 语义**（分支
 `codex/qwen36-text-mrope-r26`）：vllm_qwen36_mrope_pin 5 文件
@@ -146,7 +221,7 @@ attribution.json 逐 op 归因，--check 无漂移复算）。新增 32 项独�
 source_map 注册）。既有断言随事实更新（G9/G10/test_model_ir_v02/
 test_v41_moe_route 结构缺口断言；test_v41_hc 冻结面追加 moe_act/
 moe_shared_act 行名，各附因——合法门禁更新非放宽）。[报告]
-(validation/v41-swiglu-tail-20261113.md)；G-C15 主干解除。剩余：clamp
+(validation/v41-swiglu-tail-20261113.md)；G-C18 主干解除。剩余：clamp
 kernel 数值等价/masked/pad-aware 运行时差异/SWIGLUOAI 家族/MegaMoE
 SM100 执行变体、DSpark 草稿本体与非零尾部——登记不冒充。
 

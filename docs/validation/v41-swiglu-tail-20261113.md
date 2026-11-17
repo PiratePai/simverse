@@ -181,7 +181,8 @@ totals delta = Σ by_op delta 断言成立；测试 §7 同步冻结。
 ## 7. 结论
 
 swiglu_limit 与 compress_ratios 尾部两项缺口按 13 文件 pin
-source-checked 解除（G-C15）；V4.1 config 覆盖完备。新增计量为
+source-checked 解除（G-C15；该编号 2026-11-17 修复重号后为 G-C18，
+见 capability-gaps 编号修复注记）；V4.1 config 覆盖完备。新增计量为
 纯增量（+483,840 flops/+80 行，decode TP8/B1），字节与内存账本不变。
 structure_complete 仍 False（核本体）；部署排名资格不变。全部验证为
 源码阅读 + 本仓独立 oracle + 解析 replay；无 CPU forward/GPU 实测。

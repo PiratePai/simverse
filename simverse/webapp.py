@@ -2,11 +2,13 @@
 
 铁律：前端零物理计算——所有数字来自 /api/v2/run 的 ResultBundle；本文件只做
 入口转发。生产工作台 /（static/workbench.html）；v0.1 简表 /legacy；
-原型演示仍在 docs/rebuild-20261106/prototype/（不进生产路径）。
+原型演示仍在 docs/rebuild-20261106/prototype/（不进生产路径，经 /docs/ 只读）。
 """
 from __future__ import annotations
 
+import html
 import json
+import re
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -18,6 +20,23 @@ from .models import registry_json
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIO_DIR = ROOT / "assets" / "scenarios"
+# 工作台顶栏文档链接的只读根（send_from_directory 自带穿越/绝对路径拒绝，
+# 只开放仓库 docs/ 一层，不提供任意本地文件访问）
+DOCS_DIR = ROOT / "docs"
+
+
+def _linked_markdown(text: str) -> str:
+    """保留原文排版，并让文档内相对链接可点击。"""
+    escaped = html.escape(text)
+
+    def link(match):
+        target = html.unescape(match.group(2))
+        if not target or target.startswith(("/", "\\")) or ":" in target:
+            return match.group(0)
+        return (f'<a href="{html.escape(target, quote=True)}">'
+                f'{match.group(1)}</a>')
+
+    return re.sub(r"\[([^\]\n]+)\]\(([^)\s]+)\)", link, escaped)
 
 app = Flask(__name__, static_folder=str(Path(__file__).parent / "static"),
             static_url_path="/static")
@@ -44,6 +63,31 @@ def index():
 @app.get("/legacy")
 def legacy_index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.get("/docs/<path:fn>")
+def docs_static(fn):
+    """docs/ 只读静态路由（顶栏四个文档链接 + 原型存档的相对资源）。
+
+    只开放仓库 docs/ 目录；Markdown 用最小 <pre> 包装（无渲染依赖、无 JS），
+    其余文件按原样发送。不注册任何 docs 之外的文件入口。
+    """
+    path = (DOCS_DIR / fn).resolve()
+    if not path.is_relative_to(DOCS_DIR.resolve()):
+        return jsonify({"error": "只允许访问 docs 目录"}), 404
+    if fn.lower().endswith(".md"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return jsonify({"error": f"文档不存在或不可读：{fn}"}), 404
+        return (
+            "<!DOCTYPE html><html lang=zh><head><meta charset=utf-8>"
+            "<title>simverse docs · " + html.escape(fn) + "</title>"
+            "<body style=font-family:Consolas,monospace;margin:24px;"
+            "white-space:pre-wrap;word-break:break-word;line-height:1.55>"
+            + _linked_markdown(text) + "</body></html>"
+        ), 200, {"Content-Type": "text/html; charset=utf-8"}
+    return send_from_directory(DOCS_DIR, fn)
 
 
 # ---------------------------------------------------------------------------
@@ -104,10 +148,14 @@ def api_v2_sweep():
 
 @app.get("/api/v2/export/<fmt>")
 def api_v2_export(fmt):
-    """从最近一次 run 的 body 重放导出（POST /api/v2/run 已含全部字段；
-    CSV 由前端从同一 bundle 生成前调用此端点登记 manifest——保持单一来源）。"""
-    return jsonify({"error": "请 POST /api/v2/run 并使用返回的 bundle 导出；"
-                             "服务端不维护会话状态"}), 400
+    """已移除（2026-11-17 工作台审查）：该端点从未有调用方且恒返 400，
+    旧注释“前端导出前在此登记 manifest”与实际行为不符。导出统一从
+    POST /api/v2/run 返回的同一 ResultBundle 派生（前端按钮 / CLI
+    export-v2），服务端不维护“最近一次运行”会话状态。保留 410 明示弃用。
+    """
+    return jsonify({"error": "该端点已弃用（无调用方、恒不可用）。请 POST "
+                             "/api/v2/run 并从返回的 bundle 导出（前端按钮或 "
+                             "CLI export-v2）；服务端无状态导出。"}), 410
 
 
 # ---------------------------------------------------------------------------
