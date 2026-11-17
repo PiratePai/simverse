@@ -196,7 +196,7 @@ def check() -> None:
         # ② 当前代码复现已提交 after（确定性）
         if comparable != committed:
             ok = False
-            print(f"DRIFT: after-{name}.json 与当前复算不一致")
+            print(f"DRIFT: after-{name}.json differs from current replay")
     att = build_attribution()
     committed_att = json.loads((FOLDER / "attribution.json").read_text(
         encoding="utf-8"))

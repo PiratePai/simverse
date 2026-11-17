@@ -118,7 +118,7 @@ def test_selected_pipeline_and_serial_boundaries_are_distinct():
 
 def test_original_fifteen_scenario_anchors():
     for script in ("tools/replay_cost_groups.py", "tools/replay_cost_integrity_r27.py"):
-        args = [sys.executable, script] + (["--check"] if "r27" in script else [])
+        args = [sys.executable, "-X", "utf8", script] + (["--check"] if "r27" in script else [])
         result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
         assert result.returncode == 0, result.stderr
 
