@@ -1,6 +1,6 @@
 # Simverse 合入准则（长期规范）
 
-版本：1.1（2026-11-09 建立；2026-11-10 增补两模型证据分层/配置覆盖/CI 门禁）。
+版本：1.2（2026-11-18 增补成本组所有权；原来源、适用域与证据门禁保留）。
 本文件是所有合入 new-viewer/simverse 的**强制性准则**，
 与 [重构计划](rebuild-20261106/plan.md)、[原理底座](rebuild-20261106/principles.md)、
 [UI 数据契约](rebuild-20261106/ui-data-contract.md) 配套：那些文件定义目标架构，本文件定义
@@ -30,6 +30,10 @@
    能做必须做；不能做的在缺口清单登记，不得因此把结论标成已验证。
 6. **profile 的算子所有权**：校准映射必须写明被测算子拥有哪些账本行（含融合边界，
    如 fused QKV+QKNorm、fused add+norm），并给出采集代码位置作为证据。
+   默认计时单位为成本组：允许一个有依据的融合/模块计时区间拥有多行，不要求把组耗时
+   分摊为逐行实测。每个计价项只能由一个组拥有；组内解析成本沿用原项求和，不由
+   `sum(max(compute, memory))` 擅自改成 `max(sum(compute), sum(memory))`。通信原语、
+   阶段、目标/草稿、未知项与计时边界分别保留。来源不完整的组可先审计归档，不能准入校准。
 7. **完整 config 覆盖**：必须展平完整 config（含 `text_config`/`vision_config`/
    `quantization_config`/`rope_parameters`/`dflash_config` 等嵌套叶键）逐键登记。
    未知键**不得默认 ignored**；不能映射的键登记 `unsupported-semantic` 并进 gaps。

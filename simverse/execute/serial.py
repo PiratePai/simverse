@@ -44,6 +44,21 @@ class SerialRound:
                 "tpot_ms": self.tpot_ms, "reason": self.reason}
 
 
+def evaluate_execution(plan, stage_costs, e_n, deployment):
+    """One execution policy for analytical and selected costs; no model recount."""
+    if e_n is None:
+        return SerialRound("r0", [], 0.0, None, None, "E[N] unknown"), None
+    serial = build_serial_round(plan, stage_costs, e_n)
+    simulation = None
+    if deployment.mode == "dt_pipeline_sim":
+        from .resource_core import dt_pipeline_schedule
+        draft = sum(v for k,v in stage_costs.items() if k == "draft_block" or k.startswith("draft_step_"))
+        simulation = dt_pipeline_schedule(draft, stage_costs.get("d2t", 0.0),
+            stage_costs.get("verify_block", stage_costs.get("verify", 0.0)), stage_costs.get("t2d", 0.0),
+            rounds=deployment.pipeline_rounds, microbatches=deployment.pipeline_microbatches).to_json()
+    return serial, simulation
+
+
 def build_serial_round(plan, stage_costs: Dict[str, float], e_n: Optional[float],
                        reason: Optional[str] = None) -> SerialRound:
     """把 MethodPlan 步骤 + 各阶段计价串成一条因果链。

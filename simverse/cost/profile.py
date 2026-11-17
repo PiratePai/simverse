@@ -1,6 +1,7 @@
 """Profile 校准契约（Q2/§10）：接口先行，无数据时 unmeasured。
 
-三对象（M2 契约 + 合成 fixture 验证接线；真实采集/拟合/holdout 属 M4）：
+兼容契约（历史 M2 合成 fixture；运行时统一由 cost.session.CostSession 驱动，
+本模块不构成另一条生产计价路径）：
   ProfileRecord   一次原始测量：实现/recipe/版本、shape/dtype/设备栈、计时边界、
                   warmup/重复政策、样本统计身份
   CalibrationModel 版本化校准模型：训练/留出引用、覆盖域、误差报告、外推政策
