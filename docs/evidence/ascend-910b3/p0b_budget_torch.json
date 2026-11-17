@@ -1,0 +1,72 @@
+{
+  "kind": "gd7_budget_torch",
+  "captured_at": "2026-11-17T10:44:30+0800",
+  "ascend_rt_visible_devices": "6,7",
+  "torch": "2.9.0+cpu",
+  "torch_npu": "2.9.0.post9",
+  "timing_boundary": "runtime-api",
+  "devices": [
+    {
+      "logical_dev": 0,
+      "name": "Ascend910B3",
+      "total_bytes": 65452113920,
+      "free_after_init": 65062248448,
+      "reserved_after_init": 389865472,
+      "steps": [
+        {
+          "requested_gib": 1,
+          "ok": true,
+          "free_bytes": 63982215168,
+          "allocated_bytes": 1073742336,
+          "reserved_bytes": 1075838976
+        },
+        {
+          "requested_gib": 4,
+          "ok": true,
+          "free_bytes": 60760989696,
+          "allocated_bytes": 4294967808,
+          "reserved_bytes": 4297064448
+        },
+        {
+          "requested_gib": 8,
+          "ok": true,
+          "free_bytes": 56466022400,
+          "allocated_bytes": 8589935104,
+          "reserved_bytes": 8592031744
+        }
+      ],
+      "free_after_release": 65058054144
+    },
+    {
+      "logical_dev": 1,
+      "name": "Ascend910B3",
+      "total_bytes": 65452113920,
+      "free_after_init": 65060270080,
+      "reserved_after_init": 391843840,
+      "steps": [
+        {
+          "requested_gib": 1,
+          "ok": true,
+          "free_bytes": 63980236800,
+          "allocated_bytes": 1073742336,
+          "reserved_bytes": 1075838976
+        },
+        {
+          "requested_gib": 4,
+          "ok": true,
+          "free_bytes": 60759011328,
+          "allocated_bytes": 4294967808,
+          "reserved_bytes": 4297064448
+        },
+        {
+          "requested_gib": 8,
+          "ok": true,
+          "free_bytes": 56464044032,
+          "allocated_bytes": 8589935104,
+          "reserved_bytes": 8592031744
+        }
+      ],
+      "free_after_release": 65056075776
+    }
+  ]
+}

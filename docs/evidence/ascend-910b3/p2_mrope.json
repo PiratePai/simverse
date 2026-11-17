@@ -1,0 +1,46 @@
+{
+  "kind": "gc16_mrope_text_rope_device_semantics",
+  "captured_at": "2026-11-17T10:49:39+0800",
+  "device": "Ascend910B3",
+  "ascend_rt_visible_devices": "6,7",
+  "head_dim": 128,
+  "rope_theta": 1000000.0,
+  "comparisons": {
+    "device_equivalence": "NPU float32 vs CPU float32",
+    "algorithm_precision": "NPU float32 vs CPU float64"
+  },
+  "timing_boundary": "device-executed",
+  "positions": [
+    {
+      "pos": 0,
+      "vs_cpu_fp32_max_abs": 0.0,
+      "vs_cpu_fp64_max_abs": 0.0
+    },
+    {
+      "pos": 1,
+      "vs_cpu_fp32_max_abs": 2.384185791015625e-07,
+      "vs_cpu_fp64_max_abs": 2.4520050700971296e-07
+    },
+    {
+      "pos": 127,
+      "vs_cpu_fp32_max_abs": 4.76837158203125e-07,
+      "vs_cpu_fp64_max_abs": 4.883888341078446e-06
+    },
+    {
+      "pos": 1000,
+      "vs_cpu_fp32_max_abs": 2.384185791015625e-07,
+      "vs_cpu_fp64_max_abs": 4.1819272146637054e-05
+    },
+    {
+      "pos": 32767,
+      "vs_cpu_fp32_max_abs": 4.76837158203125e-07,
+      "vs_cpu_fp64_max_abs": 0.00211484754521285
+    }
+  ],
+  "three_row_identity": {
+    "max_abs_diff": 5.45075457596721,
+    "bit_identical": false
+  },
+  "max_vs_cpu_fp32": 4.76837158203125e-07,
+  "max_vs_cpu_fp64": 0.00211484754521285
+}

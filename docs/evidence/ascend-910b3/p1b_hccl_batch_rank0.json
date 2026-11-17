@@ -1,0 +1,424 @@
+{
+  "kind": "r17_hccl_batch_timing",
+  "captured_at": "2026-11-17T10:47:00+0800",
+  "rank": 0,
+  "world_size": 2,
+  "device_name": "Ascend910B3",
+  "ascend_rt_visible_devices": "6,7",
+  "transport": "HCCS (verified via HCCL plog: transporttype[HCCS])",
+  "timing_boundary": "device-sync wallclock, batched: N collectives per timing window, per-op = window/N",
+  "batches": 5,
+  "results": [
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 1024,
+      "iters_per_batch": 100,
+      "median_ms": 0.161147,
+      "min_ms": 0.160474,
+      "algbw_GBps": 0.006,
+      "busbw_GBps": 0.003
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 1024,
+      "iters_per_batch": 100,
+      "median_ms": 0.286097,
+      "min_ms": 0.285642,
+      "algbw_GBps": 0.004
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 1024,
+      "iters_per_batch": 100,
+      "median_ms": 0.265322,
+      "min_ms": 0.262217,
+      "algbw_GBps": 0.004
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 1024,
+      "iters_per_batch": 100,
+      "median_ms": 0.16834,
+      "min_ms": 0.165857,
+      "algbw_GBps": 0.006
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 1024,
+      "iters_per_batch": 100,
+      "median_ms": 0.192177,
+      "min_ms": 0.1907,
+      "algbw_GBps": 0.005
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 4096,
+      "iters_per_batch": 100,
+      "median_ms": 0.161204,
+      "min_ms": 0.160316,
+      "algbw_GBps": 0.025,
+      "busbw_GBps": 0.013
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 4096,
+      "iters_per_batch": 100,
+      "median_ms": 0.288614,
+      "min_ms": 0.286451,
+      "algbw_GBps": 0.014
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 4096,
+      "iters_per_batch": 100,
+      "median_ms": 0.262896,
+      "min_ms": 0.26142,
+      "algbw_GBps": 0.016
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 4096,
+      "iters_per_batch": 100,
+      "median_ms": 0.164005,
+      "min_ms": 0.161442,
+      "algbw_GBps": 0.025
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 4096,
+      "iters_per_batch": 100,
+      "median_ms": 0.185724,
+      "min_ms": 0.184905,
+      "algbw_GBps": 0.022
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 16384,
+      "iters_per_batch": 100,
+      "median_ms": 0.156048,
+      "min_ms": 0.153728,
+      "algbw_GBps": 0.105,
+      "busbw_GBps": 0.052
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 16384,
+      "iters_per_batch": 100,
+      "median_ms": 0.28946,
+      "min_ms": 0.287394,
+      "algbw_GBps": 0.057
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 16384,
+      "iters_per_batch": 100,
+      "median_ms": 0.266335,
+      "min_ms": 0.261323,
+      "algbw_GBps": 0.062
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 16384,
+      "iters_per_batch": 100,
+      "median_ms": 0.159835,
+      "min_ms": 0.15849,
+      "algbw_GBps": 0.103
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 16384,
+      "iters_per_batch": 100,
+      "median_ms": 0.184391,
+      "min_ms": 0.183901,
+      "algbw_GBps": 0.089
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 65536,
+      "iters_per_batch": 100,
+      "median_ms": 0.154888,
+      "min_ms": 0.153445,
+      "algbw_GBps": 0.423,
+      "busbw_GBps": 0.211
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 65536,
+      "iters_per_batch": 100,
+      "median_ms": 0.289331,
+      "min_ms": 0.288292,
+      "algbw_GBps": 0.227
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 65536,
+      "iters_per_batch": 100,
+      "median_ms": 0.26515,
+      "min_ms": 0.263029,
+      "algbw_GBps": 0.247
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 65536,
+      "iters_per_batch": 100,
+      "median_ms": 0.160304,
+      "min_ms": 0.157428,
+      "algbw_GBps": 0.409
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 65536,
+      "iters_per_batch": 100,
+      "median_ms": 0.18265,
+      "min_ms": 0.181634,
+      "algbw_GBps": 0.359
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 262144,
+      "iters_per_batch": 100,
+      "median_ms": 0.158197,
+      "min_ms": 0.153906,
+      "algbw_GBps": 1.657,
+      "busbw_GBps": 0.829
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 262144,
+      "iters_per_batch": 100,
+      "median_ms": 0.285961,
+      "min_ms": 0.28483,
+      "algbw_GBps": 0.917
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 262144,
+      "iters_per_batch": 100,
+      "median_ms": 0.25696,
+      "min_ms": 0.253889,
+      "algbw_GBps": 1.02
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 262144,
+      "iters_per_batch": 100,
+      "median_ms": 0.161135,
+      "min_ms": 0.159847,
+      "algbw_GBps": 1.627
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 262144,
+      "iters_per_batch": 100,
+      "median_ms": 0.18358,
+      "min_ms": 0.182486,
+      "algbw_GBps": 1.428
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 1048576,
+      "iters_per_batch": 100,
+      "median_ms": 0.159053,
+      "min_ms": 0.156773,
+      "algbw_GBps": 6.593,
+      "busbw_GBps": 3.296
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 1048576,
+      "iters_per_batch": 100,
+      "median_ms": 0.217801,
+      "min_ms": 0.216787,
+      "algbw_GBps": 4.814
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 1048576,
+      "iters_per_batch": 100,
+      "median_ms": 0.19656,
+      "min_ms": 0.194689,
+      "algbw_GBps": 5.335
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 1048576,
+      "iters_per_batch": 100,
+      "median_ms": 0.161232,
+      "min_ms": 0.160164,
+      "algbw_GBps": 6.504
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 1048576,
+      "iters_per_batch": 100,
+      "median_ms": 0.186109,
+      "min_ms": 0.184766,
+      "algbw_GBps": 5.634
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 4194304,
+      "iters_per_batch": 100,
+      "median_ms": 0.260601,
+      "min_ms": 0.259872,
+      "algbw_GBps": 16.095,
+      "busbw_GBps": 8.047
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 4194304,
+      "iters_per_batch": 100,
+      "median_ms": 0.258892,
+      "min_ms": 0.258459,
+      "algbw_GBps": 16.201
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 4194304,
+      "iters_per_batch": 100,
+      "median_ms": 0.195279,
+      "min_ms": 0.194221,
+      "algbw_GBps": 21.478
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 4194304,
+      "iters_per_batch": 100,
+      "median_ms": 0.160918,
+      "min_ms": 0.159605,
+      "algbw_GBps": 26.065
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 4194304,
+      "iters_per_batch": 100,
+      "median_ms": 0.243569,
+      "min_ms": 0.24308,
+      "algbw_GBps": 17.22
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 16777216,
+      "iters_per_batch": 100,
+      "median_ms": 0.945386,
+      "min_ms": 0.939206,
+      "algbw_GBps": 17.746,
+      "busbw_GBps": 8.873
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 16777216,
+      "iters_per_batch": 100,
+      "median_ms": 0.943303,
+      "min_ms": 0.941139,
+      "algbw_GBps": 17.786
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 16777216,
+      "iters_per_batch": 100,
+      "median_ms": 0.522309,
+      "min_ms": 0.520952,
+      "algbw_GBps": 32.121
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 16777216,
+      "iters_per_batch": 100,
+      "median_ms": 0.530483,
+      "min_ms": 0.52611,
+      "algbw_GBps": 31.626
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 16777216,
+      "iters_per_batch": 100,
+      "median_ms": 0.88854,
+      "min_ms": 0.886176,
+      "algbw_GBps": 18.882
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 67108864,
+      "iters_per_batch": 20,
+      "median_ms": 3.688599,
+      "min_ms": 3.676792,
+      "algbw_GBps": 18.194,
+      "busbw_GBps": 9.097
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 67108864,
+      "iters_per_batch": 20,
+      "median_ms": 3.79981,
+      "min_ms": 3.785239,
+      "algbw_GBps": 17.661
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 67108864,
+      "iters_per_batch": 20,
+      "median_ms": 2.156547,
+      "min_ms": 2.146151,
+      "algbw_GBps": 31.119
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 67108864,
+      "iters_per_batch": 20,
+      "median_ms": 2.025974,
+      "min_ms": 2.017636,
+      "algbw_GBps": 33.124
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 67108864,
+      "iters_per_batch": 20,
+      "median_ms": 3.474709,
+      "min_ms": 3.466476,
+      "algbw_GBps": 19.314
+    },
+    {
+      "op": "all_reduce",
+      "bytes_per_rank": 268435456,
+      "iters_per_batch": 20,
+      "median_ms": 14.560769,
+      "min_ms": 14.534167,
+      "algbw_GBps": 18.436,
+      "busbw_GBps": 9.218
+    },
+    {
+      "op": "all_gather",
+      "bytes_per_rank": 268435456,
+      "iters_per_batch": 20,
+      "median_ms": 15.133949,
+      "min_ms": 15.127628,
+      "algbw_GBps": 17.737
+    },
+    {
+      "op": "reduce_scatter",
+      "bytes_per_rank": 268435456,
+      "iters_per_batch": 20,
+      "median_ms": 8.496653,
+      "min_ms": 8.480639,
+      "algbw_GBps": 31.593
+    },
+    {
+      "op": "all_to_all_single",
+      "bytes_per_rank": 268435456,
+      "iters_per_batch": 20,
+      "median_ms": 7.296606,
+      "min_ms": 7.289292,
+      "algbw_GBps": 36.789
+    },
+    {
+      "op": "broadcast",
+      "bytes_per_rank": 268435456,
+      "iters_per_batch": 20,
+      "median_ms": 14.023863,
+      "min_ms": 14.007466,
+      "algbw_GBps": 19.141
+    }
+  ],
+  "comm_pool_bytes": 445497344
+}

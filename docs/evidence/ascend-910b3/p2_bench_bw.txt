@@ -1,0 +1,4 @@
+copy 1GiB: 1.764 ms -> 1217.5 GB/s (read+write)
+add 1GiB: 3.364 ms -> 957.4 GB/s (2R+1W)
+softmax 8x32k: 0.0949 ms
+BW_OK

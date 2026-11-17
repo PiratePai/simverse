@@ -1,0 +1,165 @@
+{
+  "evidence_id": "ev-ascend-910b3-20261117",
+  "captured_at": "2026-11-17T10:44:00+0800",
+  "device": "Ascend910B3 x2 (physical 6,7)",
+  "ascend_rt_visible_devices": "6,7",
+  "software_stack": {
+    "cann": "9.1.0",
+    "driver": "26.0.rc1",
+    "torch": "2.9.0+cpu",
+    "torch_npu": "2.9.0.post9",
+    "python": "3.12.3",
+    "os": "openEuler 22.03 aarch64"
+  },
+  "source_kind": "measured",
+  "timing_boundaries": [
+    "runtime-api",
+    "device-sync wallclock",
+    "device-executed",
+    "KERNEL_ONLY"
+  ],
+  "not_in_tree": [
+    "msprof raw profiling output (size, machine paths)",
+    "HCCL plog archive (transport evidence, size)"
+  ],
+  "limits": [
+    "See review.json and the review report before use; original derived fields include known errors.",
+    "No production profile, model forward, topology or deployment eligibility is granted.",
+    "Source kind describes collection only; metadata and methodology have not passed calibration admission."
+  ],
+  "files": {
+    "README.md": {
+      "sha256": "649363865cac51d01eea5c3360913840206fe41d1760b46c4c8dd7ab33c674c2",
+      "bytes": 2761
+    },
+    "diag_hccl.log": {
+      "sha256": "57767a39ec71b0d2d1c1567234adf54fcd4e6f5ad0c9fc2b4c18fe56cd08d3ec",
+      "bytes": 727
+    },
+    "env.txt": {
+      "sha256": "36220c49c3a95558a33fffdeeb44d6c132a5ad8051a9cdb3a52f0aed3a0133dc",
+      "bytes": 94
+    },
+    "msprof_by_shape.txt": {
+      "sha256": "251351bcfad8a0a666ab627f76bc5b56a75027b20e19034ae592f53adfcfa4f5",
+      "bytes": 580
+    },
+    "msprof_op_summary.txt": {
+      "sha256": "b28cb1d73ee511224190d303a9fdbedb8d35de31182018c31df9f2d68a0de6a9",
+      "bytes": 375
+    },
+    "p0a_budget_acl.json": {
+      "sha256": "88fb37574cf05cefdebfbc2d204be3bf8edefef84edd6260f4f7f3e7f776763b",
+      "bytes": 1533
+    },
+    "p0b_budget_torch.json": {
+      "sha256": "8e9a60ce93148f16f2db10271e5202c347e898a8736c9009eb6716d2bdffa44f",
+      "bytes": 1851
+    },
+    "p1a_runtime_pools.json": {
+      "sha256": "604f62a43a2e1bac86947418a70b3c1e71d84c98e9cc8833d13e3678acf74ba5",
+      "bytes": 1221
+    },
+    "p1b_hccl_batch_rank0.json": {
+      "sha256": "01cd15521745fddb66af596944e7213057acf0aa29bf21aad4dd03f0cabb1e25",
+      "bytes": 9910
+    },
+    "p1b_hccl_batch_rank1.json": {
+      "sha256": "bf85b0d75be5cf29a1926207175bbe5225de24381792a5d3c22d3e189e495d42",
+      "bytes": 9919
+    },
+    "p2_bench_bw.txt": {
+      "sha256": "49aad0b9a486551f5d2fccac7f44d85e146109f3a1294c56835ecbf2b0979b0a",
+      "bytes": 120
+    },
+    "p2_bench_gemm.txt": {
+      "sha256": "ac941d91d051dc9fe0807e9716d2a05c5653d498eda61197cf850a12c98ed75e",
+      "bytes": 340
+    },
+    "p2_moe_route.json": {
+      "sha256": "a9fcfe2bcd3c5b93411b1b0d60c02011ba352f16f96c87853d741228431b4e61",
+      "bytes": 2506
+    },
+    "p2_mrope.json": {
+      "sha256": "663c59443e3b2d58375aa59923ff8fd15ad48185dcba09cad27e369335e5ded0",
+      "bytes": 1219
+    },
+    "p2_mrope_identity.json": {
+      "sha256": "531375078f5d47f50b7be83f5ae42b3af46a69b443898ede0f0dfb8e1274c82d",
+      "bytes": 240
+    },
+    "p2_swiglu.json": {
+      "sha256": "07fa416edd9c11f96b808c0dc9218f0beab0d0f16e9007aeebdc36a28accd8fa",
+      "bytes": 4214
+    },
+    "p3_per_op_qwen.json": {
+      "sha256": "004249cb6aa2514946b62430b4a8ee20645ef358a576cc3e0bb13881042f877d",
+      "bytes": 10470
+    },
+    "scripts/mini_ops.py": {
+      "sha256": "6c346dfaeecf228b347355dca83c18bba71db349cf177a539d957fc6dc6fe23c",
+      "bytes": 431
+    },
+    "scripts/p0a_budget_acl.py": {
+      "sha256": "d3b3460fdad38bc26bc6ed8d7337206e12a9a5eac54938971bc1f74ce9220965",
+      "bytes": 1484
+    },
+    "scripts/p0b_budget_torch.py": {
+      "sha256": "20b5516609d6540b133ee3c356d7fe9e1196c6982ab7a67c447f2df5f4eaa38e",
+      "bytes": 1483
+    },
+    "scripts/p1a_runtime_pools.py": {
+      "sha256": "7f07422b6ab46bcab2201315977b0244715c26715b122f4c1bfacca751aa7715",
+      "bytes": 2554
+    },
+    "scripts/p1b_hccl.py": {
+      "sha256": "9ba72852e7b08e019627ffcc614102abab54ce655799d0741e917e813d1022fa",
+      "bytes": 3824
+    },
+    "scripts/p1b_hccl_batch.py": {
+      "sha256": "b294e0fd7114ad47da2e610bc60b8ed525df5d8efc837ef62f39be2668e95499",
+      "bytes": 3745
+    },
+    "scripts/p2_bench_bw.py": {
+      "sha256": "3291d5433053f07e3716d962db3336688c834c874a9d0101766fa8557f8bb0a9",
+      "bytes": 1219
+    },
+    "scripts/p2_bench_gemm.py": {
+      "sha256": "d78a4d9d9e859f2dfe9319a91bb0d81e235da8b40fe2660eb0fca59d30ce00f3",
+      "bytes": 1006
+    },
+    "scripts/p2_moe_route.py": {
+      "sha256": "60d852095e9991e693cd74123e7952a52bb03f87d7abdcbd009ed81bba5ead6c",
+      "bytes": 3150
+    },
+    "scripts/p2_mrope.py": {
+      "sha256": "ecda2d273ed703702f80b8f8a27a058e90a3c83ae12ec4a6442c1cebfda7394d",
+      "bytes": 2630
+    },
+    "scripts/p2_swiglu.py": {
+      "sha256": "4c021399178fb731e3f4bfb4515050690e15621288e9dce2148c69e08237b10a",
+      "bytes": 2775
+    },
+    "scripts/p3_per_op.py": {
+      "sha256": "23d2cc2c618ec596071a957d61798c9f2bc6e64c8259fe776927ba6720c6f5a1",
+      "bytes": 7474
+    },
+    "review.json": {
+      "sha256": "0348676fb7ec006848616ebe1d175d64ed6878c96f493435e6ad8f1e26ac3257",
+      "bytes": 10730
+    }
+  },
+  "calibration_admission": "not-admitted",
+  "review": "review.json",
+  "review_provenance": {
+    "original_commit": "6a16fbed8e6dc0982ed9abdea0ea1df6c006e429",
+    "original_manifest_sha256": "f7a3c31eca12d5e4d55f22b35d6f8ea95c5ccb07d5d67ece29cfe6455f4a72fa",
+    "changed_capture_files": [
+      "README.md"
+    ],
+    "new_files": [
+      "review.json"
+    ],
+    "raw_measurements_and_scripts_unchanged": true
+  }
+}

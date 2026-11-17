@@ -1,0 +1,7 @@
+{
+  "kind": "gc16_mrope_three_row_identity",
+  "captured_at": "2026-11-17T10:49:58+0800",
+  "max_abs_diff": 0.0,
+  "bit_identical": true,
+  "note": "文本路径三行 position 相同 → 分段重组退化为标准 NeoX 1D 位置嵌入"
+}

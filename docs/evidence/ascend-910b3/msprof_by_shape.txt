@@ -1,0 +1,5 @@
+op                                             input_shapes                                 n  median_us     min_us
+aclnnMatmul_MatMulCommon_MatMulV2              "1,2048;2048,1024"                          23      7.080      6.740
+aclnnMatmul_MatMulCommon_MatMulV2              "64,2048;2048,1024"                         23      8.620      8.200
+aclnnMatmul_MatMulCommon_MatMulV2              "512,2048;2048,1024"                        23     13.900     13.580
+aclnnMatmul_MatMulCommon_MatMulV2              "1,2048;2048,31040"                         23     73.302     72.502

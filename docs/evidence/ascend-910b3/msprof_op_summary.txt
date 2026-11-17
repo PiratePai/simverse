@@ -1,0 +1,6 @@
+rows: 108
+duration col: Task Duration(us)
+op_name                           n      mean_us       min_us       max_us
+aclnnInplaceNormal_DSARandomNormal_DSARandomNormal      8      839.407        1.360     6002.060
+aclnnMatmul_MatMulCommon_MatMulV2     92       27.317        6.740      177.224
+aclnnInplaceNormal_CastAiCore_Cast      8       37.216        1.300      249.026
