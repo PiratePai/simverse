@@ -44,3 +44,5 @@ docs/evidence/ascend-910b3/** -text diff
 docs/evidence/ascend-910b3-r29/** -text diff
 # R29 capture manifest also hashes this original report outside the archive.
 docs/validation/ascend-910b3-r29.md text eol=lf
+assets/cost_records/*.json text eol=lf
+docs/evidence/ascend-record-costs/*.json text eol=lf

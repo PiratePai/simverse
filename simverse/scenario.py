@@ -175,6 +175,7 @@ class ScenarioV2:
     # dense_w=8 推出来的；量化/回退场景必须显式覆盖。
     draft_ctx_kv_path: str = FUSED_RAW
     cost_profile: Optional[str] = None   # profile 集 id（如 h200-qwen3-30b-a3b-tiny-op-v1）
+    cost_records: Optional[str] = None   # 独立栈的条件观测档，不与生产profile混用
     seed: int = 0
     notes: str = ""
 
@@ -195,6 +196,12 @@ class ScenarioV2:
                 setattr(self, field_name, merged)
 
     def validate(self) -> "ScenarioV2":
+        if self.cost_records is not None:
+            from .cost.records import SETS
+            if not isinstance(self.cost_records, str) or self.cost_records not in SETS:
+                raise ValueError("未知成本记录档；一次只能选择一个独立环境的记录档")
+            if self.cost_profile:
+                raise ValueError("成本记录对照不能与实测 profile 混用；计时边界/栈域不同")
         if self.deployment.mode not in DEPLOY_MODES:
             raise ValueError(f"未知部署模式 {self.deployment.mode}")
         if self.method_id == "baseline" and self.deployment.mode != "baseline":
@@ -300,6 +307,8 @@ class ScenarioV2:
 
     def to_json(self) -> dict:
         out = asdict(self)
+        if self.cost_records is None:
+            out.pop("cost_records")
         out["rng"] = self.rng().to_json()
         return out
 

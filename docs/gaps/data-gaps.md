@@ -1,5 +1,7 @@
 # 数据采集缺口清单（需要额外采集的数据）
 
+> 2026-11-17：R29 通信与 R28 纯 GEMM 已分档用于条件成本对照，不能跨栈拼接成实测校准。当前真实数据缺口按 [七场景回放](../evidence/ascend-record-costs/coverage-plan.json) 与当前 run 的回退清单更新：完整运行身份/独立批次，真实 logits/EP 原语，TP2 及 verify M16 形状，实际 MoE/GDN/attention 和草稿身份；详见 [计划](../ascend-validation-plan.md)。已有数据不盲目全网格重采，栈域变化/正式准入统计目标变化时单独建立新 run。
+
 > 2026-11-17 R29 / PR #23：[审查修正](../validation/ascend-910b3-r29-review.md)已归档。仍缺完整 runtime commit/本地补丁/CANN 身份、失败尝试日志、逐头 MRoPE 正确采样、实际后端数值与状态、同栈容量/通信联合窗口及原始 profiler trace。现有 TP1 产 token 与通用切片不解除 G-D7/R02b/R17/R18；按 A-N1a/b、A-N2a、A-N3a 补齐，不重写原始测量。下列 R28 内容是历史审查记录。
 
 > 2026-11-17 R28 更新：昇腾先于 NVIDIA 新卡；见 [有限硬件与 profiling 计划](../ascend-validation-plan.md)。

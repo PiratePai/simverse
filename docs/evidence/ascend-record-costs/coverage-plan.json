@@ -1,0 +1,4732 @@
+{
+  "schema_version": 1,
+  "method": "offline replay, no NPU execution",
+  "scope": "conditional observation comparison; fallback costs are analytical diagnostics, not measured bottlenecks",
+  "cases": [
+    {
+      "name": "r29-tp2-baseline",
+      "scenario": {
+        "schema_version": "0.2",
+        "name": "r29-tp2-baseline",
+        "model_id": "qwen36_35b_a3b",
+        "draft_id": "dflash_qwen36_35b_a3b",
+        "method_id": "baseline",
+        "k": 15,
+        "block_size": 16,
+        "deployment": {
+          "mode": "baseline",
+          "target_device": "ascend_910b3",
+          "target_tp": 2,
+          "target_ep": 1,
+          "draft_device": "l40",
+          "draft_tp": 1,
+          "link": "pcie5",
+          "draft_on_target_group": true,
+          "pipeline_microbatches": 2,
+          "pipeline_rounds": 6,
+          "budget": null,
+          "draft_budget": null,
+          "engram_table_placement": "cpu_offload",
+          "v41_kv_record": "fp8_ds_mla_sm90"
+        },
+        "workload": {
+          "batch": 1,
+          "ctx_tokens": 4096,
+          "osl_tokens": null,
+          "arrival": "fixed-batch",
+          "source_kind": "hypothesis",
+          "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+        },
+        "acceptance": {
+          "kind": "geometric",
+          "alpha": 0.75
+        },
+        "quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_ctx_kv_path": "fused_raw",
+        "cost_profile": null,
+        "cost_records": "ascend-r29-hccl",
+        "seed": 0,
+        "notes": "",
+        "rng": {
+          "algorithm": "pcg64-xsl-rr",
+          "master_seed": 0,
+          "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+          "semantic_key_fields": {
+            "model": "qwen36_35b_a3b",
+            "method": "baseline",
+            "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+          }
+        }
+      },
+      "record_digest": "db7b8278063dc03485afac51b598a2c6c3605a2a7cf6cbccfaa6d78e6d2d4def",
+      "work_digest": "sha256:83c0266ec8c9867b7432732e6319bedd4b454444c5091f116c92fa0f7be54aef",
+      "raw_counts_memory_unchanged": true,
+      "matched": 80,
+      "total": 704,
+      "analytical_tpot_ms": 25.748260145129617,
+      "record_tpot_ms": 22.110020145129617,
+      "coverage_by_stage": {
+        "target_decode": {
+          "matched": 80,
+          "total": 704,
+          "record_ms": 12.36688,
+          "fallback_ms": 9.743140145129615,
+          "selected_ms": 22.110020145129614,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.5593337282745159
+        }
+      },
+      "prerequisites": [
+        "P0：补CANN/runtime commit/dirty补丁/实际拓扑/每run唯一ID与计时原样窗口",
+        "P1：同栈至少三次独立进程，按shape分组留出；通信联合批窗口对齐；不重复收费host/launch"
+      ],
+      "unpriced_components": [],
+      "measurement_plan": [
+        {
+          "reason_code": "operator-set-missing",
+          "reason": "所选 R29 档只有通信；不能混入 R28 不同栈的算子成本",
+          "instances": 623,
+          "fallback_analytic_ms": 9.639260145129615,
+          "action": "在R29统一栈补采当前模型真实算子；R28独立GEMM可先单独对照，不跨栈拼接",
+          "unique_cases": 27,
+          "examples": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP2 inter/tp=256 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1600240269879496
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5251773378313253
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp2=256",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.3950030033734937
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2626526689156627
+            }
+          ],
+          "cases": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP2 inter/tp=256 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1600240269879496
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5251773378313253
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp2=256",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.3950030033734937
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2626526689156627
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=16(卡上) d_k=128 d_v=128 state=262144 elem（每请求常数，per-rank）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.19670275084337355
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=8 kv(card)=1 v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.13237585855421685
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.13177433445783138
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "in_proj_ba",
+              "shape": [
+                1,
+                2048,
+                32
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.012689843855421686
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 4096(卡上)",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.003842960963855421
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "shared_gate",
+              "shape": "sigmoid gate Linear(h,1) replicated",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0010282138709677422
+            },
+            {
+              "name": "v_norm_gated",
+              "shape": "16 头(卡上) × d_v=128",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.000821969032258065
+            },
+            {
+              "name": "attn_output_gate",
+              "shape": "sigmoid(gate)·attn_out 逐元素 2048 elem（q_proj 2× 门控分支消费；R06 fixture 修正）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00038412337349397587
+            },
+            {
+              "name": "q_norm",
+              "shape": "8 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00028998580645161294
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00026037161290322586
+            },
+            {
+              "name": "k_norm",
+              "shape": "1 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 6.424822580645163e-05
+            },
+            {
+              "name": "final_norm",
+              "shape": "width=2048（final，replicated）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 5.122468072289157e-05
+            },
+            {
+              "name": "embed_lookup",
+              "shape": "查表 1 行/token；容量 h×V/tp（词表行切）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 2.5600000000000002e-05
+            }
+          ]
+        },
+        {
+          "reason_code": "primitive-unresolved",
+          "reason": "实际通信原语/切分与记录不等价，不能按字节碰巧相等替换",
+          "instances": 1,
+          "fallback_analytic_ms": 0.10388,
+          "action": "先固定Ascend实际gather/allgather或EP variable-split实现，再采对应通信，不按同字节硬配",
+          "unique_cases": 1,
+          "examples": [
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ],
+          "cases": [
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "r29-tp2-dflash",
+      "scenario": {
+        "schema_version": "0.2",
+        "name": "r29-tp2-dflash",
+        "model_id": "qwen36_35b_a3b",
+        "draft_id": "dflash_qwen36_35b_a3b",
+        "method_id": "dflash_v1",
+        "k": 15,
+        "block_size": 16,
+        "deployment": {
+          "mode": "colocated",
+          "target_device": "ascend_910b3",
+          "target_tp": 2,
+          "target_ep": 1,
+          "draft_device": "l40",
+          "draft_tp": 1,
+          "link": "pcie5",
+          "draft_on_target_group": true,
+          "pipeline_microbatches": 2,
+          "pipeline_rounds": 6,
+          "budget": null,
+          "draft_budget": null,
+          "engram_table_placement": "cpu_offload",
+          "v41_kv_record": "fp8_ds_mla_sm90"
+        },
+        "workload": {
+          "batch": 1,
+          "ctx_tokens": 4096,
+          "osl_tokens": null,
+          "arrival": "fixed-batch",
+          "source_kind": "hypothesis",
+          "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+        },
+        "acceptance": {
+          "kind": "geometric",
+          "alpha": 0.75
+        },
+        "quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_ctx_kv_path": "fused_raw",
+        "cost_profile": null,
+        "cost_records": "ascend-r29-hccl",
+        "seed": 0,
+        "notes": "",
+        "rng": {
+          "algorithm": "pcg64-xsl-rr",
+          "master_seed": 0,
+          "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+          "semantic_key_fields": {
+            "model": "qwen36_35b_a3b",
+            "method": "dflash_v1",
+            "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+          }
+        }
+      },
+      "record_digest": "db7b8278063dc03485afac51b598a2c6c3605a2a7cf6cbccfaa6d78e6d2d4def",
+      "work_digest": "sha256:db4182fd336e883aad66d509f3ee5faad079834239da0141bf0c4f651e951649",
+      "raw_counts_memory_unchanged": true,
+      "matched": 172,
+      "total": 1530,
+      "analytical_tpot_ms": 18.230667487829347,
+      "record_tpot_ms": 17.027995593604487,
+      "coverage_by_stage": {
+        "draft_block": {
+          "matched": 12,
+          "total": 122,
+          "record_ms": 1.791096,
+          "fallback_ms": 3.4051538131709096,
+          "selected_ms": 5.196249813170909,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.34469012545550015
+        },
+        "target_decode": {
+          "matched": 80,
+          "total": 704,
+          "record_ms": 12.36688,
+          "fallback_ms": 9.743140145129615,
+          "selected_ms": 22.110020145129614,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.5593337282745159
+        },
+        "verify_block": {
+          "matched": 80,
+          "total": 704,
+          "record_ms": 11.94064,
+          "fallback_ms": 50.2924336956582,
+          "selected_ms": 62.2330736956582,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.1918696810379954
+        }
+      },
+      "prerequisites": [
+        "P0：补CANN/runtime commit/dirty补丁/实际拓扑/每run唯一ID与计时原样窗口",
+        "P1：同栈至少三次独立进程，按shape分组留出；通信联合批窗口对齐；不重复收费host/launch",
+        "未计价方法阶段仍为unknown，不在覆盖分母内：先确认Ascend实现，再采接受/回退/hidden提取，不按0ms忽略"
+      ],
+      "unpriced_components": [
+        {
+          "id": "stage_cost_complete",
+          "time_ms": null,
+          "reason": "DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；时间线以显式 0 占位，仅为已建模阶段下界。R07a 源码核对：两栈 accept/bonus/prepare-inputs 均为 GPU kernel，但计时边界不同——vLLM prepare_dflash_inputs 是图外 eager Triton，draft sampler 在 draft FULL 图内；SGLang draft sampler 在 draft 图内，accept/bonus 为独立 Triton launch；均未独立计价，仍 unknown。成本行按 vLLM 实现（layout copy/全量 logits）；SGLang 无全局 layout copy 等差异单列 source_map"
+        }
+      ],
+      "measurement_plan": [
+        {
+          "reason_code": "operator-set-missing",
+          "reason": "所选 R29 档只有通信；不能混入 R28 不同栈的算子成本",
+          "instances": 1354,
+          "fallback_analytic_ms": 63.016567653958724,
+          "action": "在R29统一栈补采当前模型真实算子；R28独立GEMM可先单独对照，不跨栈拼接",
+          "unique_cases": 63,
+          "examples": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=16 TP2 inter/tp=256 → E[U]=101.962（分片字节口径）",
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 40.3218900511747
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=16(卡上) d_k=128 d_v=128 state=262144 elem（每请求常数，per-rank）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 3.343946764337353
+            },
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP2 inter/tp=256 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1600240269879496
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                16,
+                2048,
+                124160
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.6263776848192772
+            },
+            {
+              "name": "draft_lm_head",
+              "shape": "B=1×(blk−1)=15×2048×248320/tp2（目标 lm_head 分片共享，读流量入草稿；容量归目标对象；logits 聚合通信在 lowering 计）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.6240570795180724
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                16,
+                2048,
+                4096
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.6155522159036133
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            }
+          ],
+          "cases": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=16 TP2 inter/tp=256 → E[U]=101.962（分片字节口径）",
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 40.3218900511747
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=16(卡上) d_k=128 d_v=128 state=262144 elem（每请求常数，per-rank）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 3.343946764337353
+            },
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP2 inter/tp=256 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1600240269879496
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                16,
+                2048,
+                124160
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.6263776848192772
+            },
+            {
+              "name": "draft_lm_head",
+              "shape": "B=1×(blk−1)=15×2048×248320/tp2（目标 lm_head 分片共享，读流量入草稿；容量归目标对象；logits 聚合通信在 lowering 计）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.6240570795180724
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                16,
+                2048,
+                4096
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.6155522159036133
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp2=256",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.8168110573493982
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                16,
+                2048,
+                2048
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.8108481079518074
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                16,
+                2048,
+                2048
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.8108481079518074
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                16,
+                2048,
+                4096
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5385174053012047
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5251773378313253
+            },
+            {
+              "name": "gate_up_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.48405126477108423
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                16,
+                2048,
+                2048
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2702827026506024
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2626526689156627
+            },
+            {
+              "name": "down_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.24264003238554213
+            },
+            {
+              "name": "dflash_fc",
+              "shape": "B=1×blk=16（verify 跨度）×[16384→2048] fc（replicated，不随 TP2 缩放）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.21479256212048192
+            },
+            {
+              "name": "q_proj",
+              "shape": "blk=16 heads(卡上)=16",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.16216962159036144
+            },
+            {
+              "name": "o_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.16216962159036144
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=65672 heads(card)=8 kv(card)=1 v2.causal_pairs",
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.15196349108433735
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                16,
+                2048,
+                256
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.14230935132530115
+            },
+            {
+              "name": "draft_attn_core",
+              "shape": "B=1 pairs=65536 rows=4096 win=4096 causal=True heads(卡上)=16",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 5,
+              "fallback_analytic_ms": 0.14179636433734938
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=8 kv(card)=1 v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.13237585855421685
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.13177433445783138
+            },
+            {
+              "name": "ctx_kv_proj",
+              "shape": "span=B=1×blk=16 行投影/committed=3.96 行写 path=fused_raw（raw 融合 GEMM（_fused_kv_weight 新 cat 副本））；全层 _fused_kv_weight 融合 GEMM，仅 K/V 行",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.08185125454518072
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 4096(卡上)",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 0.06533033638554218
+            },
+            {
+              "name": "k_proj",
+              "shape": "kv(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.041464005397590355
+            },
+            {
+              "name": "v_proj",
+              "shape": "kv(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.041464005397590355
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                16,
+                2048,
+                256
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03557733783132531
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                16,
+                2048,
+                256
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03557733783132531
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "draft_attn_core",
+              "shape": "B=1 pairs=65792 rows=4096 win=None causal=False heads(卡上)=16",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.028365651277108432
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.026145692903225777
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.026145692903225777
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.019590804516129014
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.019590804516129014
+            },
+            {
+              "name": "in_proj_ba",
+              "shape": [
+                16,
+                2048,
+                32
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.018717501686746983
+            },
+            {
+              "name": "v_norm_gated",
+              "shape": "16 头(卡上) × d_v=128",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 0.013253473548387082
+            },
+            {
+              "name": "in_proj_ba",
+              "shape": [
+                1,
+                2048,
+                32
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.012689843855421686
+            },
+            {
+              "name": "shared_gate",
+              "shape": "sigmoid gate Linear(h,1) replicated",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.009799635806451613
+            },
+            {
+              "name": "attn_output_gate",
+              "shape": "sigmoid(gate)·attn_out 逐元素 2048 elem（q_proj 2× 门控分支消费；R06 fixture 修正）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.006530097349397588
+            },
+            {
+              "name": "q_norm",
+              "shape": "8 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.0044497587096774165
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=64",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.004426317419354841
+            },
+            {
+              "name": "attn_add",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.00369115664516129
+            },
+            {
+              "name": "mlp_add",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.00369115664516129
+            },
+            {
+              "name": "attn_norm",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0026302312258064515
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0026302312258064515
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=128 heads(卡上)=16",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0025486699354838713
+            },
+            {
+              "name": "q_norm",
+              "shape": "16 头(卡上) × d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.002486300903225806
+            },
+            {
+              "name": "ctx_kv_layout_copy",
+              "shape": "vLLM permute+contiguous span=16×L=6×2×kv=4×d=128 读+写（SGLang 无全局拷贝）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.0012288
+            },
+            {
+              "name": "ctx_k_rope",
+              "shape": "ctx K RoPE span=16×kvh=4×d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0006916441445783132
+            },
+            {
+              "name": "k_norm",
+              "shape": "4 头(卡上) × d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0006287752258064516
+            },
+            {
+              "name": "ctx_k_norm",
+              "shape": "ctx K RMSNorm span=16×kvh=4×d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0006245945060240966
+            },
+            {
+              "name": "k_norm",
+              "shape": "1 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.0006122198387096776
+            },
+            {
+              "name": "final_norm",
+              "shape": "width=2048（final，replicated）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 2,
+              "fallback_analytic_ms": 0.0004868195722891566
+            },
+            {
+              "name": "dflash_hidden_norm",
+              "shape": "width=2048（fc 后归一）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.000435594891566265
+            },
+            {
+              "name": "draft_final_norm",
+              "shape": "B=1×blk=16 行，width=2048（draft final，replicated）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.000435594891566265
+            },
+            {
+              "name": "embed_lookup",
+              "shape": "查表 1 行/token；容量 h×V/tp（词表行切）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 2,
+              "fallback_analytic_ms": 0.00043520000000000006
+            },
+            {
+              "name": "noise_embed",
+              "shape": "B=1×blk=16 行查表（目标 embedding 共享，词表行切）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.00040960000000000004
+            }
+          ]
+        },
+        {
+          "reason_code": "primitive-unresolved",
+          "reason": "实际通信原语/切分与记录不等价，不能按字节碰巧相等替换",
+          "instances": 3,
+          "fallback_analytic_ms": 0.42416,
+          "action": "先固定Ascend实际gather/allgather或EP variable-split实现，再采对应通信，不按同字节硬配",
+          "unique_cases": 3,
+          "examples": [
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 3973120
+              },
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.16208
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 3724800
+              },
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.1582
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ],
+          "cases": [
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 3973120
+              },
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.16208
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 3724800
+              },
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.1582
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "r29-tp2-ep2",
+      "scenario": {
+        "schema_version": "0.2",
+        "name": "r29-tp2-ep2",
+        "model_id": "qwen36_35b_a3b",
+        "draft_id": "dflash_qwen36_35b_a3b",
+        "method_id": "baseline",
+        "k": 15,
+        "block_size": 16,
+        "deployment": {
+          "mode": "baseline",
+          "target_device": "ascend_910b3",
+          "target_tp": 2,
+          "target_ep": 2,
+          "draft_device": "l40",
+          "draft_tp": 1,
+          "link": "pcie5",
+          "draft_on_target_group": true,
+          "pipeline_microbatches": 2,
+          "pipeline_rounds": 6,
+          "budget": null,
+          "draft_budget": null,
+          "engram_table_placement": "cpu_offload",
+          "v41_kv_record": "fp8_ds_mla_sm90"
+        },
+        "workload": {
+          "batch": 1,
+          "ctx_tokens": 4096,
+          "osl_tokens": null,
+          "arrival": "fixed-batch",
+          "source_kind": "hypothesis",
+          "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+        },
+        "acceptance": {
+          "kind": "geometric",
+          "alpha": 0.75
+        },
+        "quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_ctx_kv_path": "fused_raw",
+        "cost_profile": null,
+        "cost_records": "ascend-r29-hccl",
+        "seed": 0,
+        "notes": "",
+        "rng": {
+          "algorithm": "pcg64-xsl-rr",
+          "master_seed": 0,
+          "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+          "semantic_key_fields": {
+            "model": "qwen36_35b_a3b",
+            "method": "baseline",
+            "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+          }
+        }
+      },
+      "record_digest": "db7b8278063dc03485afac51b598a2c6c3605a2a7cf6cbccfaa6d78e6d2d4def",
+      "work_digest": "sha256:7ecdc19f3708a4265352b903e37b4337e4b94c4172a4efb96fd702ea52e623c6",
+      "raw_counts_memory_unchanged": true,
+      "matched": 40,
+      "total": 744,
+      "analytical_tpot_ms": 25.746704145129616,
+      "record_tpot_ms": 23.927584145129615,
+      "coverage_by_stage": {
+        "target_decode": {
+          "matched": 40,
+          "total": 744,
+          "record_ms": 6.18344,
+          "fallback_ms": 17.744144145129617,
+          "selected_ms": 23.927584145129615,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.2584230803450594
+        }
+      },
+      "prerequisites": [
+        "P0：补CANN/runtime commit/dirty补丁/实际拓扑/每run唯一ID与计时原样窗口",
+        "P1：同栈至少三次独立进程，按shape分组留出；通信联合批窗口对齐；不重复收费host/launch"
+      ],
+      "unpriced_components": [],
+      "measurement_plan": [
+        {
+          "reason_code": "operator-set-missing",
+          "reason": "所选 R29 档只有通信；不能混入 R28 不同栈的算子成本",
+          "instances": 623,
+          "fallback_analytic_ms": 9.635164145129615,
+          "action": "在R29统一栈补采当前模型真实算子；R28独立GEMM可先单独对照，不跨栈拼接",
+          "unique_cases": 27,
+          "examples": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 EP2 E_local=128 → E[U_local]=4.000（均匀路由假设）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1559280269879513
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5251773378313253
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp2=256",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.3950030033734937
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2626526689156627
+            }
+          ],
+          "cases": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 EP2 E_local=128 → E[U_local]=4.000（均匀路由假设）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1559280269879513
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5251773378313253
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp2=256",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.3950030033734937
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2626526689156627
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=16(卡上) d_k=128 d_v=128 state=262144 elem（每请求常数，per-rank）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.19670275084337355
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=8 kv(card)=1 v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.13237585855421685
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.13177433445783138
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "in_proj_ba",
+              "shape": [
+                1,
+                2048,
+                32
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.012689843855421686
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 4096(卡上)",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.003842960963855421
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "shared_gate",
+              "shape": "sigmoid gate Linear(h,1) replicated",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0010282138709677422
+            },
+            {
+              "name": "v_norm_gated",
+              "shape": "16 头(卡上) × d_v=128",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.000821969032258065
+            },
+            {
+              "name": "attn_output_gate",
+              "shape": "sigmoid(gate)·attn_out 逐元素 2048 elem（q_proj 2× 门控分支消费；R06 fixture 修正）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00038412337349397587
+            },
+            {
+              "name": "q_norm",
+              "shape": "8 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00028998580645161294
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00026037161290322586
+            },
+            {
+              "name": "k_norm",
+              "shape": "1 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 6.424822580645163e-05
+            },
+            {
+              "name": "final_norm",
+              "shape": "width=2048（final，replicated）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 5.122468072289157e-05
+            },
+            {
+              "name": "embed_lookup",
+              "shape": "查表 1 行/token；容量 h×V/tp（词表行切）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 2.5600000000000002e-05
+            }
+          ]
+        },
+        {
+          "reason_code": "primitive-unresolved",
+          "reason": "实际通信原语/切分与记录不等价，不能按字节碰巧相等替换",
+          "instances": 81,
+          "fallback_analytic_ms": 8.10898,
+          "action": "先固定Ascend实际gather/allgather或EP variable-split实现，再采对应通信，不按同字节硬配",
+          "unique_cases": 3,
+          "examples": [
+            {
+              "name": "ep_dispatch",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 4080
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 4.002549999999998
+            },
+            {
+              "name": "ep_combine",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 4080
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 4.002549999999998
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ],
+          "cases": [
+            {
+              "name": "ep_dispatch",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 4080
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 4.002549999999998
+            },
+            {
+              "name": "ep_combine",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 4080
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 4.002549999999998
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "r29-tp8-domain-fallback",
+      "scenario": {
+        "schema_version": "0.2",
+        "name": "r29-tp8-domain-fallback",
+        "model_id": "qwen36_35b_a3b",
+        "draft_id": "dflash_qwen36_35b_a3b",
+        "method_id": "baseline",
+        "k": 15,
+        "block_size": 16,
+        "deployment": {
+          "mode": "baseline",
+          "target_device": "ascend_910b3",
+          "target_tp": 8,
+          "target_ep": 1,
+          "draft_device": "l40",
+          "draft_tp": 1,
+          "link": "pcie5",
+          "draft_on_target_group": true,
+          "pipeline_microbatches": 2,
+          "pipeline_rounds": 6,
+          "budget": null,
+          "draft_budget": null,
+          "engram_table_placement": "cpu_offload",
+          "v41_kv_record": "fp8_ds_mla_sm90"
+        },
+        "workload": {
+          "batch": 1,
+          "ctx_tokens": 4096,
+          "osl_tokens": null,
+          "arrival": "fixed-batch",
+          "source_kind": "hypothesis",
+          "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+        },
+        "acceptance": {
+          "kind": "geometric",
+          "alpha": 0.75
+        },
+        "quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_ctx_kv_path": "fused_raw",
+        "cost_profile": null,
+        "cost_records": "ascend-r29-hccl",
+        "seed": 0,
+        "notes": "",
+        "rng": {
+          "algorithm": "pcg64-xsl-rr",
+          "master_seed": 0,
+          "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+          "semantic_key_fields": {
+            "model": "qwen36_35b_a3b",
+            "method": "baseline",
+            "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+          }
+        }
+      },
+      "record_digest": "db7b8278063dc03485afac51b598a2c6c3605a2a7cf6cbccfaa6d78e6d2d4def",
+      "work_digest": "sha256:4ce58c71bc9c4c7a9a939080be29422540528eeab7de103dc89c52c36e8f8c39",
+      "raw_counts_memory_unchanged": true,
+      "matched": 0,
+      "total": 704,
+      "analytical_tpot_ms": 115.58350301050466,
+      "record_tpot_ms": null,
+      "coverage_by_stage": {
+        "target_decode": {
+          "matched": 0,
+          "total": 704,
+          "record_ms": 0,
+          "fallback_ms": 115.58350301050467,
+          "selected_ms": 115.58350301050467,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.0
+        }
+      },
+      "prerequisites": [
+        "P0：补CANN/runtime commit/dirty补丁/实际拓扑/每run唯一ID与计时原样窗口",
+        "P1：同栈至少三次独立进程，按shape分组留出；通信联合批窗口对齐；不重复收费host/launch"
+      ],
+      "unpriced_components": [],
+      "measurement_plan": [
+        {
+          "reason_code": "rank-domain",
+          "reason": "通信仅有 world=2，不外推其他 rank 数",
+          "instances": 81,
+          "fallback_analytic_ms": 112.71575,
+          "action": "先验收已有双卡；TP4/8需更多卡或匹配trace，不用双卡带宽外推",
+          "unique_cases": 2,
+          "examples": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 7168
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 112.00896000000023
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 434560
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.70679
+            }
+          ],
+          "cases": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 7168
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 112.00896000000023
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 434560
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.70679
+            }
+          ]
+        },
+        {
+          "reason_code": "operator-set-missing",
+          "reason": "所选 R29 档只有通信；不能混入 R28 不同栈的算子成本",
+          "instances": 623,
+          "fallback_analytic_ms": 2.867753010504664,
+          "action": "在R29统一栈补采当前模型真实算子；R28独立GEMM可先单独对照，不跨栈拼接",
+          "unique_cases": 27,
+          "examples": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.7961500067469884
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                31040
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.3979017513253012
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                1024
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.39417100337349414
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2625259646385542
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                512
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.197277501686747
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                512,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.197277501686747
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.13177433445783138
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                1024
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.1313903344578313
+            }
+          ],
+          "cases": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.7961500067469884
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                31040
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.3979017513253012
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                1024
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.39417100337349414
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2625259646385542
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                512
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.197277501686747
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                512,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.197277501686747
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.13177433445783138
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                1024
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.1313903344578313
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp8=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.09951875084337355
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                1,
+                2048,
+                512
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.06575916722891566
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                1,
+                2048,
+                512
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.06575916722891566
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                512,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.06575916722891566
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.04917568771084339
+            },
+            {
+              "name": "in_proj_ba",
+              "shape": [
+                1,
+                2048,
+                8
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.0034604609638554246
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "shared_gate",
+              "shape": "sigmoid gate Linear(h,1) replicated",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0010282138709677422
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 1024(卡上)",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.0009607402409638553
+            },
+            {
+              "name": "v_norm_gated",
+              "shape": "4 头(卡上) × d_v=128",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.00024149225806451631
+            },
+            {
+              "name": "q_norm",
+              "shape": "2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 9.649645161290321e-05
+            },
+            {
+              "name": "k_norm",
+              "shape": "2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 9.649645161290321e-05
+            },
+            {
+              "name": "attn_output_gate",
+              "shape": "sigmoid(gate)·attn_out 逐元素 512 elem（q_proj 2× 门控分支消费；R06 fixture 修正）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 9.603084337349397e-05
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 6.809290322580643e-05
+            },
+            {
+              "name": "final_norm",
+              "shape": "width=2048（final，replicated）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 5.122468072289157e-05
+            },
+            {
+              "name": "embed_lookup",
+              "shape": "查表 1 行/token；容量 h×V/tp（词表行切）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 2.5600000000000002e-05
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "r28-tp2-baseline",
+      "scenario": {
+        "schema_version": "0.2",
+        "name": "r28-tp2-baseline",
+        "model_id": "qwen36_35b_a3b",
+        "draft_id": "dflash_qwen36_35b_a3b",
+        "method_id": "baseline",
+        "k": 15,
+        "block_size": 16,
+        "deployment": {
+          "mode": "baseline",
+          "target_device": "ascend_910b3",
+          "target_tp": 2,
+          "target_ep": 1,
+          "draft_device": "l40",
+          "draft_tp": 1,
+          "link": "pcie5",
+          "draft_on_target_group": true,
+          "pipeline_microbatches": 2,
+          "pipeline_rounds": 6,
+          "budget": null,
+          "draft_budget": null,
+          "engram_table_placement": "cpu_offload",
+          "v41_kv_record": "fp8_ds_mla_sm90"
+        },
+        "workload": {
+          "batch": 1,
+          "ctx_tokens": 4096,
+          "osl_tokens": null,
+          "arrival": "fixed-batch",
+          "source_kind": "hypothesis",
+          "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+        },
+        "acceptance": {
+          "kind": "geometric",
+          "alpha": 0.75
+        },
+        "quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_ctx_kv_path": "fused_raw",
+        "cost_profile": null,
+        "cost_records": "ascend-r28-gemm",
+        "seed": 0,
+        "notes": "",
+        "rng": {
+          "algorithm": "pcg64-xsl-rr",
+          "master_seed": 0,
+          "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+          "semantic_key_fields": {
+            "model": "qwen36_35b_a3b",
+            "method": "baseline",
+            "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+          }
+        }
+      },
+      "record_digest": "5f5a35982ec47243158d2809ba727fbf0b94f1893282b5eb3826e6416c2688f2",
+      "work_digest": "sha256:83c0266ec8c9867b7432732e6319bedd4b454444c5091f116c92fa0f7be54aef",
+      "raw_counts_memory_unchanged": true,
+      "matched": 40,
+      "total": 704,
+      "analytical_tpot_ms": 25.748260145129617,
+      "record_tpot_ms": 26.475700734947658,
+      "coverage_by_stage": {
+        "target_decode": {
+          "matched": 40,
+          "total": 704,
+          "record_ms": 0.8592149242758751,
+          "fallback_ms": 25.616485810671787,
+          "selected_ms": 26.47570073494766,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.03245296254394204
+        }
+      },
+      "prerequisites": [
+        "P0：补CANN/runtime commit/dirty补丁/实际拓扑/每run唯一ID与计时原样窗口",
+        "P1：同栈至少三次独立进程，按shape分组留出；通信联合批窗口对齐；不重复收费host/launch"
+      ],
+      "unpriced_components": [],
+      "measurement_plan": [
+        {
+          "reason_code": "communication-set-missing",
+          "reason": "所选 R28 档只有独立算子；不能混入 R29 不同栈的通信成本",
+          "instances": 81,
+          "fallback_analytic_ms": 16.109,
+          "action": "先单独使用R29通信档；若需同次组合，在统一栈采集匹配算子与通信",
+          "unique_cases": 2,
+          "examples": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": 4096,
+                "analytic_wire_bytes": 4096
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 16.00511999999998
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ],
+          "cases": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": 4096,
+                "analytic_wire_bytes": 4096
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 16.00511999999998
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 2,
+                "input_bytes": null,
+                "analytic_wire_bytes": 248320
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.10388
+            }
+          ]
+        },
+        {
+          "reason_code": "shape-missing",
+          "reason": "算子有记录但当前 M/K/N 无匹配点；不插值、不外推",
+          "instances": 161,
+          "fallback_analytic_ms": 5.6094236501204815,
+          "action": "按下列M/K/N补采BF16独立GEMM，再核实际后端融合/布局；已有点不重采",
+          "unique_cases": 9,
+          "examples": [
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5251773378313253
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2626526689156627
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            }
+          ],
+          "cases": [
+            {
+              "name": "lm_head",
+              "shape": [
+                1,
+                2048,
+                124160
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 1.5915686053012048
+            },
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 1.5755320134939768
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.7879580067469881
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                1,
+                2048,
+                4096
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.5251773378313253
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                1,
+                2048,
+                2048
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2626526689156627
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                1,
+                2048,
+                256
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.03294358361445783
+            },
+            {
+              "name": "in_proj_ba",
+              "shape": [
+                1,
+                2048,
+                32
+              ],
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.012689843855421686
+            }
+          ]
+        },
+        {
+          "reason_code": "operator-not-equivalent",
+          "reason": "无等价独立 GEMM 记录，组合/代理/融合边界未核验",
+          "instances": 422,
+          "fallback_analytic_ms": 3.8980621605513015,
+          "action": "采实际后端的GDN/attention/MoE/融合组，逐组登记账本所有权，禁止以代理替代",
+          "unique_cases": 17,
+          "examples": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP2 inter/tp=256 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1600240269879496
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp2=256",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.3950030033734937
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=16(卡上) d_k=128 d_v=128 state=262144 elem（每请求常数，per-rank）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.19670275084337355
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=8 kv(card)=1 v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.13237585855421685
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 4096(卡上)",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.003842960963855421
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            }
+          ],
+          "cases": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP2 inter/tp=256 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 3.1600240269879496
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp2=256",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.3950030033734937
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=16(卡上) d_k=128 d_v=128 state=262144 elem（每请求常数，per-rank）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.19670275084337355
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=8 kv(card)=1 v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.13237585855421685
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 4096(卡上)",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.003842960963855421
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "shared_gate",
+              "shape": "sigmoid gate Linear(h,1) replicated",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0010282138709677422
+            },
+            {
+              "name": "v_norm_gated",
+              "shape": "16 头(卡上) × d_v=128",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.000821969032258065
+            },
+            {
+              "name": "attn_output_gate",
+              "shape": "sigmoid(gate)·attn_out 逐元素 2048 elem（q_proj 2× 门控分支消费；R06 fixture 修正）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00038412337349397587
+            },
+            {
+              "name": "q_norm",
+              "shape": "8 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00028998580645161294
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.00026037161290322586
+            },
+            {
+              "name": "k_norm",
+              "shape": "1 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 6.424822580645163e-05
+            },
+            {
+              "name": "final_norm",
+              "shape": "width=2048（final，replicated）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 5.122468072289157e-05
+            },
+            {
+              "name": "embed_lookup",
+              "shape": "查表 1 行/token；容量 h×V/tp（词表行切）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 2.5600000000000002e-05
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "r28-tp8-baseline",
+      "scenario": {
+        "schema_version": "0.2",
+        "name": "r28-tp8-baseline",
+        "model_id": "qwen36_35b_a3b",
+        "draft_id": "dflash_qwen36_35b_a3b",
+        "method_id": "baseline",
+        "k": 15,
+        "block_size": 16,
+        "deployment": {
+          "mode": "baseline",
+          "target_device": "ascend_910b3",
+          "target_tp": 8,
+          "target_ep": 1,
+          "draft_device": "l40",
+          "draft_tp": 1,
+          "link": "pcie5",
+          "draft_on_target_group": true,
+          "pipeline_microbatches": 2,
+          "pipeline_rounds": 6,
+          "budget": null,
+          "draft_budget": null,
+          "engram_table_placement": "cpu_offload",
+          "v41_kv_record": "fp8_ds_mla_sm90"
+        },
+        "workload": {
+          "batch": 1,
+          "ctx_tokens": 4096,
+          "osl_tokens": null,
+          "arrival": "fixed-batch",
+          "source_kind": "hypothesis",
+          "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+        },
+        "acceptance": {
+          "kind": "geometric",
+          "alpha": 0.75
+        },
+        "quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_ctx_kv_path": "fused_raw",
+        "cost_profile": null,
+        "cost_records": "ascend-r28-gemm",
+        "seed": 0,
+        "notes": "",
+        "rng": {
+          "algorithm": "pcg64-xsl-rr",
+          "master_seed": 0,
+          "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+          "semantic_key_fields": {
+            "model": "qwen36_35b_a3b",
+            "method": "baseline",
+            "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+          }
+        }
+      },
+      "record_digest": "5f5a35982ec47243158d2809ba727fbf0b94f1893282b5eb3826e6416c2688f2",
+      "work_digest": "sha256:4ce58c71bc9c4c7a9a939080be29422540528eeab7de103dc89c52c36e8f8c39",
+      "raw_counts_memory_unchanged": true,
+      "matched": 201,
+      "total": 704,
+      "analytical_tpot_ms": 115.58350301050466,
+      "record_tpot_ms": 118.44761934659522,
+      "coverage_by_stage": {
+        "target_decode": {
+          "matched": 201,
+          "total": 704,
+          "record_ms": 4.514646725729108,
+          "fallback_ms": 113.93297262086611,
+          "selected_ms": 118.44761934659522,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.038115132669054204
+        }
+      },
+      "prerequisites": [
+        "P0：补CANN/runtime commit/dirty补丁/实际拓扑/每run唯一ID与计时原样窗口",
+        "P1：同栈至少三次独立进程，按shape分组留出；通信联合批窗口对齐；不重复收费host/launch"
+      ],
+      "unpriced_components": [],
+      "measurement_plan": [
+        {
+          "reason_code": "communication-set-missing",
+          "reason": "所选 R28 档只有独立算子；不能混入 R29 不同栈的通信成本",
+          "instances": 81,
+          "fallback_analytic_ms": 112.71575,
+          "action": "先单独使用R29通信档；若需同次组合，在统一栈采集匹配算子与通信",
+          "unique_cases": 2,
+          "examples": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 7168
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 112.00896000000023
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 434560
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.70679
+            }
+          ],
+          "cases": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 7168
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 112.00896000000023
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 434560
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.70679
+            }
+          ]
+        },
+        {
+          "reason_code": "operator-not-equivalent",
+          "reason": "无等价独立 GEMM 记录，组合/代理/融合边界未核验",
+          "instances": 422,
+          "fallback_analytic_ms": 1.2172226208661097,
+          "action": "采实际后端的GDN/attention/MoE/融合组，逐组登记账本所有权，禁止以代理替代",
+          "unique_cases": 17,
+          "examples": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.7961500067469884
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2625259646385542
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp8=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.09951875084337355
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.04917568771084339
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            }
+          ],
+          "cases": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.7961500067469884
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2625259646385542
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp8=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.09951875084337355
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.04917568771084339
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.002055929677419354
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0015379819354838721
+            },
+            {
+              "name": "shared_gate",
+              "shape": "sigmoid gate Linear(h,1) replicated",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.0010282138709677422
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 1024(卡上)",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.0009607402409638553
+            },
+            {
+              "name": "v_norm_gated",
+              "shape": "4 头(卡上) × d_v=128",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.00024149225806451631
+            },
+            {
+              "name": "q_norm",
+              "shape": "2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 9.649645161290321e-05
+            },
+            {
+              "name": "k_norm",
+              "shape": "2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 9.649645161290321e-05
+            },
+            {
+              "name": "attn_output_gate",
+              "shape": "sigmoid(gate)·attn_out 逐元素 512 elem（q_proj 2× 门控分支消费；R06 fixture 修正）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 9.603084337349397e-05
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=64",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 6.809290322580643e-05
+            },
+            {
+              "name": "final_norm",
+              "shape": "width=2048（final，replicated）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 5.122468072289157e-05
+            },
+            {
+              "name": "embed_lookup",
+              "shape": "查表 1 行/token；容量 h×V/tp（词表行切）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 2.5600000000000002e-05
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "r28-tp8-dflash-verify16",
+      "scenario": {
+        "schema_version": "0.2",
+        "name": "r28-tp8-dflash-verify16",
+        "model_id": "qwen36_35b_a3b",
+        "draft_id": "dflash_qwen36_35b_a3b",
+        "method_id": "dflash_v1",
+        "k": 15,
+        "block_size": 16,
+        "deployment": {
+          "mode": "colocated",
+          "target_device": "ascend_910b3",
+          "target_tp": 8,
+          "target_ep": 1,
+          "draft_device": "l40",
+          "draft_tp": 1,
+          "link": "pcie5",
+          "draft_on_target_group": true,
+          "pipeline_microbatches": 2,
+          "pipeline_rounds": 6,
+          "budget": null,
+          "draft_budget": null,
+          "engram_table_placement": "cpu_offload",
+          "v41_kv_record": "fp8_ds_mla_sm90"
+        },
+        "workload": {
+          "batch": 1,
+          "ctx_tokens": 4096,
+          "osl_tokens": null,
+          "arrival": "fixed-batch",
+          "source_kind": "hypothesis",
+          "notes": "Q8：首版显式假设扫描；具体数值为可编辑演示默认值，非用户确认"
+        },
+        "acceptance": {
+          "kind": "geometric",
+          "alpha": 0.75
+        },
+        "quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_quant": {
+          "dense_w": 16,
+          "expert_w": 16,
+          "act": 16,
+          "kv": 16,
+          "state": 32
+        },
+        "draft_ctx_kv_path": "fused_raw",
+        "cost_profile": null,
+        "cost_records": "ascend-r28-gemm",
+        "seed": 0,
+        "notes": "",
+        "rng": {
+          "algorithm": "pcg64-xsl-rr",
+          "master_seed": 0,
+          "stream_derivation": "sha256(master_seed, stream_name, semantic_key) → seed",
+          "semantic_key_fields": {
+            "model": "qwen36_35b_a3b",
+            "method": "dflash_v1",
+            "acceptance": "[('alpha', 0.75), ('kind', 'geometric')]"
+          }
+        }
+      },
+      "record_digest": "5f5a35982ec47243158d2809ba727fbf0b94f1893282b5eb3826e6416c2688f2",
+      "work_digest": "sha256:730ae19d447a5052b6ff526526cba325e281ea842fd7d84352b77094fea04438",
+      "raw_counts_memory_unchanged": true,
+      "matched": 201,
+      "total": 1530,
+      "analytical_tpot_ms": 36.55616000311457,
+      "record_tpot_ms": 36.55616000311457,
+      "coverage_by_stage": {
+        "draft_block": {
+          "matched": 0,
+          "total": 122,
+          "record_ms": 0,
+          "fallback_ms": 18.61336154433939,
+          "selected_ms": 18.61336154433939,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.0
+        },
+        "target_decode": {
+          "matched": 201,
+          "total": 704,
+          "record_ms": 4.514646725729108,
+          "fallback_ms": 113.93297262086611,
+          "selected_ms": 118.44761934659522,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.038115132669054204
+        },
+        "verify_block": {
+          "matched": 0,
+          "total": 704,
+          "record_ms": 0,
+          "fallback_ms": 126.14572801147072,
+          "selected_ms": 126.14572801147072,
+          "time_fraction_basis": "成本评估实例的记录值/选用成本；非E2E实测时间覆盖",
+          "record_cost_fraction": 0.0
+        }
+      },
+      "prerequisites": [
+        "P0：补CANN/runtime commit/dirty补丁/实际拓扑/每run唯一ID与计时原样窗口",
+        "P1：同栈至少三次独立进程，按shape分组留出；通信联合批窗口对齐；不重复收费host/launch",
+        "未计价方法阶段仍为unknown，不在覆盖分母内：先确认Ascend实现，再采接受/回退/hidden提取，不按0ms忽略"
+      ],
+      "unpriced_components": [
+        {
+          "id": "stage_cost_complete",
+          "time_ms": null,
+          "reason": "DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；时间线以显式 0 占位，仅为已建模阶段下界。R07a 源码核对：两栈 accept/bonus/prepare-inputs 均为 GPU kernel，但计时边界不同——vLLM prepare_dflash_inputs 是图外 eager Triton，draft sampler 在 draft FULL 图内；SGLang draft sampler 在 draft 图内，accept/bonus 为独立 Triton launch；均未独立计价，仍 unknown。成本行按 vLLM 实现（layout copy/全量 logits）；SGLang 无全局 layout copy 等差异单列 source_map"
+        }
+      ],
+      "measurement_plan": [
+        {
+          "reason_code": "communication-set-missing",
+          "reason": "所选 R28 档只有独立算子；不能混入 R29 不同栈的通信成本",
+          "instances": 175,
+          "fallback_analytic_ms": 243.29110400000002,
+          "action": "先单独使用R29通信档；若需同次组合，在统一栈采集匹配算子与通信",
+          "unique_cases": 5,
+          "examples": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 114688
+              },
+              "stages": [
+                "draft_block",
+                "verify_block"
+              ],
+              "instances": 92,
+              "fallback_analytic_ms": 128.964864
+            },
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 7168
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 112.00896000000023
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 6952960
+              },
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.80864
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 6518400
+              },
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.8018500000000001
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 434560
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.70679
+            }
+          ],
+          "cases": [
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 114688
+              },
+              "stages": [
+                "draft_block",
+                "verify_block"
+              ],
+              "instances": 92,
+              "fallback_analytic_ms": 128.964864
+            },
+            {
+              "name": "allreduce",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 7168
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 112.00896000000023
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 6952960
+              },
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.80864
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 6518400
+              },
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.8018500000000001
+            },
+            {
+              "name": "logits_gather",
+              "shape": {
+                "ranks": 8,
+                "input_bytes": null,
+                "analytic_wire_bytes": 434560
+              },
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.70679
+            }
+          ]
+        },
+        {
+          "reason_code": "operator-not-equivalent",
+          "reason": "无等价独立 GEMM 记录，组合/代理/融合边界未核验",
+          "instances": 844,
+          "fallback_analytic_ms": 12.685984398119954,
+          "action": "采实际后端的GDN/attention/MoE/融合组，逐组登记账本所有权，禁止以代理替代",
+          "unique_cases": 19,
+          "examples": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=16 TP8 inter/tp=64 → E[U]=101.962（分片字节口径）",
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 10.178776512793682
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 0.8359866910843382
+            },
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.7961500067469884
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=65672 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2682628727710843
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2625259646385542
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp8=64",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.21725876433734967
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.026145692903225777
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.026145692903225777
+            }
+          ],
+          "cases": [
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=16 TP8 inter/tp=64 → E[U]=101.962（分片字节口径）",
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 10.178776512793682
+            },
+            {
+              "name": "gdn_recurrence",
+              "shape": "N_v=4(卡上) d_k=128 d_v=128 state=65536 elem（每请求常数，per-rank）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 0.8359866910843382
+            },
+            {
+              "name": "moe_routed",
+              "shape": "E=256 top-8 M=1 TP8 inter/tp=64 → E[U]=8.000（分片字节口径）",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.7961500067469884
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=65672 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2682628727710843
+            },
+            {
+              "name": "attention_core",
+              "shape": "pairs=4097 heads(card)=2 kv(card)=2（复制） v2.causal_pairs",
+              "stages": [
+                "target_decode"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.2625259646385542
+            },
+            {
+              "name": "moe_shared",
+              "shape": "shared inter=512/tp8=64",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.21725876433734967
+            },
+            {
+              "name": "attn_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.026145692903225777
+            },
+            {
+              "name": "mlp_add",
+              "shape": "残差逐元素加法（E09：不消失）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.026145692903225777
+            },
+            {
+              "name": "attn_norm",
+              "shape": "width=2048",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.019590804516129014
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "width=2048",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.019590804516129014
+            },
+            {
+              "name": "causal_conv1d",
+              "shape": "depthwise k=4 over 1024(卡上)",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 0.016332584096385546
+            },
+            {
+              "name": "shared_gate",
+              "shape": "sigmoid gate Linear(h,1) replicated",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 80,
+              "fallback_analytic_ms": 0.009799635806451613
+            },
+            {
+              "name": "v_norm_gated",
+              "shape": "4 头(卡上) × d_v=128",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 60,
+              "fallback_analytic_ms": 0.0033853683870967767
+            },
+            {
+              "name": "attn_output_gate",
+              "shape": "sigmoid(gate)·attn_out 逐元素 512 elem（q_proj 2× 门控分支消费；R06 fixture 修正）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.001632524337349397
+            },
+            {
+              "name": "q_norm",
+              "shape": "2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.0011604396774193546
+            },
+            {
+              "name": "k_norm",
+              "shape": "2 头(卡上) × d=256（act 按 ×hd 计，2026-11-10 修正漏乘）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.0011604396774193546
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=64",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 20,
+              "fallback_analytic_ms": 0.0011575793548387091
+            },
+            {
+              "name": "final_norm",
+              "shape": "width=2048（final，replicated）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 2,
+              "fallback_analytic_ms": 0.0004868195722891566
+            },
+            {
+              "name": "embed_lookup",
+              "shape": "查表 1 行/token；容量 h×V/tp（词表行切）",
+              "stages": [
+                "verify_block",
+                "target_decode"
+              ],
+              "instances": 2,
+              "fallback_analytic_ms": 0.00043520000000000006
+            }
+          ]
+        },
+        {
+          "reason_code": "shape-missing",
+          "reason": "算子有记录但当前 M/K/N 无匹配点；不插值、不外推",
+          "instances": 201,
+          "fallback_analytic_ms": 1.7249662342168675,
+          "action": "按下列M/K/N补采BF16独立GEMM，再核实际后端融合/布局；已有点不重采",
+          "unique_cases": 10,
+          "examples": [
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                16,
+                2048,
+                1024
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.4084960539759038
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                16,
+                2048,
+                31040
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.4067480212048193
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                16,
+                2048,
+                512
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.2073200269879519
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                16,
+                512,
+                2048
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.2073200269879519
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                16,
+                2048,
+                256
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.14230935132530115
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                16,
+                2048,
+                1024
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.13616535132530122
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                16,
+                2048,
+                512
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.0691066756626506
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                16,
+                2048,
+                512
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.0691066756626506
+            }
+          ],
+          "cases": [
+            {
+              "name": "in_proj_qkv",
+              "shape": [
+                16,
+                2048,
+                1024
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.4084960539759038
+            },
+            {
+              "name": "lm_head",
+              "shape": [
+                16,
+                2048,
+                31040
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.4067480212048193
+            },
+            {
+              "name": "in_proj_z",
+              "shape": [
+                16,
+                2048,
+                512
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.2073200269879519
+            },
+            {
+              "name": "out_proj",
+              "shape": [
+                16,
+                512,
+                2048
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.2073200269879519
+            },
+            {
+              "name": "moe_router",
+              "shape": [
+                16,
+                2048,
+                256
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 40,
+              "fallback_analytic_ms": 0.14230935132530115
+            },
+            {
+              "name": "q_proj",
+              "shape": [
+                16,
+                2048,
+                1024
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.13616535132530122
+            },
+            {
+              "name": "k_proj",
+              "shape": [
+                16,
+                2048,
+                512
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.0691066756626506
+            },
+            {
+              "name": "v_proj",
+              "shape": [
+                16,
+                2048,
+                512
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.0691066756626506
+            },
+            {
+              "name": "o_proj",
+              "shape": [
+                16,
+                512,
+                2048
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 10,
+              "fallback_analytic_ms": 0.0691066756626506
+            },
+            {
+              "name": "in_proj_ba",
+              "shape": [
+                16,
+                2048,
+                8
+              ],
+              "stages": [
+                "verify_block"
+              ],
+              "instances": 30,
+              "fallback_analytic_ms": 0.009287375421686749
+            }
+          ]
+        },
+        {
+          "reason_code": "model-role-mismatch",
+          "reason": "不是采集模型的 target 行，草稿/其他模型无匹配实现记录",
+          "instances": 108,
+          "fallback_analytic_ms": 0.9900075443393899,
+          "action": "为草稿模型单独绑定实现/形状/状态；目标模型样本不跨模型复用",
+          "unique_cases": 24,
+          "examples": [
+            {
+              "name": "draft_lm_head",
+              "shape": "B=1×(blk−1)=15×2048×248320/tp8（目标 lm_head 分片共享，读流量入草稿；容量归目标对象；logits 聚合通信在 lowering 计）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.4061582698795181
+            },
+            {
+              "name": "dflash_fc",
+              "shape": "B=1×blk=16（verify 跨度）×[16384→2048] fc（replicated，不随 TP8 缩放）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.21479256212048192
+            },
+            {
+              "name": "gate_up_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.12193441619277108
+            },
+            {
+              "name": "down_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.06158160809638555
+            },
+            {
+              "name": "q_proj",
+              "shape": "blk=16 heads(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.041464005397590355
+            },
+            {
+              "name": "o_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.041464005397590355
+            },
+            {
+              "name": "draft_attn_core",
+              "shape": "B=1 pairs=65536 rows=4096 win=4096 causal=True heads(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 5,
+              "fallback_analytic_ms": 0.035449091084337345
+            },
+            {
+              "name": "ctx_kv_proj",
+              "shape": "span=B=1×blk=16 行投影/committed=3.96 行写 path=fused_raw（raw 融合 GEMM（_fused_kv_weight 新 cat 副本））；全层 _fused_kv_weight 融合 GEMM，仅 K/V 行",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.021384408948795182
+            }
+          ],
+          "cases": [
+            {
+              "name": "draft_lm_head",
+              "shape": "B=1×(blk−1)=15×2048×248320/tp8（目标 lm_head 分片共享，读流量入草稿；容量归目标对象；logits 聚合通信在 lowering 计）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.4061582698795181
+            },
+            {
+              "name": "dflash_fc",
+              "shape": "B=1×blk=16（verify 跨度）×[16384→2048] fc（replicated，不随 TP8 缩放）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.21479256212048192
+            },
+            {
+              "name": "gate_up_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.12193441619277108
+            },
+            {
+              "name": "down_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.06158160809638555
+            },
+            {
+              "name": "q_proj",
+              "shape": "blk=16 heads(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.041464005397590355
+            },
+            {
+              "name": "o_proj",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.041464005397590355
+            },
+            {
+              "name": "draft_attn_core",
+              "shape": "B=1 pairs=65536 rows=4096 win=4096 causal=True heads(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 5,
+              "fallback_analytic_ms": 0.035449091084337345
+            },
+            {
+              "name": "ctx_kv_proj",
+              "shape": "span=B=1×blk=16 行投影/committed=3.96 行写 path=fused_raw（raw 融合 GEMM（_fused_kv_weight 新 cat 副本））；全层 _fused_kv_weight 融合 GEMM，仅 K/V 行",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.021384408948795182
+            },
+            {
+              "name": "k_proj",
+              "shape": "kv(卡上)=1",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.01128760134939759
+            },
+            {
+              "name": "v_proj",
+              "shape": "kv(卡上)=1",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.01128760134939759
+            },
+            {
+              "name": "draft_attn_core",
+              "shape": "B=1 pairs=65792 rows=4096 win=None causal=False heads(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.007091412819277108
+            },
+            {
+              "name": "attn_add",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.00369115664516129
+            },
+            {
+              "name": "mlp_add",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.00369115664516129
+            },
+            {
+              "name": "attn_norm",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0026302312258064515
+            },
+            {
+              "name": "mlp_norm",
+              "shape": "",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0026302312258064515
+            },
+            {
+              "name": "rope",
+              "shape": "rotary=128 heads(卡上)=4",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0006947674838709677
+            },
+            {
+              "name": "q_norm",
+              "shape": "4 头(卡上) × d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.0006287752258064516
+            },
+            {
+              "name": "dflash_hidden_norm",
+              "shape": "width=2048（fc 后归一）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.000435594891566265
+            },
+            {
+              "name": "draft_final_norm",
+              "shape": "B=1×blk=16 行，width=2048（draft final，replicated）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.000435594891566265
+            },
+            {
+              "name": "noise_embed",
+              "shape": "B=1×blk=16 行查表（目标 embedding 共享，词表行切）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.00040960000000000004
+            },
+            {
+              "name": "ctx_kv_layout_copy",
+              "shape": "vLLM permute+contiguous span=16×L=6×2×kv=1×d=128 读+写（SGLang 无全局拷贝）",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 1,
+              "fallback_analytic_ms": 0.0003072
+            },
+            {
+              "name": "ctx_k_rope",
+              "shape": "ctx K RoPE span=16×kvh=1×d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.00023051103614457827
+            },
+            {
+              "name": "k_norm",
+              "shape": "1 头(卡上) × d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.00016439380645161288
+            },
+            {
+              "name": "ctx_k_norm",
+              "shape": "ctx K RMSNorm span=16×kvh=1×d=128",
+              "stages": [
+                "draft_block"
+              ],
+              "instances": 6,
+              "fallback_analytic_ms": 0.00016334862650602407
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

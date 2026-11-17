@@ -43,21 +43,28 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
         else:
             raise ValueError(f"未知扫描维度 {field_path}")
         bundle = run_v2(sc)
-        met = bundle.metrics.get(metric_key)
-        baseline = bundle.metrics.get("M01_tpot_baseline")
+        chosen_key = ("M01_record_tpot" if base.cost_records and metric_key == "M01_tpot_analytical"
+                      and "M01_record_tpot" in bundle.metrics else metric_key)
+        met = bundle.metrics.get(chosen_key)
+        baseline = bundle.metrics.get("M01_record_baseline") or bundle.metrics.get("M01_tpot_baseline")
+        record = bundle.cost.get("record_cost") or {}
         points.append({
             "value": v,
             "run_id": bundle.manifest.run_id,
             "status": bundle.manifest.status,
             "tpot_ms": met.value if met else None,
             "reason": met.reason if met else None,
+            "metric_key": chosen_key,
+            "record_coverage": {"matched": record.get("matched", 0), "total": record.get("total", 0)},
             "baseline_tpot_ms": baseline.value if baseline else None,
             "speedup": (baseline.value / met.value)
             if (met and met.value and baseline and baseline.value) else None,
         })
     return {"schema_version": "0.2", "field": field_path,
             "base_digest": base.scenario_digest(),
-            "metric_key": metric_key, "points": points}
+            "metric_key": ("record-cost-if-matched-else-analytical"
+                           if base.cost_records and metric_key == "M01_tpot_analytical" else metric_key),
+            "points": points}
 
 
 def find_crossover(scan: dict) -> Optional[float]:
