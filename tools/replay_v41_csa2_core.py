@@ -19,6 +19,12 @@ R25 审计面 = csa2_attention_core（csa2-core-pin.json 14 文件）：
     （decode 默认路径不调用该 Triton 核）。
 `--check` 无漂移复算：对已提交 after.json/attribution.json 核对，不写文件。
 本工具 --check 是当前的活性无漂移入口（承接 R24 的链条）。
+
+R27 重基注记（2026-11-17）：after.json 已按 R27 成本口径重定价重基（工作
+账本逐字段与 R25 版本一致；M01/M02/M04 等成本衍生指标随 GEMM 档
+fp8→fp16(bf16) 修正变化，见 docs/evidence/csa2-core/rebase-r27-provenance.json
+与 docs/evidence/cost-integrity-r27/）。attribution.json 保留 R25 历史记录；
+main() 重放时 t_ms 列按当前成本档同价复算（字节 delta 不受影响）。
 """
 from __future__ import annotations
 
@@ -134,8 +140,16 @@ def main() -> None:
     delta = {key: new["totals"][key] - old["totals"][key] for key in fields}
     for key in fields:
         assert sum(g["delta"][key] for g in groups.values()) == delta[key], key
-    time_delta = (after["metrics"]["M01_tpot_analytical"]["value"]
-                  - before["metrics"]["M01_tpot_analytical"]["value"])
+    # R27（2026-11-17）：GEMM 计算档按 extras.quant 执行配方改为 bf16 档后，
+    # M01 差混入全局重定价，不再等于 R25 结构性逐行 t_ms delta。归因改用
+    # **同价复算**：两侧行都用当前 dtype_route 计价，t_ms_delta 只反映
+    # R25 账本结构变化（重定价本身见 docs/evidence/cost-integrity-r27/）。
+    def stage_time(rows):
+        return sum(price_row(r, device, gemm, ew, engram_lookup_host=True)["t_ms"]
+                   for r in rows)
+    time_delta = stage_time(
+        [OpRow(**r) for r in new["rows"]]) - stage_time(
+        [OpRow(**r) for r in old["rows"]])
     assert abs(sum(g["t_ms_delta"] for g in groups.values()) - time_delta) < 1e-10
     assert old["rows"][-3:] == new["rows"][-3:]  # final_norm/head/embed unchanged
     result = {

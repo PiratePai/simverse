@@ -1,0 +1,7 @@
+{
+  "head": "11965105d03252dc2a45d22b68d6d668c2c61504",
+  "worktree": "D:/Github/new-viewer",
+  "captured_before_edits": true,
+  "git_status_porcelain": "?? docs/evidence/cost-integrity-r27/\n",
+  "note": "R27（2026-11-17 cost-integrity）before 基线：HEAD 1196510（main，R25+R26 合入后），simverse 生产代码与 main 相同；仅 docs/evidence/cost-integrity-r27/ 场景与 before 产物为新增未提交文件"
+}

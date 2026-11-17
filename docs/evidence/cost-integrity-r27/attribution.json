@@ -1,0 +1,73 @@
+{
+  "v41_dtype_route": {
+    "scenario": "V4.1 baseline TP8/B1/ctx32768/quant=V41_QUANT",
+    "gemm_tier_before": "fp8（dense_w=8 启发档）",
+    "gemm_tier_after": "fp16=bf16 档（Marlin W8A16/W4A16 执行配方）",
+    "M01_before": 116.33572727816723,
+    "M01_after": 116.33641192134922,
+    "M04_before": 116.33572727816723,
+    "M04_after": 116.33641192134922,
+    "opclass": {
+      "target_decode": {
+        "classes": {
+          "before": {
+            "gemm_t_ms": 0.7694574845888567,
+            "elementwise_t_ms": 0.03859879357835783
+          },
+          "after": {
+            "gemm_t_ms": 0.7701421277708517,
+            "elementwise_t_ms": 0.03859879357835783
+          }
+        },
+        "t_ms_delta": [
+          0.000684643181995015,
+          0.0
+        ],
+        "gemm_tier": {
+          "before": "fp8",
+          "after": "fp16"
+        }
+      }
+    }
+  },
+  "qwen_dflash_expected_bytes": {
+    "scenario": "Qwen3.6+DFlash colocated TP8 K15/α0.72 blk16 ctx32768",
+    "link_bytes_before": {
+      "d2t": 60,
+      "t2d": 58209
+    },
+    "link_bytes_after": {
+      "d2t": 60,
+      "t2d": 58209.08759654315
+    },
+    "t2d_anchor": 58209.08759654315,
+    "M19_t2d_statistic": "expectation",
+    "M01_before": 36.859180745326654,
+    "M01_after": 36.859180745326654
+  },
+  "v41_chain_pipeline_metric_merge": {
+    "scenario": "V4.1 chain_draft dt_pipeline_sim（内部研究组合）",
+    "M01_reason_before": "dt_pipeline_sim：解析串行 TPOT 与流水周期分列（M18）；单请求延迟需请求轨迹（M3 请求级事件）",
+    "M01_reason_after": "仅 GPU 侧解析耗时下界；Engram host 表查找与预取时延未计，不能作为完整 TPOT；dt_pipeline_sim：解析串行 TPOT 与流水周期分列（M18）；单请求延迟需请求轨迹（M3 请求级事件）",
+    "M01_support_after": "approximated",
+    "formula_ref_after": "v2.roofline",
+    "host_note_preserved": true,
+    "run_id_before": "sha256:4977a88aa5ee5caf73c79da2cda4c03ee6d4afaed44fb2fc7554a3bf85f94dcf",
+    "run_id_after": "sha256:1320dc226c445b5c267054357d68029a553d8a9824f00f575c821b0cab6e008d",
+    "run_id_basis_change": "R27 设备快照含硬件/链路数值+来源；全部历史 run_id 基随之变更，证据包未回改"
+  },
+  "counts_invariant": {
+    "v41-baseline": {
+      "work_equal": true,
+      "memory_equal": true
+    },
+    "qwen-dflash": {
+      "work_equal": true,
+      "memory_equal": true
+    },
+    "v41-chain-pipeline": {
+      "work_equal": true,
+      "memory_equal": true
+    }
+  }
+}

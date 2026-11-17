@@ -16,7 +16,8 @@ quantization_config 5 叶键 mapped（见 G-C14）；2026-11-13 R23：G-C15 新�
 R26：G-C16 新增（Qwen3.6 文本 MRoPE 语义已解除、structure_complete 翻转；
 多模态 2D 位置分支登记为域外）；2026-11-16 R25：G-C17 新增（V4.1 稀疏
 MLA 注意力核本体主干已解除、执行/变体登记；编号在 R26 合入后让位——
-初稿曾用 G-C16）。
+初稿曾用 G-C16）；2026-11-17 编号修复（工作台审查）：R24 SwiGLU 条目
+此前误用 G-C15（与 R23 Qwen MTP 重号），改编号 **G-C18**，本页引用同步。
 
 ## G-C15 ~~Qwen3.6 原生 MTP forward 证据与仿真映射~~ → 主干已解除（2026-11-13 R23）⭐P0
 
@@ -114,7 +115,7 @@ MLA 注意力核本体主干已解除、执行/变体登记；编号在 R26 合�
   CSA2 索引打分/top-k/candidate block 已由 R20 解除（见 G-C12）；MoE
   scoring/top-k/分组路由已由 R21 解除（见 G-C13）；量化映射已由 R22 解除
   （见 G-C14）；SwiGLU clamp 与 compress_ratios 尾部已由 R24 解除
-  （见 G-C15）；稀疏 MLA 注意力核本体已由 R25 解除（见 G-C17）。
+  （见 G-C18）；稀疏 MLA 注意力核本体已由 R25 解除（见 G-C17）。
 - **解除条件**：剩余项 = DP 交换路径 pin+建模（或显式永久登记单副本口径）、
   mhc 部署变体/运行时 split/物理流量与执行证据；structure_complete 还需
   稀疏 MLA 核本体缺口闭环（CSA2 索引、MoE 路由、量化映射、SwiGLU/尾部
@@ -214,11 +215,11 @@ MLA 注意力核本体主干已解除、执行/变体登记；编号在 R26 合�
   gemm 峰值档未随 W8A16（bf16 TC）改路由（乐观算力上限，登记）。
 - **当前降级**：无（执行域按注册设备固定为 Marlin W8A16/W4A16，变体以
   extras.quant 披露）；structure_complete 曾由 swiglu/核本体/尾部缺口阻断
-  ——swiglu/尾部已由 R24 解除（见 G-C15），核本体已由 R25 解除（见
+  ——swiglu/尾部已由 R24 解除（见 G-C18），核本体已由 R25 解除（见
   G-C17）；现仅由剩余显式执行变体阻断（不冒充）。
 - **优先级**：P0（必需模型场景）。
 
-## G-C15 ~~V4.1 SwiGLU clamp + compress_ratios 尾部~~ → 已解除（2026-11-13 R24）⭐P0
+## G-C18 ~~V4.1 SwiGLU clamp + compress_ratios 尾部~~ → 已解除（2026-11-13 R24；2026-11-17 修复与 G-C15 的重号）⭐P0
 
 - **解除交付**：swiglu-tail-pin.json 13 文件 pin（vllm @f358f057，blob
   sha1 对 vllm-tree.json 逐项校验 + SHA256 落盘）source-checked 入册
@@ -451,7 +452,8 @@ MLA 注意力核本体主干已解除、执行/变体登记；编号在 R26 合�
   显式 decode_backend）、SM100 mega attention、FlashInfer plain-row BF16
   KV、ROCm/XPU、PCP、SWA bounded replay、CuTe DSL gather 变体未建模；
   softmax +5/整数核 op/工作区逐对行读为解析口径；CPU/GPU 未执行——
-  structure_complete 仍 False、部署排名资格不变（G15）。
+  structure_complete 仍 False（仅因 catalog unverified_paths 的显式执行
+  变体）、部署排名资格不变（G-C1 剩余项与 CPU/GPU/预算缺口）。
 
 ## G-C9 小形状地板解析模型（暂缓；判定实验已明确）
 

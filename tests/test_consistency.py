@@ -39,7 +39,12 @@ def _cli_env(io_encoding="utf-8"):
 
 
 def _assert_ops_csv(csv_path, ops):
-    """CSV 表头/行数/逐列值必须等于 RunResult.ops 的忠实序列化。"""
+    """CSV 表头/行数/逐列值必须等于 RunResult.ops 的忠实序列化。
+
+    2026-11-17 起 CSV 走 RFC 4180 标准转义（cli._csv_field）：含逗号/
+    引号/换行的字段加引号保留原值，不再把逗号替换成分号、丢换行——
+    断言改为 csv.reader 解析后与源字段逐字符相等（真实往返验收）。
+    """
     with Path(csv_path).open("r", encoding="utf-8", newline="") as fh:
         rows = list(csv.reader(fh))
     assert tuple(rows[0]) == OPS_CSV_COLUMNS
@@ -47,7 +52,7 @@ def _assert_ops_csv(csv_path, ops):
     assert len(data_rows) == len(ops)
     for index, (op, row) in enumerate(zip(ops, data_rows)):
         for column, cell in zip(OPS_CSV_COLUMNS, row):
-            expected = str(op.get(column, "")).replace(",", ";").replace("\n", " ")
+            expected = str(op.get(column, ""))
             assert cell == expected, (index, column, cell, expected)
 
 

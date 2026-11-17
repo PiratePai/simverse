@@ -1,0 +1,24 @@
+{
+  "rebase": "R27 cost-tier rebase (2026-11-17)",
+  "reason": "dtype_route 按模型执行配方选择 GEMM 计算档：V4.1 Marlin W8A16/W4A16 于 BF16 Tensor Core 执行（R22 quant-pin @f358f057 marlin.py L14-26 / oracle/mxfp4.py L461-486）→ GEMM 峰值档 fp8(1979 TFLOPS)→fp16/bf16(989.5 TFLOPS，dense H100)。",
+  "scope": "仅成本衍生指标变化（M01/M02/M04 等，见 changed_metrics）；work/cost.memory 与 R25 版 after.json 逐字段一致（已断言）；attribution.json 保留 R25 历史记录未动（其 t_ms 列为 fp8 档时值）。",
+  "after_sha256_before_rebase": "2a4f7a55d91896050b100a5f3b8dd8cb45b09f6003be5ffb9dbb0fe642e7a234",
+  "after_sha256_after_rebase": "78ae40b6b433664a724ce9c010797f66e4c57b12185c66352cf796cca521c2bf",
+  "evidence": "docs/evidence/cost-integrity-r27/（R27 前后分解与活性入口 tools/replay_cost_integrity_r27.py --check）",
+  "work_identical_asserted": true,
+  "memory_identical_asserted": true,
+  "changed_metrics": {
+    "M01_tpot_analytical": [
+      116.33572727816723,
+      116.33641192134922
+    ],
+    "M01_tpot_baseline": [
+      116.33572727816723,
+      116.33641192134922
+    ],
+    "M04_round_ms": [
+      116.33572727816723,
+      116.33641192134922
+    ]
+  }
+}

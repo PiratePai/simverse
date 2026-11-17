@@ -25,7 +25,7 @@
     padding:10px 24px;display:flex;align-items:center;justify-content:space-between;
     flex-wrap:wrap;gap:12px}
   .brand{display:flex;align-items:center;gap:12px}
-  .brand-logo{background:linear-gradient(135deg,#3b82f6,#14b8a6);color:#fff;
+  .brand-logo{background:linear-gradient(135deg,#3b82f6,#14b8a6);color:#0f172a;
     font-weight:800;font-family:var(--mono);font-size:14px;padding:4px 10px;
     border-radius:6px;letter-spacing:.5px}
   .brand-title{font-weight:700;font-size:15.5px}
@@ -46,7 +46,7 @@
   .wb-topbar{background:#0f172a;color:#f8fafc;padding:10px 14px;display:flex;
     flex-wrap:wrap;gap:10px;align-items:flex-end;border-bottom:1px solid #334155}
   .wb-ctrl{display:flex;flex-direction:column;gap:2px;min-width:0}
-  .wb-ctrl label{font-size:10.5px;color:#94a3b8;text-transform:uppercase;
+  .wb-ctrl label{font-size:11px;color:#94a3b8;text-transform:uppercase;
     letter-spacing:.4px;font-weight:700}
   .wb-ctrl select,.wb-ctrl input{background:#1e293b;color:#f8fafc;
     border:1px solid #475569;border-radius:6px;padding:4px 8px;font-size:12px;
@@ -61,7 +61,7 @@
   .kpi-box .k-label{font-size:11px;color:var(--ink3);font-weight:600}
   .kpi-box .k-val{font-size:19px;font-weight:800;color:var(--ink);
     font-family:var(--mono)}
-  .kpi-box .k-sub{font-size:10.5px;color:var(--teal);font-weight:600;min-height:28px}
+  .kpi-box .k-sub{font-size:11px;color:var(--teal);font-weight:600;min-height:28px}
   .kpi-box .k-sub.unknown{color:var(--amber)}
   .wb-grid{display:grid;grid-template-columns:minmax(430px,1.12fr) minmax(260px,.8fr) minmax(340px,1fr);
     gap:10px;padding:10px;background:#f8fafc}
@@ -79,7 +79,7 @@
   .mx-cell.pending{background:#f1f5f9;color:#94a3b8;font-weight:400}
   .mx-cell.na{background:#f8fafc;color:var(--ink3);font-weight:400;cursor:not-allowed}
   .mx-cell.bad{background:var(--red-soft);color:var(--red)}
-  .mx-note{font-size:10.5px;color:var(--ink3);margin-top:6px}
+  .mx-note{font-size:11px;color:var(--ink3);margin-top:6px}
   .dag-list{display:flex;flex-direction:column;gap:5px}
   .dag-node{border:1.5px solid var(--line-strong);border-radius:7px;padding:6px 10px;
     cursor:pointer;display:flex;justify-content:space-between;align-items:center;
@@ -87,14 +87,14 @@
   .dag-node:hover{border-color:var(--blue-mid);background:#f8fafc}
   .dag-node.active{border-color:var(--blue);background:var(--blue-soft);
     box-shadow:0 0 0 2px rgba(37,99,235,.15)}
-  .dag-badge{font-family:var(--mono);font-size:10.5px;padding:1px 6px;
+  .dag-badge{font-family:var(--mono);font-size:11px;padding:1px 6px;
     border-radius:4px;background:#f1f5f9;color:var(--ink2)}
   .dag-badge.mem{background:#fef3c7;color:#92400e}
   .dag-badge.cmp{background:#dcfce7;color:#166534}
   .op-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
     font-size:11.8px;margin-bottom:8px}
   .op-cell{background:#f8fafc;padding:6px 8px;border-radius:6px;border:1px solid var(--line)}
-  .op-cell b{display:block;font-size:10.5px;color:var(--ink3)}
+  .op-cell b{display:block;font-size:11px;color:var(--ink3)}
   .op-cell .v{font-family:var(--mono);font-size:13.5px;font-weight:800;color:var(--blue)}
   .kv{font-size:11.8px;margin:4px 0}
   .formula-box{font-size:11.5px;background:var(--code-bg);color:var(--code-ink);
@@ -105,7 +105,7 @@
   .tl-bars{flex:1;display:flex;height:26px;background:#f1f5f9;border-radius:6px;
     overflow:hidden;position:relative}
   .tl-seg{height:100%;display:flex;align-items:center;justify-content:center;
-    color:#fff;font-size:10.5px;font-family:var(--mono);font-weight:600;
+    color:#fff;font-size:11px;font-family:var(--mono);font-weight:600;
     cursor:pointer;border-right:1px solid rgba(255,255,255,.35);overflow:hidden;
     white-space:nowrap}
   .tl-seg:hover{opacity:.88}
@@ -150,10 +150,10 @@
     <span class="brand-sub">生产管线 v0.2 · 全部数字来自 ResultBundle</span></div>
   <nav>
     <a href="/api/v2/catalog" target="_blank">能力目录</a>
-    <a href="../../docs/rebuild-20261106/plan.md" target="_blank">重构计划</a>
-    <a href="../../docs/rebuild-20261106/principles.md" target="_blank">计算原理</a>
-    <a href="../../docs/rebuild-20261106/ui-data-contract.md" target="_blank">数据契约</a>
-    <a href="../../docs/rebuild-20261106/prototype/index.html" target="_blank">原型存档</a>
+    <a href="/docs/rebuild-20261106/plan.md" target="_blank">重构计划</a>
+    <a href="/docs/rebuild-20261106/principles.md" target="_blank">计算原理</a>
+    <a href="/docs/rebuild-20261106/ui-data-contract.md" target="_blank">数据契约</a>
+    <a href="/docs/rebuild-20261106/prototype/index.html" target="_blank">原型存档</a>
     <a href="/legacy">v0.1 视图</a>
     <button id="btn-export-json" type="button">导出 JSON</button>
     <button id="btn-export-csv" type="button">导出算子 CSV</button>
@@ -181,15 +181,23 @@
         <select id="sel-target-dev"></select></div>
       <div class="wb-ctrl"><label for="sel-tp">目标 TP</label>
         <select id="sel-tp">
-          <option>1</option><option>2</option><option selected>8</option><option>16</option>
+          <option>1</option><option>2</option><option>4</option>
+          <option selected>8</option><option>16</option>
         </select></div>
       <div class="wb-ctrl"><label for="sel-ep">专家并行 EP</label>
         <select id="sel-ep">
           <option value="1" selected>关（inter/tp 切分）</option>
           <option value="tp">开（=TP，整专家分置）</option>
         </select></div>
-      <div class="wb-ctrl"><label for="inp-budget">可分配预算 GB（假设）</label>
+      <div class="wb-ctrl"><label for="inp-budget">目标端可分配预算 GB（假设）</label>
         <input id="inp-budget" type="number" min="0" step="0.1" placeholder="留空=unknown">
+        </div>
+      <div class="wb-ctrl"><label for="inp-draft-budget">草稿端预算 GB（DT·假设）</label>
+        <input id="inp-draft-budget" type="number" min="0" step="0.1"
+          placeholder="仅 DT 分离生效" disabled>
+        </div>
+      <div class="wb-ctrl"><label for="inp-overhead">额外运行时开销 GB（假设）</label>
+        <input id="inp-overhead" type="number" min="0" step="0.1" placeholder="留空=0">
         </div>
       <div class="wb-ctrl"><label for="sel-draft-dev">草稿设备（DT）</label>
         <select id="sel-draft-dev"></select></div>
@@ -201,6 +209,9 @@
           <option value="w8a8">W8A8（8/8/8/8）</option>
           <option value="w8a8_fp4e" selected>W8A8+FP4 专家（8/4/8/8）</option>
         </select></div>
+      <div class="wb-ctrl" style="min-width:180px"><label>组合支持状态（后端事实）</label>
+        <div id="combo-hint" style="font-size:11px;color:#fbbf24;
+          line-height:1.35;padding:3px 0">载入中…</div></div>
       <div class="wb-ctrl"><label for="inp-ctx">上下文 ctx</label>
         <select id="inp-ctx">
           <option>4096</option><option>8192</option><option selected>32768</option>
@@ -241,9 +252,9 @@
       <div class="kpi-box"><div class="k-label">M05 MoE 期望并集读</div>
         <div class="k-val" id="kpi-moe">–</div>
         <div class="k-sub">均匀路由假设，期望非精确</div></div>
-      <div class="kpi-box"><div class="k-label">M06 每卡显存（唯一存活对象）</div>
-        <div class="k-val" id="kpi-mem">–</div>
-        <div class="k-sub" id="kpi-mem-sub">标称口径：feasible 判定 unknown</div></div>
+      <div class="kpi-box"><div class="k-label">M06 每卡显存（逐端/最坏 rank）</div>
+        <div class="k-val" style="font-size:14px" id="kpi-mem">–</div>
+        <div class="k-sub" id="kpi-mem-sub">运行后见「显存与预算」逐端明细</div></div>
       <div class="kpi-box"><div class="k-label">M07 证据与支持状态</div>
         <div class="k-val" style="font-size:13px" id="kpi-ev">–</div>
         <div class="k-sub" id="kpi-ev-sub">结构/容量/来源逐项</div></div>
@@ -258,9 +269,11 @@
         <div class="wb-pane-body">
           <table class="mx-table"><thead id="matrix-head"></thead>
             <tbody id="matrix-body"></tbody></table>
-          <div class="mx-note">矩阵仅展示有模型身份的 DFlash 与 MTP；chain_draft 和
-            chain_moe_proxy 可在方法选择器中查看研究演示。解析估算与假设接受率不代表实测；
-            结构、方法或容量证据不合格时保留数值并标注，不参与排名。</div>
+          <div class="mx-note">矩阵仅展示有模型身份的 DFlash 与 MTP（chain_draft/
+            chain_moe_proxy 为内部研究代理，不在产品选择器开放）。批量运行为
+            <b>串行逐格</b>：单格失败不中断后续格子，每格独立 run_id。解析估算与
+            假设接受率不代表实测；结构、方法或容量证据不合格时保留数值并标注，
+            不参与排名；失败与 unsupported 格不显示成功数值。</div>
         </div>
       </div>
       <div class="wb-pane">
@@ -294,6 +307,9 @@
 
   <details class="drawer"><summary>证据 / 能力检查 / 假设 / 公式（当前 run）</summary>
     <div class="body" id="evidence-body">运行后显示。</div></details>
+  <details class="drawer"><summary>显存与预算（M06 逐端 · target/draft 不合并）</summary>
+    <div class="body" id="memory-body">运行后显示：各端已知峰值、预算来源、
+      unknown/oom/feasible/条件可行与原因。</div></details>
   <details class="drawer"><summary>模型结构与缺口（model_ir 目录 · 固定 revision）</summary>
     <div class="body" id="catalog-body">载入中…</div></details>
   <details class="drawer"><summary>参数扫描（α / B / ctx / blk；每点独立 run）</summary>
@@ -304,6 +320,7 @@
       <div id="sweep-result" style="margin-top:8px"></div></div></details>
 </div>
 
+<script src="/static/csv.js"></script>
 <script src="/static/workbench.js"></script>
 </body>
 </html>

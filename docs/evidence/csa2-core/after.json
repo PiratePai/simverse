@@ -1,15 +1,15 @@
 {
  "schema_version": "0.2",
  "manifest": {
-  "run_id": "sha256:070842afcba92aba338d4ebbd04bd29e190d7957fbea18fb9ff0799e678cdbb0",
+  "run_id": "sha256:4f301a1814afada9b12eae50598c01e555926bb3ba275d4b55d3b14081e6e8d6",
   "status": "completed",
   "input_digest": "sha256:834f618347b86b719db28a9f8a5935013d4b3647be5b46a8cca4d202bee90c5c",
-  "model_ir_digest": "sha256:4cd2fdec32739e1f50e3b44ef201c935e5cc77276a88e1ca50beca9ad455f2fc",
+  "model_ir_digest": "sha256:0e0b88ca1482c9aa2c0a6dc07a6129fa92b432c720e78dcff48e26b6184f6e9e",
   "method_digest": "sha256:bc10470a78cc508de34929445a502d43bcccdcfe6562ea1dee44c6a3a5f477e2",
   "lowering_digest": "",
   "cost_digest": "sha256:88dd8e1cfa72f4798537a815bbc71708639ae57c03c3436c570972cc5268ad74",
-  "device_snapshot_digest": "sha256:ad4b44a3f2ce32dcbe660392989d9a2fb7501aaa0046279e76ba8a95cbc68abc",
-  "code_revision": "ee70ce236415ad4855d5994ca4521f49d8a03b38",
+  "device_snapshot_digest": "sha256:4e81be24cbc3918ec3b1fd4b3083367ca0c40cbf06e200542a5903fec882f922",
+  "code_revision": "11965105d03252dc2a45d22b68d6d668c2c61504",
   "parent_run_id": null,
   "created_at": "",
   "progress": 0.0,
@@ -125,7 +125,7 @@
   "source": {
    "repo_id": "deepseek-ai/DeepSeek-V4.1-Flash",
    "revision": "314113f8a7dadb388215396ba5fbee2c610a04d6",
-   "config_sha256": "6a8152cdb02f47955b7da027d1f2c8acb32de5353fc1c6e692a214b92fe493f7",
+   "config_sha256": "8be45ce0476004a3f529fd896115a4a2e800a129ad2d3ec05b16050f52e21879",
    "captured_at": "2026-11-09",
    "note": "官方 config 固定快照"
   },
@@ -586,7 +586,7 @@
     "note": "视觉塔不在本仓文本推理 scope；未执行，不作为结构完备证据"
    }
   },
-  "digest": "sha256:4cd2fdec32739e1f50e3b44ef201c935e5cc77276a88e1ca50beca9ad455f2fc"
+  "digest": "sha256:0e0b88ca1482c9aa2c0a6dc07a6129fa92b432c720e78dcff48e26b6184f6e9e"
  },
  "method_plan": {
   "method_id": "baseline",
@@ -24997,7 +24997,7 @@
  "memory": {},
  "cost": {
   "target_decode": {
-   "t_ms": 116.33572727816723,
+   "t_ms": 116.33641192134922,
    "collectives": {
     "per_layer": [
      {
@@ -25040,9 +25040,14 @@
     "op": "lm_head",
     "stage": "target_decode",
     "ai_flop_per_byte": 0.9997428724434658,
-    "attained_tflops": 3.3480054307404816,
+    "attained_tflops": 3.3468730053743374,
     "bound": "memory",
-    "t_ms": 0.0494259652271236
+    "t_ms": 0.04944268866320243,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:1:engram_wkv",
@@ -25050,9 +25055,14 @@
     "op": "engram_wkv",
     "stage": "target_decode",
     "ai_flop_per_byte": 1.9376080128164697,
-    "attained_tflops": 6.48673163427507,
+    "attained_tflops": 6.482482001019421,
     "bound": "memory",
-    "t_ms": 0.006061850900726282
+    "t_ms": 0.006065824786527192,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:14:engram_wkv",
@@ -25060,9 +25070,14 @@
     "op": "engram_wkv",
     "stage": "target_decode",
     "ai_flop_per_byte": 1.9376080128164697,
-    "attained_tflops": 6.48673163427507,
+    "attained_tflops": 6.482482001019421,
     "bound": "memory",
-    "t_ms": 0.006061850900726282
+    "t_ms": 0.006065824786527192,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:0:moe_routed",
@@ -25070,9 +25085,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:1:moe_routed",
@@ -25080,9 +25100,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:2:moe_routed",
@@ -25090,9 +25115,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:3:moe_routed",
@@ -25100,9 +25130,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:4:moe_routed",
@@ -25110,9 +25145,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:5:moe_routed",
@@ -25120,9 +25160,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:6:moe_routed",
@@ -25130,9 +25175,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:7:moe_routed",
@@ -25140,9 +25190,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:8:moe_routed",
@@ -25150,9 +25205,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:9:moe_routed",
@@ -25160,9 +25220,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:10:moe_routed",
@@ -25170,9 +25235,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:11:moe_routed",
@@ -25180,9 +25250,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:12:moe_routed",
@@ -25190,9 +25265,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:13:moe_routed",
@@ -25200,9 +25280,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:14:moe_routed",
@@ -25210,9 +25295,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:15:moe_routed",
@@ -25220,9 +25310,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:16:moe_routed",
@@ -25230,9 +25325,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:17:moe_routed",
@@ -25240,9 +25340,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:18:moe_routed",
@@ -25250,9 +25355,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:19:moe_routed",
@@ -25260,9 +25370,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:20:moe_routed",
@@ -25270,9 +25385,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:21:moe_routed",
@@ -25280,9 +25400,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:22:moe_routed",
@@ -25290,9 +25415,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:23:moe_routed",
@@ -25300,9 +25430,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:24:moe_routed",
@@ -25310,9 +25445,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:25:moe_routed",
@@ -25320,9 +25460,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:26:moe_routed",
@@ -25330,9 +25475,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:27:moe_routed",
@@ -25340,9 +25490,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:28:moe_routed",
@@ -25350,9 +25505,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:29:moe_routed",
@@ -25360,9 +25520,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:30:moe_routed",
@@ -25370,9 +25535,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:31:moe_routed",
@@ -25380,9 +25550,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:32:moe_routed",
@@ -25390,9 +25565,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:33:moe_routed",
@@ -25400,9 +25580,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:34:moe_routed",
@@ -25410,9 +25595,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:35:moe_routed",
@@ -25420,9 +25610,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    },
    {
     "row_id": "target_decode:36:moe_routed",
@@ -25430,9 +25625,14 @@
     "op": "moe_routed",
     "stage": "target_decode",
     "ai_flop_per_byte": 2.802124295617627,
-    "attained_tflops": 9.378219529454274,
+    "attained_tflops": 9.369339517040249,
     "bound": "memory",
-    "t_ms": 0.005660366536876005
+    "t_ms": 0.005665731282707232,
+    "compute_dtype": "fp16",
+    "peak_tflops": 989.5,
+    "effective_peak_tflops": 742.125,
+    "bandwidth_tb_s": 3.35,
+    "cost_basis": "T0 roofline max+0.15·min；GEMM 计算峰值档由执行配方选择（Marlin W8A16/W4A16 于 BF16 Tensor Core 执行、激活 BF16（quant-pin @f358f057 marlin.py L14-26/oracle L461-486）；理论峰值路由修正，非实测吞吐校准）"
    }
   ],
   "memory": {
@@ -27788,7 +27988,7 @@
       "role": "target",
       "stage": "decode",
       "label": "单 token decode 前向",
-      "t_ms": 116.33572727816723,
+      "t_ms": 116.33641192134922,
       "depends_on": [],
       "start_ms": 0.0,
       "detail": {
@@ -27796,9 +27996,9 @@
       }
      }
     ],
-    "t_round_ms": 116.33572727816723,
+    "t_round_ms": 116.33641192134922,
     "E_N": 1.0,
-    "tpot_ms": 116.33572727816723,
+    "tpot_ms": 116.33641192134922,
     "reason": null
    }
   ],
@@ -27807,7 +28007,7 @@
  },
  "metrics": {
   "M01_tpot_analytical": {
-   "value": 116.33572727816723,
+   "value": 116.33641192134922,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -27832,7 +28032,7 @@
    "sample": null
   },
   "M01_tpot_baseline": {
-   "value": 116.33572727816723,
+   "value": 116.33641192134922,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -27924,7 +28124,7 @@
    "sample": null
   },
   "M04_round_ms": {
-   "value": 116.33572727816723,
+   "value": 116.33641192134922,
    "unit": "ms",
    "scope": {
     "phase": "steady-decode",
@@ -27948,7 +28148,7 @@
   },
   "M04_stage_breakdown_ms": {
    "decode": {
-    "value": 116.33572727816723,
+    "value": 116.33641192134922,
     "unit": "ms",
     "scope": {
      "phase": "steady-decode",
@@ -28729,6 +28929,7 @@
  "assumption_dict": {
   "A1_performance": "全部时延为 T0 解析估算（roofline；Q2 首版无实测/拟合）",
   "A2_serial": "串行解析档：阶段和=轮墙钟；无重叠/流水（M3 事件核后扩展）",
+  "A2b_kernel_gaps": "逐算子 launch 开销、kernel 融合收益、host 调度与 CUDA Graph 捕获均未建模（launch_overhead_ms 仅注册未入 T0 行计价）；解析耗时不含这些项，实际 eager 执行通常更高",
   "A3_acceptance": "接受率为显式假设输入（Q8 hypothesis）：{'kind': 'geometric', 'alpha': 0.75}",
   "A4_routing": "MoE 路由按均匀独立假设；期望并集非精确计数",
   "A5_workload": "负载假设：B=1 ctx=32768（可编辑演示默认值，非用户确认）",
