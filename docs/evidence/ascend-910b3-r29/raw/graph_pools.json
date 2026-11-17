@@ -1,0 +1,154 @@
+{
+  "kind": "r29_graph_pools",
+  "run_id": "ascend-910b3-r29",
+  "captured_at": "2026-11-17T15:37:14+0800",
+  "ascend_rt_visible_devices": "5,6",
+  "host": {
+    "hostname": "localhost.localdomain",
+    "kernel": "Linux-5.10.0-216.0.0.115.oe2203sp4.aarch64-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "cpu_count": 192
+  },
+  "git": {
+    "commit": "a857142523fea92b42e64c6df270ddc873e2a2ed",
+    "branch": "main",
+    "dirty": "?? docs/evidence/ascend-910b3-r29/"
+  },
+  "modules": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "unknown",
+    "numpy": "2.5.4"
+  },
+  "device": "Ascend910B3",
+  "workload": "20 x (relu(x @ w)) with 2048x2048 bf16 weights on npu:0",
+  "snapshots": [
+    {
+      "stage": "startup",
+      "free_bytes": 65065390080,
+      "total_bytes": 65452113920,
+      "used_bytes": 386723840,
+      "allocated_bytes": 0,
+      "reserved_bytes": 0,
+      "active_bytes": 0
+    },
+    {
+      "stage": "eager_after_first_step",
+      "free_bytes": 64966791168,
+      "total_bytes": 65452113920,
+      "used_bytes": 485322752,
+      "allocated_bytes": 25167360,
+      "reserved_bytes": 85983232,
+      "active_bytes": 25167360
+    },
+    {
+      "stage": "eager_after_warmup",
+      "free_bytes": 64966791168,
+      "total_bytes": 65452113920,
+      "used_bytes": 485322752,
+      "allocated_bytes": 25167360,
+      "reserved_bytes": 85983232,
+      "active_bytes": 25167360
+    },
+    {
+      "stage": "baseline_after_warmup_and_empty_cache",
+      "free_bytes": 64966791168,
+      "total_bytes": 65452113920,
+      "used_bytes": 485322752,
+      "allocated_bytes": 25167360,
+      "reserved_bytes": 44040192,
+      "active_bytes": 25167360
+    },
+    {
+      "stage": "after_capture",
+      "free_bytes": 64910168064,
+      "total_bytes": 65452113920,
+      "used_bytes": 541945856,
+      "allocated_bytes": 41946624,
+      "reserved_bytes": 113246208,
+      "active_bytes": 41946624
+    },
+    {
+      "stage": "after_replay_1",
+      "free_bytes": 64905973760,
+      "total_bytes": 65452113920,
+      "used_bytes": 546140160,
+      "allocated_bytes": 41946624,
+      "reserved_bytes": 113246208,
+      "active_bytes": 41946624
+    },
+    {
+      "stage": "after_replay_10",
+      "free_bytes": 64905973760,
+      "total_bytes": 65452113920,
+      "used_bytes": 546140160,
+      "allocated_bytes": 41946624,
+      "reserved_bytes": 113246208,
+      "active_bytes": 41946624
+    },
+    {
+      "stage": "after_release_and_empty_cache",
+      "free_bytes": 64905973760,
+      "total_bytes": 65452113920,
+      "used_bytes": 546140160,
+      "allocated_bytes": 25167360,
+      "reserved_bytes": 44040192,
+      "active_bytes": 25167360
+    }
+  ],
+  "deltas": [
+    {
+      "label": "eager_net_vs_startup",
+      "free_delta_bytes": 98598912,
+      "allocated_delta_bytes": 25167360,
+      "reserved_delta_bytes": 44040192,
+      "from": "startup",
+      "to": "baseline_after_warmup_and_empty_cache"
+    },
+    {
+      "label": "after_capture_vs_baseline",
+      "free_delta_bytes": 56623104,
+      "allocated_delta_bytes": 16779264,
+      "reserved_delta_bytes": 69206016,
+      "from": "baseline_after_warmup_and_empty_cache",
+      "to": "after_capture"
+    },
+    {
+      "label": "after_replay_1_vs_baseline",
+      "free_delta_bytes": 60817408,
+      "allocated_delta_bytes": 16779264,
+      "reserved_delta_bytes": 69206016,
+      "from": "baseline_after_warmup_and_empty_cache",
+      "to": "after_replay_1"
+    },
+    {
+      "label": "after_replay_10_vs_baseline",
+      "free_delta_bytes": 60817408,
+      "allocated_delta_bytes": 16779264,
+      "reserved_delta_bytes": 69206016,
+      "from": "baseline_after_warmup_and_empty_cache",
+      "to": "after_replay_10"
+    },
+    {
+      "label": "capture_vs_warmup",
+      "free_delta_bytes": 56623104,
+      "allocated_delta_bytes": 16779264,
+      "reserved_delta_bytes": 27262976,
+      "from": "eager_after_warmup",
+      "to": "after_capture"
+    }
+  ],
+  "errors": [],
+  "boundary": "allocator/free snapshots across phases of one process; not a full-model peak budget and not comparable to ACL snapshots",
+  "graph_api_present": true,
+  "graph_api": "torch.npu.NPUGraph + torch.npu.graph(...) context",
+  "old_report_recompute": {
+    "warmup_free": 64966791168,
+    "capture_free": 64910168064,
+    "warmup_minus_capture_free": 56623104,
+    "note": "旧 p1a 中 before−after 与 before−baseline 同值；这里给出可复算的等价量"
+  }
+}

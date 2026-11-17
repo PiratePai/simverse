@@ -1,5 +1,17 @@
 # Simverse 重构实施状态（M0–M5 验收清单）
 
+## 2026-11-17 R29 昇腾 910B3（物理卡 5/6）验证重采
+
+按 [昇腾优先、少卡验证与 profiling 计划](ascend-validation-plan.md) 在 `ASCEND_RT_VISIBLE_DEVICES=5,6`
+上执行 P0 的 A-N1（ACL 返回码/context、集合通信 shape 与数值、graph 分阶段、MRoPE 参数域）、
+A-N2 forward 预检与显式执行、A-N3 的 TP2/EP2 算子切片与容量快照。
+新增产物入册 [evidence/ascend-910b3-r29](evidence/ascend-910b3-r29/)，带栈身份、设备可见性
+与逐文件 SHA256；结论与边界见 [R29 报告](validation/ascend-910b3-r29.md)。
+R28 归档字节未改；全部记录仍 not-admitted，未改变 DEVICES/PROFILE_SETS/模型执行状态/部署资格。
+本轮栈为 torch 2.10.0+cpu / torch_npu 2.10.0.post4 / vLLM 0.32.0 / vllm-ascend 0.19.1rc2，
+与 R28 采集声明的 2.9.0 栈不同，两组数据不得相减或拼接。
+无新增测试（收集数仍 543）；`py -3.12 -m pytest tests -q` → **538 passed / 5 skipped**。
+
 ## 2026-11-17 R28 路径可移植性修复
 
 将 Ascend 工具的上游来源改为仓库 URL + 固定 commit，来源清单 schema 2 使用
