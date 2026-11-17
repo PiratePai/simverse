@@ -9,6 +9,10 @@
 > G-C13/G-C16/G-C18。AllReduce 派生指标已纠正；ReduceScatter、graph、MRoPE、
 > launch 和代理映射需重采或补来源。容量快照/组合算子执行不等于整模 forward。
 > [审查报告](../validation/ascend-910b3-20261117.md)列明保留范围与问题；后续按新 run 独立验收。
+> 2026-11-17 R30 增补：A-N5 第一阶段**离线** profiling 审计工装已交付
+> （[报告](../validation/ascend-profile-audit-20261117.md)）——导入/映射/差异/覆盖/回退
+> 可在 CLI `simverse ascend-audit` 与工作台只读抽屉查看导出；审计包
+> `calibration_admission=not-admitted`，**未解除** R17/R18/G-D7/R02b。
 
 
 与 [数据缺口清单](data-gaps.md) 分开维护：本页只列**工程实现**缺口（不依赖新数据，

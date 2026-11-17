@@ -318,6 +318,15 @@
       unknown/oom/feasible/条件可行与原因。</div></details>
   <details class="drawer"><summary>模型结构与缺口（model_ir 目录 · 固定 revision）</summary>
     <div class="body" id="catalog-body">载入中…</div></details>
+  <details class="drawer"><summary>Ascend profiling 审计（未准入 · 只读）</summary>
+    <div class="body" id="audit-body">载入中…</div>
+    <div style="padding:0 16px 12px"><button type="button" id="btn-export-audit"
+      disabled style="padding:6px 14px;border-radius:6px;
+      border:1px solid var(--line-strong);background:#fff;cursor:pointer">
+      导出审计 JSON</button>
+      <span style="font-size:11.5px;color:var(--ink3);margin-left:8px">
+      只读审计证据：非校准/profile 选择，selected_ms 恒为 null（未准入）</span></div>
+  </details>
   <details class="drawer"><summary>参数扫描（α / B / ctx / blk；每点独立 run）</summary>
     <div class="body" id="sweep-body">
       <button type="button" id="btn-sweep" style="padding:6px 14px;border-radius:6px;

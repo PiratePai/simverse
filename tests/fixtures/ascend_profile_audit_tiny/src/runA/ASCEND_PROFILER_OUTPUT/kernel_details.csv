@@ -1,0 +1,9 @@
+Device_id,Stream ID,Name,Type,Duration(us),Start Time(us),Input Shapes,Input Data Types,Output Shapes
+8,2,aclnnMatmul_MatMulV3Common_MatMulV3,MatMulV3,140.0,1000.0,"4096,4096;2048,4096",DT_BF16;DT_BF16,"4096,2048"
+8,2,aclnnMatmul_MatMulV3Common_MatMulV3,MatMulV3,160.0,1200.0,"4096,4096;2048,4096",DT_BF16;DT_BF16,"4096,2048"
+8,2,FusedInferAttentionScore,FusedInferAttentionScore,200.0,1500.0,"4096,16,256;4096,2,256;4096,2,256",DT_BF16;DT_BF16;DT_BF16,"4096,16,256"
+8,2,MoeGatingTopK,MoeGatingTopK,100.0,1800.0,"4096,256;",DT_BF16;DT_UNDEFINED,"4096,8;4096,8;4096,256"
+8,3,MoeTokenPermute,MoeTokenPermute,150.0,1900.0,"4096,2048",DT_BF16,"4096,2048"
+8,2,AddRmsNormBias,AddRmsNormBias,120.0,2100.0,"4096,2048;4096,2048;2048;",DT_BF16;DT_BF16;DT_BF16;DT_UNDEFINED,"4096,2048;4096,1;4096,2048"
+8,2,AddRmsNormBias,AddRmsNormBias,130.0,2400.0,"4096,2048;4096,2048;2048;",DT_BF16;DT_BF16;DT_BF16;DT_UNDEFINED,"4096,2048;4096,1;4096,2048"
+8,4,hcom_alltoallv_,hcom_alltoallv_,400.0,2200.0,,,,,

@@ -30,7 +30,7 @@ PR #21（R28）与 PR #23（R29）均作为局部、未准入采集归档。R29 
 | P0 / A-N2 昇腾 forward 路径（R06/R08） | 固定 vLLM + vLLM-Ascend + CANN/torch_npu 组合；逐一核对模型注册、config、GDN/attention/MoE/量化/KV 路径；提供预检与显式执行入口 | 少层随机权重与完整 checkpoint 两种身份分开；无匹配 kernel/型号立即拒绝。源码映射/离线接线不冒称 NPU 已运行 |
 | P0 / A-N3 1–2 卡正确性与容量（R02b/R03/G-D7） | 先做下表无权重/局部层测试；同一进程分阶段快照，实际 serving 栈 budget + workspace/graph/HCCL | 数值 oracle、分片重组、状态守恒；每 rank 已知峰值及未知项分栏。小样例可分配不代表整模 feasible |
 | P1（昇腾第一顺位）/ A-N4 设备与实现档（R15/R16） | 独立 Ascend 设备身份、官方 dense 规格及能力；NPU 核/引擎字段与 CUDA sm_count 分离；平台特定量化/lowering recipe | 来源与不支持精度负例；不得复用 Marlin/FlashMLA SM90 调度器为 Ascend 实现，也不得用实测峰值填 spec |
-| P1（昇腾第一顺位）/ A-N5 profiling 校对与局部校准（R17/R18） | 先提供原始 trace 审核、映射与差异表；只有设备/实现/形状域匹配后才接 CalibratedPricer | 行数/时间双覆盖、去重留出、域外回退、原账本不变；可独立交付局部校对，无需等待整模 |
+| P1（昇腾第一顺位）/ A-N5 profiling 校对与局部校准（R17/R18） | 先提供原始 trace 审核、映射与差异表；只有设备/实现/形状域匹配后才接 CalibratedPricer | 行数/时间双覆盖、去重留出、域外回退、原账本不变；可独立交付局部校对，无需等待整模。**R30 已交付离线审计**（[报告](validation/ascend-profile-audit-20261117.md)，`assets/profile_audit/ascend_910b_profile_audit_v1`，含 owner 声明/minidraft 排除、算子 shape 维度验证与 row-level 计数分摊候选；未准入）；准入未变 |
 | P1 / A-N6 匹配 E2E（R07b/R09） | 权重、显存、后端集成条件满足后，固定 workload 实测 prefill/decode/verify 与接受长度分布 | 按 TTFT/ITL/吞吐/显存误差验收；没有真实配对和请求轨迹时保持缺口。DFlash/MTP 单独核对 |
 
 本轮 A-N2 已交付 `tools/ascend_forward_probe.py` 的 Qwen3.6 fixture/本地权重入口与离线门禁；R29 有 TP1、物理卡 5 的 fixture 成功记录，来源仍有限，数值正确性、TP2 集成和完整权重身份未验收。V4.1 仅交付明确阻断的部署计划，没有将 V4 或双 910B3 代理冒充整模。
@@ -131,8 +131,11 @@ coverage / fallback_reason / evidence_ref`，以及按模型、阶段、算子�
 5. 开/关校准重放确保 Work/Traffic/Memory 逐字段不变；成本所覆盖的部署域有预算与
    数值证据后再讨论排名。原 PR21 的代理、冲突结果和缺元数据摘要不进入训练/留出。
 
-工程交付的导入/差异报告/覆盖与回退信息须在工作台可查看并导出；本轮只增加规划和
-离线验证/采集工装，不宣称已实现 profiling 导入 UI 或 NPU 生产校准。
+工程交付的导入/差异报告/覆盖与回退信息须在工作台可查看并导出。R30 已交付
+**离线**导入/映射/差异/覆盖/回退与工作台只读抽屉（`simverse ascend-audit`、
+`/api/v2/profile-audit/<set_id>`，见 [报告](validation/ascend-profile-audit-20261117.md)），
+审计包 `calibration_admission=not-admitted`；**NPU 生产校准仍 blocked**，依赖 A-N4
+设备身份/官方 dense 规格/实现档与匹配采数，本轮未宣称已实现生产校准或排名准入。
 
 ## 4. 官方实现参考与取舍
 

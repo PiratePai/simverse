@@ -1,5 +1,14 @@
 # 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06、2026-11-16 R25 增补）
 
+2026-11-17 R30（A-N5 离线 profiling 审计）：Ascend NPU 外部 profiling 已离线导入为
+只读审计包（6 run：Qwen3.6-35B-A3B MTP/minidraft + Qwen3-8B 类 dense
+baseline/DFlash/DSpark/minidraft；minidraft 自研按 owner 声明排除），提供 kernel
+census、OP Type→账本行组映射、算子 shape 维度验证、账本覆盖/未建模占比、设备内核
+间隙与身份缺口清单，可从 CLI/工作台查看导出。**该包 `calibration_admission=not-admitted`**：
+不产生成本/排名结论、不改 DEVICES/PROFILE_SETS/模型执行状态，Qwen3.6/V4.1 的部署
+排名限制不变；生产校准准入仍依赖 A-N4 设备/实现身份与匹配采数。见
+[报告](validation/ascend-profile-audit-20261117.md)。
+
 2026-11-17 逐记录成本：已提供 R29 双卡通信 / R28 独立 GEMM 两个互斥条件对照档，显示精确/插值命中、分阶段覆盖、解析回退与自动补采清单，详见 [说明](validation/ascend-record-costs.md)。部分成本开始使用归档数值，但缺完整来源与独立留出仍不能升格生产 profile；原解析指标、计数/容量、模型执行与排名资格保持原边界。
 
 2026-11-17 910B3：目标/DT 草稿下拉框已接入旧仓参数的 BF16 解析档，见 [迁移说明](validation/ascend-910b3-device.md)。Qwen3.6 可做解析研究；V4.1 Ascend 配方与 FP8/量化仍拒绝，NPU 成本/容量/排名资格不升级为实测支持。

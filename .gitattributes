@@ -46,3 +46,11 @@ docs/evidence/ascend-910b3-r29/** -text diff
 docs/validation/ascend-910b3-r29.md text eol=lf
 assets/cost_records/*.json text eol=lf
 docs/evidence/ascend-record-costs/*.json text eol=lf
+
+# R30 Ascend profiling 审计包：manifest 对产物逐文件 SHA256 锚定（生成器为
+# tools/import_ascend_profiles.py），行尾转换会破坏 --check 重放与 registry 证据。
+assets/profile_audit/** -text diff
+
+# R30 审计导入器 hermetic fixture（小型合成 profile 树）：固定 LF，保证
+# 工具重放结果与手算期望一致（不依赖原始 400MB 采集）。
+tests/fixtures/ascend_profile_audit_tiny/** text eol=lf
