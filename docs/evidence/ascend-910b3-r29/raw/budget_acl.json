@@ -1,0 +1,162 @@
+{
+  "kind": "r29_budget_acl",
+  "run_id": "ascend-910b3-r29",
+  "captured_at": "2026-11-17T15:27:21+0800",
+  "ascend_rt_visible_devices": "5,6",
+  "host": {
+    "hostname": "localhost.localdomain",
+    "kernel": "Linux-5.10.0-216.0.0.115.oe2203sp4.aarch64-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "cpu_count": 192
+  },
+  "git": {
+    "commit": "a857142523fea92b42e64c6df270ddc873e2a2ed",
+    "branch": "main",
+    "dirty": "?? docs/evidence/ascend-910b3-r29/"
+  },
+  "modules": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "unknown",
+    "numpy": "2.5.4"
+  },
+  "api": "pyacl (acl.rt.*)",
+  "timing_boundary": "runtime-api-query, single process, sequential stages",
+  "stages": [
+    {
+      "logical_dev": 0,
+      "calls": {
+        "set_device": 0,
+        "create_context": 0,
+        "get_mem_info@init": 0,
+        "free_0": 0,
+        "free_1": 0,
+        "free_2": 0,
+        "get_mem_info@release": 0,
+        "destroy_context": 0,
+        "reset_device": 0
+      },
+      "steps": [
+        {
+          "stage": "after_malloc_1GiB_held",
+          "requested_bytes": 1073741824,
+          "malloc_ret": 0,
+          "ptr": 20622285471744,
+          "ok": true,
+          "get_mem_info_ret": 0,
+          "free_bytes": 63986855936,
+          "delta_from_init_bytes": 1075838976
+        },
+        {
+          "stage": "after_malloc_4GiB_held",
+          "requested_bytes": 4294967296,
+          "malloc_ret": 0,
+          "ptr": 20624432955392,
+          "ok": true,
+          "get_mem_info_ret": 0,
+          "free_bytes": 59689791488,
+          "delta_from_init_bytes": 5372903424
+        },
+        {
+          "stage": "after_malloc_8GiB_held",
+          "requested_bytes": 8589934592,
+          "malloc_ret": 0,
+          "ptr": 20629801664512,
+          "ok": true,
+          "get_mem_info_ret": 0,
+          "free_bytes": 51097649152,
+          "delta_from_init_bytes": 13965045760
+        }
+      ],
+      "context_handle": 187651942693744,
+      "after_init": {
+        "stage": "after_init",
+        "free_bytes": 65062694912,
+        "total_bytes": 65452113920,
+        "used_bytes": 389419008
+      },
+      "held_blocks": 3,
+      "held_bytes": 13958643712,
+      "after_release": {
+        "stage": "after_release_all_blocks",
+        "free_bytes": 65062584320,
+        "total_bytes": 65452113920,
+        "delta_from_init_bytes": 110592
+      },
+      "destroy_context_form": "with_context_handle"
+    },
+    {
+      "logical_dev": 1,
+      "calls": {
+        "set_device": 0,
+        "create_context": 0,
+        "get_mem_info@init": 0,
+        "free_0": 0,
+        "free_1": 0,
+        "free_2": 0,
+        "get_mem_info@release": 0,
+        "destroy_context": 0,
+        "reset_device": 0
+      },
+      "steps": [
+        {
+          "stage": "after_malloc_1GiB_held",
+          "requested_bytes": 1073741824,
+          "malloc_ret": 0,
+          "ptr": 20622285471744,
+          "ok": true,
+          "get_mem_info_ret": 0,
+          "free_bytes": 63984721920,
+          "delta_from_init_bytes": 1075838976
+        },
+        {
+          "stage": "after_malloc_4GiB_held",
+          "requested_bytes": 4294967296,
+          "malloc_ret": 0,
+          "ptr": 20624432955392,
+          "ok": true,
+          "get_mem_info_ret": 0,
+          "free_bytes": 59687657472,
+          "delta_from_init_bytes": 5372903424
+        },
+        {
+          "stage": "after_malloc_8GiB_held",
+          "requested_bytes": 8589934592,
+          "malloc_ret": 0,
+          "ptr": 20629801664512,
+          "ok": true,
+          "get_mem_info_ret": 0,
+          "free_bytes": 51095625728,
+          "delta_from_init_bytes": 13964935168
+        }
+      ],
+      "context_handle": 187651942693744,
+      "after_init": {
+        "stage": "after_init",
+        "free_bytes": 65060560896,
+        "total_bytes": 65452113920,
+        "used_bytes": 391553024
+      },
+      "held_blocks": 3,
+      "held_bytes": 13958643712,
+      "after_release": {
+        "stage": "after_release_all_blocks",
+        "free_bytes": 65060339712,
+        "total_bytes": 65452113920,
+        "delta_from_init_bytes": 221184
+      },
+      "destroy_context_form": "with_context_handle"
+    }
+  ],
+  "calls": {
+    "acl.init": 0,
+    "acl.finalize": 0
+  },
+  "soc_name": "Ascend910B3",
+  "failures": [],
+  "all_calls_ok": true,
+  "interpretation_boundary": "These are free/used snapshots of the current device at each stage. They are not capacity guarantees, do not prove full-capacity allocation, and must not be compared to torch allocator snapshots from another process."
+}

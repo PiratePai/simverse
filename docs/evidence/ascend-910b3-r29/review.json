@@ -1,0 +1,1546 @@
+{
+  "schema_version": 1,
+  "source_commit": "7de467d604d83cbee5eef76c2d12679356f3cad1",
+  "review_method": "offline archive/source audit; no new NPU execution",
+  "original_manifest_sha256": "90b0f50b77e9d1744602571ae5f70441041bce71a9ec7cad2534402352a6c3d0",
+  "archive_inventory": {
+    "docs/evidence/ascend-910b3-r29/raw/budget_acl.json": {
+      "bytes": 4716,
+      "sha256": "0f6275474e68891358850516f5380f5cfbe0b393b8cfc2da211e20c5ca23d188"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/budget_torch.json": {
+      "bytes": 4749,
+      "sha256": "f05c29db2bb7f4022eee1918550e179a45915da551495d9915760ed3dc9d6f3d"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/collectives_rank0.json": {
+      "bytes": 43448,
+      "sha256": "d13c905b872a4b11b7373ed3ef805a650bfc259c602e7434937f54b6a05fce82"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/collectives_rank1.json": {
+      "bytes": 43430,
+      "sha256": "0b42a65c46e6f0bfc2d447271690588e799f3fbd0c465e4db91d1e2f75327d79"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/env_identity.json": {
+      "bytes": 10625,
+      "sha256": "6704c98b635e08915fbf3ba1c98b7f48fb329f13dcb6180d6e79da581b9afc3d"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/forward_execute.json": {
+      "bytes": 11204,
+      "sha256": "a5a491157e299d066b0fa0eb0b96a8ed161a5dc5733a54595308d68265403a50"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/forward_execute.log": {
+      "bytes": 16603,
+      "sha256": "4c98422297b399c14257d690e45c0c6c7909dd7161750b3aa5e2bf3f673b166e"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/forward_plan.json": {
+      "bytes": 10170,
+      "sha256": "d73d4e5f7183333edbee45faee06756bcb5e4701ddd0eeeade541d75adee7042"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/graph_pools.json": {
+      "bytes": 4583,
+      "sha256": "57ed4bc78894a9838c70046d1b44ec2c2b02bdf8b5783544cb643dea548ed89a"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/mrope.json": {
+      "bytes": 8475,
+      "sha256": "260776d76db4a49535de0fe24e0a216312a62216d5fb30ddee8c849ce627b0b4"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/tp2_slice_rank0.json": {
+      "bytes": 5039,
+      "sha256": "3b85d702e281be5b634b89b1f05309ff8380aa904f26b55c4f2071764e089f12"
+    },
+    "docs/evidence/ascend-910b3-r29/raw/tp2_slice_rank1.json": {
+      "bytes": 5039,
+      "sha256": "d0edbc5fd47a2bb03b50b9285b6b161fa0fb4ad052e15d986f26353e00eb0bb5"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_budget_acl.py": {
+      "bytes": 6388,
+      "sha256": "f53a519e86261694fe91c42d238e39400475fb40ce106d7251d3de03769e2deb"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_budget_torch.py": {
+      "bytes": 2968,
+      "sha256": "78e4019503773c8a4e41331db89c03757845486ca305f4499878d52d40a099a6"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_collectives.py": {
+      "bytes": 11878,
+      "sha256": "c11b221532738cada1a4026255200f7f9473b6d12b963226b6a90110c0556f8d"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_common.py": {
+      "bytes": 4238,
+      "sha256": "88e92e0c2feaafc87cd29386b9fd3aae706070d47bdecbea8b92b988bfbae9f2"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_env.py": {
+      "bytes": 2742,
+      "sha256": "2f5be77cca8a74ffd7bc2e386c432bef8e1625b545b50c1dd7b3051b51967865"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_graph.py": {
+      "bytes": 5398,
+      "sha256": "085becdad4214fda8a1ec1c2fda862b48a5fb22e6c41bd879f78670ff29e9d42"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_manifest.py": {
+      "bytes": 3867,
+      "sha256": "b2596fa1891dba04f52cb897ff048fc7bf582d54a067ef9451cfa54f8f9eca98"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_mrope.py": {
+      "bytes": 9657,
+      "sha256": "78477cafb305c6b7935619f51b3a296a8f088210d07b9e5a930bc7b5f5fc7bc0"
+    },
+    "docs/evidence/ascend-910b3-r29/scripts/r29_tp2.py": {
+      "bytes": 13201,
+      "sha256": "baed513acb6e39497800dc132fab1252298ff85ee9342035bb95d2d490b4d2e5"
+    },
+    "docs/evidence/ascend-910b3-r29/README.md": {
+      "bytes": 2951,
+      "sha256": "7761d3eb7230410e0db3fa007e1d67d2af038a3c65a8b7e83b25769026d8de38"
+    },
+    "docs/validation/ascend-910b3-r29.md": {
+      "bytes": 11200,
+      "sha256": "c74cf9ec37c4e897309929385f0a56ce5671071cfc01787d1fa49d06d3d3a787"
+    }
+  },
+  "manifest_mismatches": [
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/forward_execute.log",
+      "declared": {
+        "bytes": 16614,
+        "sha256": "aca73752ed69100be5a2791e5be4a3d9b7a020e90f2dad315cf5b64be0a83197"
+      },
+      "actual": {
+        "bytes": 16603,
+        "sha256": "4c98422297b399c14257d690e45c0c6c7909dd7161750b3aa5e2bf3f673b166e"
+      }
+    }
+  ],
+  "script_identity": {
+    "missing_from_env_snapshot": [
+      "r29_tp2.py"
+    ],
+    "hash_mismatches": [
+      "r29_manifest.py"
+    ]
+  },
+  "environment_limits": [
+    "CANN version files missing; 9.1.0 is a path/collector declaration",
+    "runtime vLLM commit and local patches not archived",
+    "PCIe BDFs do not prove switch plane or HCCL transport"
+  ],
+  "collectives": {
+    "points": [
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 1024,
+        "median_ms": 0.171582,
+        "original_algbw_GBps": 0.006,
+        "original_busbw_GBps": 0.006,
+        "derived_algbw_GBps": 0.005967991980510776,
+        "derived_busbw_GBps": 0.005967991980510776
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 2048,
+        "normalized_bytes": 2048,
+        "median_ms": 0.311731,
+        "original_algbw_GBps": 0.003,
+        "original_busbw_GBps": 0.002,
+        "derived_algbw_GBps": 0.006569766882344072,
+        "derived_busbw_GBps": 0.003284883441172036
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 2048,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 2048,
+        "median_ms": 0.281422,
+        "original_algbw_GBps": 0.007,
+        "original_busbw_GBps": 0.004,
+        "derived_algbw_GBps": 0.0072773272878453,
+        "derived_busbw_GBps": 0.00363866364392265
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 1024,
+        "median_ms": 0.19226,
+        "original_algbw_GBps": 0.005,
+        "original_busbw_GBps": 0.005,
+        "derived_algbw_GBps": 0.005326120877977739,
+        "derived_busbw_GBps": 0.005326120877977739
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 1024,
+        "median_ms": 0.165219,
+        "original_algbw_GBps": 0.006,
+        "original_busbw_GBps": 0.003,
+        "derived_algbw_GBps": 0.00619783438950726,
+        "derived_busbw_GBps": 0.00309891719475363
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 4096,
+        "median_ms": 0.154586,
+        "original_algbw_GBps": 0.026,
+        "original_busbw_GBps": 0.026,
+        "derived_algbw_GBps": 0.026496577956606676,
+        "derived_busbw_GBps": 0.026496577956606676
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 8192,
+        "normalized_bytes": 8192,
+        "median_ms": 0.287604,
+        "original_algbw_GBps": 0.014,
+        "original_busbw_GBps": 0.007,
+        "derived_algbw_GBps": 0.02848360940737959,
+        "derived_busbw_GBps": 0.014241804703689794
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 8192,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 8192,
+        "median_ms": 0.262279,
+        "original_algbw_GBps": 0.031,
+        "original_busbw_GBps": 0.015,
+        "derived_algbw_GBps": 0.031233915029415242,
+        "derived_busbw_GBps": 0.015616957514707621
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 4096,
+        "median_ms": 0.187572,
+        "original_algbw_GBps": 0.022,
+        "original_busbw_GBps": 0.022,
+        "derived_algbw_GBps": 0.02183694794532233,
+        "derived_busbw_GBps": 0.02183694794532233
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 4096,
+        "median_ms": 0.165606,
+        "original_algbw_GBps": 0.025,
+        "original_busbw_GBps": 0.013,
+        "derived_algbw_GBps": 0.02473340337910462,
+        "derived_busbw_GBps": 0.01236670168955231
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 16384,
+        "median_ms": 0.156756,
+        "original_algbw_GBps": 0.105,
+        "original_busbw_GBps": 0.105,
+        "derived_algbw_GBps": 0.10451912526474266,
+        "derived_busbw_GBps": 0.10451912526474266
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 32768,
+        "normalized_bytes": 32768,
+        "median_ms": 0.288915,
+        "original_algbw_GBps": 0.057,
+        "original_busbw_GBps": 0.029,
+        "derived_algbw_GBps": 0.11341744111589915,
+        "derived_busbw_GBps": 0.05670872055794957
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 32768,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 32768,
+        "median_ms": 0.261096,
+        "original_algbw_GBps": 0.126,
+        "original_busbw_GBps": 0.063,
+        "derived_algbw_GBps": 0.1255017311640163,
+        "derived_busbw_GBps": 0.06275086558200815
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 16384,
+        "median_ms": 0.18393,
+        "original_algbw_GBps": 0.089,
+        "original_busbw_GBps": 0.089,
+        "derived_algbw_GBps": 0.08907736638938726,
+        "derived_busbw_GBps": 0.08907736638938726
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 16384,
+        "median_ms": 0.155679,
+        "original_algbw_GBps": 0.105,
+        "original_busbw_GBps": 0.052,
+        "derived_algbw_GBps": 0.10524219708502752,
+        "derived_busbw_GBps": 0.05262109854251376
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 65536,
+        "median_ms": 0.149128,
+        "original_algbw_GBps": 0.439,
+        "original_busbw_GBps": 0.439,
+        "derived_algbw_GBps": 0.43946140228528513,
+        "derived_busbw_GBps": 0.43946140228528513
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 131072,
+        "normalized_bytes": 131072,
+        "median_ms": 0.282411,
+        "original_algbw_GBps": 0.232,
+        "original_busbw_GBps": 0.116,
+        "derived_algbw_GBps": 0.4641178990903328,
+        "derived_busbw_GBps": 0.2320589495451664
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 131072,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 131072,
+        "median_ms": 0.2581,
+        "original_algbw_GBps": 0.508,
+        "original_busbw_GBps": 0.254,
+        "derived_algbw_GBps": 0.5078341728012399,
+        "derived_busbw_GBps": 0.25391708640061994
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 65536,
+        "median_ms": 0.180586,
+        "original_algbw_GBps": 0.363,
+        "original_busbw_GBps": 0.363,
+        "derived_algbw_GBps": 0.36290742360980366,
+        "derived_busbw_GBps": 0.36290742360980366
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 65536,
+        "median_ms": 0.154379,
+        "original_algbw_GBps": 0.425,
+        "original_busbw_GBps": 0.212,
+        "derived_algbw_GBps": 0.4245136968110948,
+        "derived_busbw_GBps": 0.2122568484055474
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 262144,
+        "median_ms": 0.15438,
+        "original_algbw_GBps": 1.698,
+        "original_busbw_GBps": 1.698,
+        "derived_algbw_GBps": 1.6980437880554475,
+        "derived_busbw_GBps": 1.6980437880554475
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 524288,
+        "normalized_bytes": 524288,
+        "median_ms": 0.284866,
+        "original_algbw_GBps": 0.92,
+        "original_busbw_GBps": 0.46,
+        "derived_algbw_GBps": 1.8404723624440966,
+        "derived_busbw_GBps": 0.9202361812220483
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 524288,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 524288,
+        "median_ms": 0.261696,
+        "original_algbw_GBps": 2.003,
+        "original_busbw_GBps": 1.002,
+        "derived_algbw_GBps": 2.0034238200048913,
+        "derived_busbw_GBps": 1.0017119100024456
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 262144,
+        "median_ms": 0.179564,
+        "original_algbw_GBps": 1.46,
+        "original_busbw_GBps": 1.46,
+        "derived_algbw_GBps": 1.459891737764808,
+        "derived_busbw_GBps": 1.459891737764808
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 262144,
+        "median_ms": 0.155508,
+        "original_algbw_GBps": 1.686,
+        "original_busbw_GBps": 0.843,
+        "derived_algbw_GBps": 1.6857267793296806,
+        "derived_busbw_GBps": 0.8428633896648403
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 1048576,
+        "median_ms": 0.152692,
+        "original_algbw_GBps": 6.867,
+        "original_busbw_GBps": 6.867,
+        "derived_algbw_GBps": 6.867262201032142,
+        "derived_busbw_GBps": 6.867262201032142
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 2097152,
+        "normalized_bytes": 2097152,
+        "median_ms": 0.210691,
+        "original_algbw_GBps": 4.977,
+        "original_busbw_GBps": 2.489,
+        "derived_algbw_GBps": 9.953685729338225,
+        "derived_busbw_GBps": 4.976842864669113
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 2097152,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 2097152,
+        "median_ms": 0.1859,
+        "original_algbw_GBps": 11.281,
+        "original_busbw_GBps": 5.641,
+        "derived_algbw_GBps": 11.281075847229692,
+        "derived_busbw_GBps": 5.640537923614846
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 1048576,
+        "median_ms": 0.176636,
+        "original_algbw_GBps": 5.936,
+        "original_busbw_GBps": 5.936,
+        "derived_algbw_GBps": 5.93636631264295,
+        "derived_busbw_GBps": 5.93636631264295
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 1048576,
+        "median_ms": 0.150886,
+        "original_algbw_GBps": 6.949,
+        "original_busbw_GBps": 3.474,
+        "derived_algbw_GBps": 6.949458531606643,
+        "derived_busbw_GBps": 3.4747292658033215
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 4194304,
+        "median_ms": 0.23871,
+        "original_algbw_GBps": 17.571,
+        "original_busbw_GBps": 17.571,
+        "derived_algbw_GBps": 17.570709228771314,
+        "derived_busbw_GBps": 17.570709228771314
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 8388608,
+        "normalized_bytes": 8388608,
+        "median_ms": 0.262871,
+        "original_algbw_GBps": 15.956,
+        "original_busbw_GBps": 7.978,
+        "derived_algbw_GBps": 31.911500317646293,
+        "derived_busbw_GBps": 15.955750158823147
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 8388608,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 8388608,
+        "median_ms": 0.277452,
+        "original_algbw_GBps": 30.234,
+        "original_busbw_GBps": 15.117,
+        "derived_algbw_GBps": 30.23444776033332,
+        "derived_busbw_GBps": 15.11722388016666
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 4194304,
+        "median_ms": 0.248752,
+        "original_algbw_GBps": 16.861,
+        "original_busbw_GBps": 16.861,
+        "derived_algbw_GBps": 16.861388049141315,
+        "derived_busbw_GBps": 16.861388049141315
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 4194304,
+        "median_ms": 0.160854,
+        "original_algbw_GBps": 26.075,
+        "original_busbw_GBps": 13.037,
+        "derived_algbw_GBps": 26.075223494597587,
+        "derived_busbw_GBps": 13.037611747298794
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 16777216,
+        "median_ms": 0.842395,
+        "original_algbw_GBps": 19.916,
+        "original_busbw_GBps": 19.916,
+        "derived_algbw_GBps": 19.916091619727087,
+        "derived_busbw_GBps": 19.916091619727087
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 33554432,
+        "normalized_bytes": 33554432,
+        "median_ms": 0.944476,
+        "original_algbw_GBps": 17.764,
+        "original_busbw_GBps": 8.882,
+        "derived_algbw_GBps": 35.52703509670971,
+        "derived_busbw_GBps": 17.763517548354855
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 33554432,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 33554432,
+        "median_ms": 0.998563,
+        "original_algbw_GBps": 33.603,
+        "original_busbw_GBps": 16.802,
+        "derived_algbw_GBps": 33.60271910735727,
+        "derived_busbw_GBps": 16.801359553678633
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 16777216,
+        "median_ms": 0.901759,
+        "original_algbw_GBps": 18.605,
+        "original_busbw_GBps": 18.605,
+        "derived_algbw_GBps": 18.604988694318546,
+        "derived_busbw_GBps": 18.604988694318546
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 16777216,
+        "median_ms": 0.528909,
+        "original_algbw_GBps": 31.72,
+        "original_busbw_GBps": 15.86,
+        "derived_algbw_GBps": 31.72042071509466,
+        "derived_busbw_GBps": 15.86021035754733
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 67108864,
+        "median_ms": 3.27957,
+        "original_algbw_GBps": 20.463,
+        "original_busbw_GBps": 20.463,
+        "derived_algbw_GBps": 20.46270212253436,
+        "derived_busbw_GBps": 20.46270212253436
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 134217728,
+        "normalized_bytes": 134217728,
+        "median_ms": 3.814543,
+        "original_algbw_GBps": 17.593,
+        "original_busbw_GBps": 8.796,
+        "derived_algbw_GBps": 35.18579499562595,
+        "derived_busbw_GBps": 17.592897497812974
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 134217728,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 134217728,
+        "median_ms": 4.037118,
+        "original_algbw_GBps": 33.246,
+        "original_busbw_GBps": 16.623,
+        "derived_algbw_GBps": 33.245926425732414,
+        "derived_busbw_GBps": 16.622963212866207
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 67108864,
+        "median_ms": 3.487238,
+        "original_algbw_GBps": 19.244,
+        "original_busbw_GBps": 19.244,
+        "derived_algbw_GBps": 19.24413074186505,
+        "derived_busbw_GBps": 19.24413074186505
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 67108864,
+        "median_ms": 2.035238,
+        "original_algbw_GBps": 32.973,
+        "original_busbw_GBps": 16.486,
+        "derived_algbw_GBps": 32.97347238996127,
+        "derived_busbw_GBps": 16.486736194980637
+      },
+      {
+        "rank": 0,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 268435456,
+        "median_ms": 12.913047,
+        "original_algbw_GBps": 20.788,
+        "original_busbw_GBps": 20.788,
+        "derived_algbw_GBps": 20.787925266592772,
+        "derived_busbw_GBps": 20.787925266592772
+      },
+      {
+        "rank": 0,
+        "op": "all_gather",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 536870912,
+        "normalized_bytes": 536870912,
+        "median_ms": 15.144462,
+        "original_algbw_GBps": 17.725,
+        "original_busbw_GBps": 8.863,
+        "derived_algbw_GBps": 35.4499824424268,
+        "derived_busbw_GBps": 17.7249912212134
+      },
+      {
+        "rank": 0,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 536870912,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 536870912,
+        "median_ms": 16.069441,
+        "original_algbw_GBps": 33.409,
+        "original_busbw_GBps": 16.704,
+        "derived_algbw_GBps": 33.409432972808446,
+        "derived_busbw_GBps": 16.704716486404223
+      },
+      {
+        "rank": 0,
+        "op": "broadcast",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 268435456,
+        "median_ms": 14.045876,
+        "original_algbw_GBps": 19.111,
+        "original_busbw_GBps": 19.111,
+        "derived_algbw_GBps": 19.111336024894424,
+        "derived_busbw_GBps": 19.111336024894424
+      },
+      {
+        "rank": 0,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 268435456,
+        "median_ms": 7.358821,
+        "original_algbw_GBps": 36.478,
+        "original_busbw_GBps": 18.239,
+        "derived_algbw_GBps": 36.478052122751734,
+        "derived_busbw_GBps": 18.239026061375867
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 1024,
+        "median_ms": 0.171764,
+        "original_algbw_GBps": 0.006,
+        "original_busbw_GBps": 0.006,
+        "derived_algbw_GBps": 0.005961668335623297,
+        "derived_busbw_GBps": 0.005961668335623297
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 2048,
+        "normalized_bytes": 2048,
+        "median_ms": 0.311827,
+        "original_algbw_GBps": 0.003,
+        "original_busbw_GBps": 0.002,
+        "derived_algbw_GBps": 0.006567744294111799,
+        "derived_busbw_GBps": 0.0032838721470558993
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 2048,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 2048,
+        "median_ms": 0.281439,
+        "original_algbw_GBps": 0.007,
+        "original_busbw_GBps": 0.004,
+        "derived_algbw_GBps": 0.007276887709237172,
+        "derived_busbw_GBps": 0.003638443854618586
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 1024,
+        "median_ms": 0.192193,
+        "original_algbw_GBps": 0.005,
+        "original_busbw_GBps": 0.005,
+        "derived_algbw_GBps": 0.005327977605844125,
+        "derived_busbw_GBps": 0.005327977605844125
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 1024,
+        "logical_input_bytes": 1024,
+        "logical_output_bytes": 1024,
+        "normalized_bytes": 1024,
+        "median_ms": 0.164532,
+        "original_algbw_GBps": 0.006,
+        "original_busbw_GBps": 0.003,
+        "derived_algbw_GBps": 0.006223713320205188,
+        "derived_busbw_GBps": 0.003111856660102594
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 4096,
+        "median_ms": 0.154507,
+        "original_algbw_GBps": 0.027,
+        "original_busbw_GBps": 0.027,
+        "derived_algbw_GBps": 0.026510125754820167,
+        "derived_busbw_GBps": 0.026510125754820167
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 8192,
+        "normalized_bytes": 8192,
+        "median_ms": 0.287145,
+        "original_algbw_GBps": 0.014,
+        "original_busbw_GBps": 0.007,
+        "derived_algbw_GBps": 0.028529140329798534,
+        "derived_busbw_GBps": 0.014264570164899267
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 8192,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 8192,
+        "median_ms": 0.262841,
+        "original_algbw_GBps": 0.031,
+        "original_busbw_GBps": 0.015,
+        "derived_algbw_GBps": 0.031167131459703776,
+        "derived_busbw_GBps": 0.015583565729851888
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 4096,
+        "median_ms": 0.187463,
+        "original_algbw_GBps": 0.022,
+        "original_busbw_GBps": 0.022,
+        "derived_algbw_GBps": 0.021849644996612665,
+        "derived_busbw_GBps": 0.021849644996612665
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 4096,
+        "logical_input_bytes": 4096,
+        "logical_output_bytes": 4096,
+        "normalized_bytes": 4096,
+        "median_ms": 0.165032,
+        "original_algbw_GBps": 0.025,
+        "original_busbw_GBps": 0.013,
+        "derived_algbw_GBps": 0.024819428959232146,
+        "derived_busbw_GBps": 0.012409714479616073
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 16384,
+        "median_ms": 0.156049,
+        "original_algbw_GBps": 0.105,
+        "original_busbw_GBps": 0.105,
+        "derived_algbw_GBps": 0.10499266256111864,
+        "derived_busbw_GBps": 0.10499266256111864
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 32768,
+        "normalized_bytes": 32768,
+        "median_ms": 0.287179,
+        "original_algbw_GBps": 0.057,
+        "original_busbw_GBps": 0.029,
+        "derived_algbw_GBps": 0.11410305071053244,
+        "derived_busbw_GBps": 0.05705152535526622
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 32768,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 32768,
+        "median_ms": 0.261303,
+        "original_algbw_GBps": 0.125,
+        "original_busbw_GBps": 0.062,
+        "derived_algbw_GBps": 0.1254023107273931,
+        "derived_busbw_GBps": 0.06270115536369655
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 16384,
+        "median_ms": 0.183674,
+        "original_algbw_GBps": 0.089,
+        "original_busbw_GBps": 0.089,
+        "derived_algbw_GBps": 0.08920152008449753,
+        "derived_busbw_GBps": 0.08920152008449753
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 16384,
+        "logical_input_bytes": 16384,
+        "logical_output_bytes": 16384,
+        "normalized_bytes": 16384,
+        "median_ms": 0.155696,
+        "original_algbw_GBps": 0.105,
+        "original_busbw_GBps": 0.052,
+        "derived_algbw_GBps": 0.10523070599116226,
+        "derived_busbw_GBps": 0.05261535299558113
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 65536,
+        "median_ms": 0.149258,
+        "original_algbw_GBps": 0.439,
+        "original_busbw_GBps": 0.439,
+        "derived_algbw_GBps": 0.4390786423508287,
+        "derived_busbw_GBps": 0.4390786423508287
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 131072,
+        "normalized_bytes": 131072,
+        "median_ms": 0.282606,
+        "original_algbw_GBps": 0.232,
+        "original_busbw_GBps": 0.116,
+        "derived_algbw_GBps": 0.4637976546853216,
+        "derived_busbw_GBps": 0.2318988273426608
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 131072,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 131072,
+        "median_ms": 0.258138,
+        "original_algbw_GBps": 0.508,
+        "original_busbw_GBps": 0.254,
+        "derived_algbw_GBps": 0.5077594155064346,
+        "derived_busbw_GBps": 0.2538797077532173
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 65536,
+        "median_ms": 0.18068,
+        "original_algbw_GBps": 0.363,
+        "original_busbw_GBps": 0.363,
+        "derived_algbw_GBps": 0.3627186185521364,
+        "derived_busbw_GBps": 0.3627186185521364
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 65536,
+        "logical_input_bytes": 65536,
+        "logical_output_bytes": 65536,
+        "normalized_bytes": 65536,
+        "median_ms": 0.154082,
+        "original_algbw_GBps": 0.425,
+        "original_busbw_GBps": 0.212,
+        "derived_algbw_GBps": 0.42533196609597484,
+        "derived_busbw_GBps": 0.21266598304798742
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 262144,
+        "median_ms": 0.154215,
+        "original_algbw_GBps": 1.7,
+        "original_busbw_GBps": 1.7,
+        "derived_algbw_GBps": 1.6998605842492622,
+        "derived_busbw_GBps": 1.6998605842492622
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 524288,
+        "normalized_bytes": 524288,
+        "median_ms": 0.284927,
+        "original_algbw_GBps": 0.92,
+        "original_busbw_GBps": 0.46,
+        "derived_algbw_GBps": 1.840078335854447,
+        "derived_busbw_GBps": 0.9200391679272235
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 524288,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 524288,
+        "median_ms": 0.261568,
+        "original_algbw_GBps": 2.004,
+        "original_busbw_GBps": 1.002,
+        "derived_algbw_GBps": 2.0044042084658673,
+        "derived_busbw_GBps": 1.0022021042329337
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 262144,
+        "median_ms": 0.179209,
+        "original_algbw_GBps": 1.463,
+        "original_busbw_GBps": 1.463,
+        "derived_algbw_GBps": 1.4627836771590712,
+        "derived_busbw_GBps": 1.4627836771590712
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 262144,
+        "logical_input_bytes": 262144,
+        "logical_output_bytes": 262144,
+        "normalized_bytes": 262144,
+        "median_ms": 0.155606,
+        "original_algbw_GBps": 1.685,
+        "original_busbw_GBps": 0.843,
+        "derived_algbw_GBps": 1.6846651157410384,
+        "derived_busbw_GBps": 0.8423325578705192
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 1048576,
+        "median_ms": 0.15269,
+        "original_algbw_GBps": 6.867,
+        "original_busbw_GBps": 6.867,
+        "derived_algbw_GBps": 6.867352151417906,
+        "derived_busbw_GBps": 6.867352151417906
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 2097152,
+        "normalized_bytes": 2097152,
+        "median_ms": 0.21077,
+        "original_algbw_GBps": 4.975,
+        "original_busbw_GBps": 2.487,
+        "derived_algbw_GBps": 9.949954927171799,
+        "derived_busbw_GBps": 4.974977463585899
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 2097152,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 2097152,
+        "median_ms": 0.185772,
+        "original_algbw_GBps": 11.289,
+        "original_busbw_GBps": 5.644,
+        "derived_algbw_GBps": 11.28884869625132,
+        "derived_busbw_GBps": 5.64442434812566
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 1048576,
+        "median_ms": 0.176728,
+        "original_algbw_GBps": 5.933,
+        "original_busbw_GBps": 5.933,
+        "derived_algbw_GBps": 5.933275994748993,
+        "derived_busbw_GBps": 5.933275994748993
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 1048576,
+        "logical_input_bytes": 1048576,
+        "logical_output_bytes": 1048576,
+        "normalized_bytes": 1048576,
+        "median_ms": 0.151132,
+        "original_algbw_GBps": 6.938,
+        "original_busbw_GBps": 3.469,
+        "derived_algbw_GBps": 6.938146785591405,
+        "derived_busbw_GBps": 3.4690733927957025
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 4194304,
+        "median_ms": 0.372276,
+        "original_algbw_GBps": 11.267,
+        "original_busbw_GBps": 11.267,
+        "derived_algbw_GBps": 11.266651624063867,
+        "derived_busbw_GBps": 11.266651624063867
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 8388608,
+        "normalized_bytes": 8388608,
+        "median_ms": 0.262677,
+        "original_algbw_GBps": 15.968,
+        "original_busbw_GBps": 7.984,
+        "derived_algbw_GBps": 31.935068544257774,
+        "derived_busbw_GBps": 15.967534272128887
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 8388608,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 8388608,
+        "median_ms": 0.277406,
+        "original_algbw_GBps": 30.239,
+        "original_busbw_GBps": 15.12,
+        "derived_algbw_GBps": 30.239461294997223,
+        "derived_busbw_GBps": 15.119730647498612
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 4194304,
+        "median_ms": 0.248366,
+        "original_algbw_GBps": 16.888,
+        "original_busbw_GBps": 16.888,
+        "derived_algbw_GBps": 16.88759330987333,
+        "derived_busbw_GBps": 16.88759330987333
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 4194304,
+        "logical_input_bytes": 4194304,
+        "logical_output_bytes": 4194304,
+        "normalized_bytes": 4194304,
+        "median_ms": 0.160634,
+        "original_algbw_GBps": 26.111,
+        "original_busbw_GBps": 13.056,
+        "derived_algbw_GBps": 26.110935418404573,
+        "derived_busbw_GBps": 13.055467709202286
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 16777216,
+        "median_ms": 0.842198,
+        "original_algbw_GBps": 19.921,
+        "original_busbw_GBps": 19.921,
+        "derived_algbw_GBps": 19.92075022738121,
+        "derived_busbw_GBps": 19.92075022738121
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 33554432,
+        "normalized_bytes": 33554432,
+        "median_ms": 0.94449,
+        "original_algbw_GBps": 17.763,
+        "original_busbw_GBps": 8.882,
+        "derived_algbw_GBps": 35.52650848606125,
+        "derived_busbw_GBps": 17.763254243030627
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 33554432,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 33554432,
+        "median_ms": 0.997351,
+        "original_algbw_GBps": 33.644,
+        "original_busbw_GBps": 16.822,
+        "derived_algbw_GBps": 33.64355377394718,
+        "derived_busbw_GBps": 16.82177688697359
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 16777216,
+        "median_ms": 0.900558,
+        "original_algbw_GBps": 18.63,
+        "original_busbw_GBps": 18.63,
+        "derived_algbw_GBps": 18.629800634717586,
+        "derived_busbw_GBps": 18.629800634717586
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 16777216,
+        "logical_input_bytes": 16777216,
+        "logical_output_bytes": 16777216,
+        "normalized_bytes": 16777216,
+        "median_ms": 0.528709,
+        "original_algbw_GBps": 31.732,
+        "original_busbw_GBps": 15.866,
+        "derived_algbw_GBps": 31.732419913411725,
+        "derived_busbw_GBps": 15.866209956705863
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 67108864,
+        "median_ms": 3.280721,
+        "original_algbw_GBps": 20.456,
+        "original_busbw_GBps": 20.456,
+        "derived_algbw_GBps": 20.455523038990513,
+        "derived_busbw_GBps": 20.455523038990513
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 134217728,
+        "normalized_bytes": 134217728,
+        "median_ms": 3.817321,
+        "original_algbw_GBps": 17.58,
+        "original_busbw_GBps": 8.79,
+        "derived_algbw_GBps": 35.1601890435727,
+        "derived_busbw_GBps": 17.58009452178635
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 134217728,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 134217728,
+        "median_ms": 4.039602,
+        "original_algbw_GBps": 33.225,
+        "original_busbw_GBps": 16.613,
+        "derived_algbw_GBps": 33.22548310452366,
+        "derived_busbw_GBps": 16.61274155226183
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 67108864,
+        "median_ms": 3.488972,
+        "original_algbw_GBps": 19.235,
+        "original_busbw_GBps": 19.235,
+        "derived_algbw_GBps": 19.234566514148007,
+        "derived_busbw_GBps": 19.234566514148007
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 67108864,
+        "logical_input_bytes": 67108864,
+        "logical_output_bytes": 67108864,
+        "normalized_bytes": 67108864,
+        "median_ms": 2.03241,
+        "original_algbw_GBps": 33.019,
+        "original_busbw_GBps": 16.509,
+        "derived_algbw_GBps": 33.019353378501386,
+        "derived_busbw_GBps": 16.509676689250693
+      },
+      {
+        "rank": 1,
+        "op": "all_reduce",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 268435456,
+        "median_ms": 12.920742,
+        "original_algbw_GBps": 20.776,
+        "original_busbw_GBps": 20.776,
+        "derived_algbw_GBps": 20.77554493387454,
+        "derived_busbw_GBps": 20.77554493387454
+      },
+      {
+        "rank": 1,
+        "op": "all_gather",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 536870912,
+        "normalized_bytes": 536870912,
+        "median_ms": 15.146026,
+        "original_algbw_GBps": 17.723,
+        "original_busbw_GBps": 8.861,
+        "derived_algbw_GBps": 35.44632182725686,
+        "derived_busbw_GBps": 17.72316091362843
+      },
+      {
+        "rank": 1,
+        "op": "reduce_scatter",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 536870912,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 536870912,
+        "median_ms": 16.064523,
+        "original_algbw_GBps": 33.42,
+        "original_busbw_GBps": 16.71,
+        "derived_algbw_GBps": 33.41966095102855,
+        "derived_busbw_GBps": 16.709830475514273
+      },
+      {
+        "rank": 1,
+        "op": "broadcast",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 268435456,
+        "median_ms": 14.054121,
+        "original_algbw_GBps": 19.1,
+        "original_busbw_GBps": 19.1,
+        "derived_algbw_GBps": 19.10012415575474,
+        "derived_busbw_GBps": 19.10012415575474
+      },
+      {
+        "rank": 1,
+        "op": "all_to_all_single",
+        "buffer_scale_bytes": 268435456,
+        "logical_input_bytes": 268435456,
+        "logical_output_bytes": 268435456,
+        "normalized_bytes": 268435456,
+        "median_ms": 7.356532,
+        "original_algbw_GBps": 36.489,
+        "original_busbw_GBps": 18.244,
+        "derived_algbw_GBps": 36.4894023433868,
+        "derived_busbw_GBps": 18.2447011716934
+      }
+    ],
+    "correctness": [
+      {
+        "rank": 0,
+        "checked": 50,
+        "exact": 50,
+        "mismatch": 0,
+        "errors": 0
+      },
+      {
+        "rank": 1,
+        "checked": 50,
+        "exact": 50,
+        "mismatch": 0,
+        "errors": 0
+      }
+    ],
+    "boundary": "per-rank batched host+sync wallclock, not kernel or wire bandwidth",
+    "cross_rank_joint_timing_available": false,
+    "definition_source": "https://github.com/NVIDIA/nccl-tests/tree/afd59abab774a6a4b492eb344bd0c845a0b7bb4d"
+  },
+  "graph": {
+    "capture_minus_baseline_free_bytes": 56623104,
+    "capture_minus_baseline_allocated_bytes": 16779264,
+    "replay1_minus_capture_free_bytes": 4194304,
+    "pure_graph_pool_bytes": null,
+    "reason": "static_in clone occurs after baseline; no clone-only control or output finite/equality check"
+  },
+  "acl": {
+    "incremental_observations": [
+      {
+        "logical_dev": 0,
+        "observed_free_delta_minus_requested_bytes": [
+          2097152,
+          2097152,
+          2207744
+        ]
+      },
+      {
+        "logical_dev": 1,
+        "observed_free_delta_minus_requested_bytes": [
+          2097152,
+          2097152,
+          2097152
+        ]
+      }
+    ],
+    "allocation_granularity_bytes": null,
+    "deployment_budget_bytes": null
+  },
+  "mrope": {
+    "numeric_admitted": false,
+    "fused_target_support": "unresolved",
+    "reasons": [
+      "flat [tokens, heads*256] rotates only the first 64 dims, not 64 per head",
+      "oracle shares that slicing defect; tail check includes heads that should rotate",
+      "identity compares assembled frequencies with their device copy, not an independent T row",
+      "NeoX bands use adjacent pairs instead of indices j and j+32; low/high labels reversed",
+      "161002 is a recorded call failure, not proof that Qwen integration is unsupported"
+    ]
+  },
+  "forward": {
+    "hardware_executed": true,
+    "tensor_parallel_size": 1,
+    "physical_participating_card": 5,
+    "output_token_ids": [
+      20,
+      20,
+      20,
+      20
+    ],
+    "weights_GiB_log_observation": 0.32,
+    "kv_available_GiB_log_observation": 11.81,
+    "failed_attempts_archived": false,
+    "numerical_correctness_verified": false,
+    "full_model_forward": false,
+    "performance_measured": false,
+    "reason": "success-only log; OOM reports are not weight-size measurements or a utilization upper bound"
+  },
+  "slices": {
+    "captured_summaries": [
+      {
+        "cases": 7,
+        "passed": 7,
+        "failed": 0,
+        "failed_cases": []
+      },
+      {
+        "cases": 7,
+        "passed": 7,
+        "failed": 0,
+        "failed_cases": []
+      }
+    ],
+    "entries_per_rank_sent": [
+      32,
+      32
+    ],
+    "max_allocator_peak_bytes": 3624960,
+    "full_model_npu_ep_verified": false,
+    "limits": [
+      "MLP tests one up/down GEMM, not full SwiGLU",
+      "GQA is unmasked; BF16 case computes scores in FP32",
+      "MoE uses E8/top2/H64/GELU with CPU expert compute, NPU metadata/output exchange",
+      "permutation flag checks received metadata multiset, not inverse roundtrip identity",
+      "empty experts are both owned by rank1; rank0 never exercises an owned empty expert",
+      "7/7 excludes KV/permutation flags from failure aggregation; toy peaks exclude runtime pools"
+    ]
+  },
+  "manifest_status_correction": "A-N3 generic slices executed; full model/state/capacity not verified (original not_executed is stale)",
+  "calibration_admission": "not-admitted",
+  "deployment_ranking_eligible": false,
+  "does_not_unblock": [
+    "G-D7",
+    "R02b",
+    "R17",
+    "R18"
+  ]
+}

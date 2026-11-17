@@ -1,0 +1,291 @@
+{
+  "schema_version": "1",
+  "kind": "ascend-forward-probe-plan",
+  "profile": "qwen36-fixture",
+  "mode": "dry-run",
+  "status": "planned",
+  "generated_at": "2026-11-17T07:37:30+00:00",
+  "claims": {
+    "hardware_executed": false,
+    "hardware_verified": false,
+    "full_model_forward": false,
+    "random_weights": true,
+    "performance_measured": false,
+    "acceptance_rate_measured": false,
+    "v41_substitute_for_v4": false
+  },
+  "identity": {
+    "model_name": "Qwen3.6-35B-A3B",
+    "profile": "qwen36-fixture",
+    "checkpoint_kind": "random-weight-text-fixture",
+    "architecture": "Qwen3_5MoeForCausalLM",
+    "architectures": [
+      "Qwen3_5MoeForCausalLM"
+    ],
+    "model_type": "qwen3_5_moe_text",
+    "dtype": "bfloat16",
+    "quantization": null,
+    "implementation": "vllm-ascend",
+    "entrypoint": "vllm.LLM",
+    "source_config_path": "/home/p00929506/TQ/simverse/assets/config/qwen36_35b_a3b_main__config.json",
+    "source_config_sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+    "effective_config_path": "/data/p00929506/TQ/r29-runtime/config.json",
+    "effective_config_sha256": "fe26f62087773d54d76506da68b7142bf41b562ea51afe222b3401284d315721",
+    "overrides": {
+      "vocab_size": 1024,
+      "num_hidden_layers": 2,
+      "layer_types": [
+        "linear_attention",
+        "full_attention"
+      ],
+      "num_experts": 16,
+      "max_position_embeddings": 4096,
+      "bos_token_id": 1,
+      "eos_token_id": 2,
+      "mtp_num_hidden_layers": 0
+    },
+    "config": null,
+    "checkpoint_identity": {
+      "repo_id": "Qwen/Qwen3.6-35B-A3B",
+      "pinned_revision_main_sha": "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
+      "pinned_main_config_sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+      "matches_pinned_main": true,
+      "note": "fixture derives from the pinned Qwen3.6-35B-A3B text_config"
+    },
+    "weights_sha256": null,
+    "weights_identity_verified": false,
+    "full_model": false
+  },
+  "sources": {
+    "vllm": {
+      "repo": "https://github.com/vllm-project/vllm",
+      "commit": "6b858751f6e99c4f33913657dc0c2afd34ff13e6",
+      "installed_version": "0.32.0+empty",
+      "commit_role": "reviewed-reference-not-runtime",
+      "runtime_commit": null
+    },
+    "vllm_ascend": {
+      "repo": "https://github.com/vllm-project/vllm-ascend",
+      "commit": "baa023ada41a5b889cac6249845a688aab130892",
+      "installed_version": "0.19.1rc2.dev2959+g450e55698",
+      "commit_role": "reviewed-reference-not-runtime",
+      "runtime_commit": null
+    },
+    "vllm_main_verified_commit": "84030bbe3d74d99bad477a3d2e37a973ccd8865c",
+    "vllm_release_tag": "v0.29.0",
+    "source_manifest": "assets/identity/ascend_forward/source_manifest.json",
+    "source_manifest_sha256": "18742adf6b7088139e349f260cce0fc2906bc769a4b7fa39fdc71deeff0323c7",
+    "stack_requirements": {
+      "torch": "2.10.0",
+      "torch-npu": "2.10.0.post4",
+      "cann": "9.1.0",
+      "evidence": "vllm-ascend baa023a requirements.txt / release notes"
+    },
+    "installed": {
+      "torch": "2.10.0+cpu",
+      "torch-npu": "2.10.0.post4"
+    }
+  },
+  "engine": {
+    "args": {
+      "model": "/data/p00929506/TQ/r29-runtime",
+      "dtype": "bfloat16",
+      "tensor_parallel_size": 1,
+      "max_model_len": 128,
+      "max_num_seqs": 1,
+      "max_num_batched_tokens": 128,
+      "gpu_memory_utilization": 0.5,
+      "enforce_eager": true,
+      "enable_prefix_caching": false,
+      "trust_remote_code": false,
+      "seed": 20261117,
+      "disable_log_stats": true,
+      "quantization": null,
+      "enable_expert_parallel": false,
+      "load_format": "dummy",
+      "skip_tokenizer_init": true
+    },
+    "sampling": {
+      "max_tokens": 4,
+      "temperature": 0.0,
+      "top_p": 1.0,
+      "seed": 20261117,
+      "detokenize": false,
+      "ignore_eos": true
+    },
+    "request": {
+      "mode": "token_ids",
+      "prompts": [
+        {
+          "prompt_token_ids": [
+            16,
+            17,
+            18,
+            19,
+            20
+          ]
+        }
+      ]
+    }
+  },
+  "gates": [
+    {
+      "id": "fixture_identity",
+      "status": "pass",
+      "detail": "source hash and every override match the pinned text_config"
+    },
+    {
+      "id": "architecture",
+      "status": "pass",
+      "detail": "architectures=['Qwen3_5MoeForCausalLM'], model_type=qwen3_5_moe_text, text_model_type=qwen3_5_moe_text"
+    },
+    {
+      "id": "tp",
+      "status": "pass",
+      "detail": "TP=1 fits attention/GDN head counts (heads=16, kv_heads=2)"
+    },
+    {
+      "id": "weights",
+      "status": "pass",
+      "detail": "vLLM load_format=dummy; no checkpoint weights are read"
+    },
+    {
+      "id": "tokenizer",
+      "status": "pass",
+      "detail": "skip_tokenizer_init=True; prompts are token IDs"
+    },
+    {
+      "id": "quantization",
+      "status": "pass",
+      "detail": "dummy random weights, BF16, quantization disabled"
+    },
+    {
+      "id": "prompt",
+      "status": "pass",
+      "detail": "5 token id(s) in [0, 1024); no tokenizer"
+    },
+    {
+      "id": "stack",
+      "status": "pass",
+      "detail": "torch=2.10.0+cpu torch-npu=2.10.0.post4 meet the 2.10 major/minor floor"
+    },
+    {
+      "id": "vllm_version",
+      "status": "pass",
+      "detail": "vLLM 0.32.0+empty >= 0.18.0"
+    },
+    {
+      "id": "vllm_ascend_version",
+      "status": "pass",
+      "detail": "vllm-ascend 0.19.1rc2.dev2959+g450e55698 >= 0.18.0rc1"
+    },
+    {
+      "id": "sources",
+      "status": "pass",
+      "detail": "vLLM @6b858751f6e99c4f33913657dc0c2afd34ff13e6 (verified main pin 84030bbe3d74d99bad477a3d2e37a973ccd8865c); vllm-ascend @baa023ada41a5b889cac6249845a688aab130892"
+    }
+  ],
+  "execute_blocked": false,
+  "blocked_reason": null,
+  "commands": {
+    "plan": "python3 tools/ascend_forward_probe.py --profile qwen36-fixture --tensor-parallel-size 1 --quantization none --max-model-len 128 --max-tokens 4 --prompt-token-ids 16,17,18,19,20 --runtime-dir /data/p00929506/TQ/r29-runtime --no-enable-expert-parallel --dtype bfloat16 --device npu --seed 20261117 --max-num-batched-tokens 128 --gpu-memory-utilization 0.5",
+    "execute": "python3 tools/ascend_forward_probe.py --profile qwen36-fixture --tensor-parallel-size 1 --quantization none --max-model-len 128 --max-tokens 4 --prompt-token-ids 16,17,18,19,20 --runtime-dir /data/p00929506/TQ/r29-runtime --no-enable-expert-parallel --dtype bfloat16 --device npu --seed 20261117 --max-num-batched-tokens 128 --gpu-memory-utilization 0.5 --execute"
+  },
+  "limitations": [
+    "Source audit is read-only against local reference trees; vLLM 6b858751f6e99c4f33913657dc0c2afd34ff13e6 is not vllm-ascend's documented verified main 84030bbe3d74d99bad477a3d2e37a973ccd8865c.",
+    "Random-weight, text-only, 2-layer fixture: not the Qwen3.6-35B-A3B checkpoint, not whole-model performance, and not an acceptance-rate measurement.",
+    "Vision tower, image/video tokens, MTP and DFlash are not exercised.",
+    "A fixture pass only proves the vLLM/vllm-ascend forward wiring on the installed Ascend stack."
+  ],
+  "notes": [
+    "Dry-run does not import torch or vllm and does not load weights.",
+    "The only hardware path is vLLM LLM + the installed vllm-ascend platform plugin; there is no hand-written CUDA/Ascend forward here.",
+    "No automatic model download and no remote GPU call."
+  ],
+  "fixture": {
+    "enabled": true,
+    "source_config": "assets/config/qwen36_35b_a3b_main__config.json",
+    "source_config_sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+    "source_field": "text_config",
+    "effective_config": {
+      "architectures": [
+        "Qwen3_5MoeForCausalLM"
+      ],
+      "attention_bias": false,
+      "attention_dropout": 0.0,
+      "attn_output_gate": true,
+      "bos_token_id": 1,
+      "dtype": "bfloat16",
+      "eos_token_id": 2,
+      "full_attention_interval": 4,
+      "head_dim": 256,
+      "hidden_act": "silu",
+      "hidden_size": 2048,
+      "initializer_range": 0.02,
+      "layer_types": [
+        "linear_attention",
+        "full_attention"
+      ],
+      "linear_conv_kernel_dim": 4,
+      "linear_key_head_dim": 128,
+      "linear_num_key_heads": 16,
+      "linear_num_value_heads": 32,
+      "linear_value_head_dim": 128,
+      "mamba_ssm_dtype": "float32",
+      "max_position_embeddings": 4096,
+      "model_type": "qwen3_5_moe_text",
+      "moe_intermediate_size": 512,
+      "mtp_num_hidden_layers": 0,
+      "mtp_use_dedicated_embeddings": false,
+      "num_attention_heads": 16,
+      "num_experts": 16,
+      "num_experts_per_tok": 8,
+      "num_hidden_layers": 2,
+      "num_key_value_heads": 2,
+      "output_router_logits": false,
+      "pad_token_id": null,
+      "partial_rotary_factor": 0.25,
+      "rms_norm_eps": 1e-06,
+      "rope_parameters": {
+        "mrope_interleaved": true,
+        "mrope_section": [
+          11,
+          11,
+          10
+        ],
+        "partial_rotary_factor": 0.25,
+        "rope_theta": 10000000,
+        "rope_type": "default"
+      },
+      "router_aux_loss_coef": 0.001,
+      "shared_expert_intermediate_size": 512,
+      "tie_word_embeddings": false,
+      "use_cache": true,
+      "vocab_size": 1024
+    },
+    "effective_config_sha256": "fe26f62087773d54d76506da68b7142bf41b562ea51afe222b3401284d315721",
+    "runtime_config_path": "/data/p00929506/TQ/r29-runtime/config.json",
+    "overrides": {
+      "vocab_size": 1024,
+      "num_hidden_layers": 2,
+      "layer_types": [
+        "linear_attention",
+        "full_attention"
+      ],
+      "num_experts": 16,
+      "max_position_embeddings": 4096,
+      "bos_token_id": 1,
+      "eos_token_id": 2,
+      "mtp_num_hidden_layers": 0
+    },
+    "added_keys": [
+      "architectures"
+    ],
+    "random_weights": true,
+    "text_only": true,
+    "vision": false,
+    "mtp": false,
+    "full_model": false,
+    "note": "Random-weight two-layer text fixture. Native hidden/head/GDN/intermediate/MRoPE/top-k dimensions retained. Only layers, total experts, vocabulary, context limit, token IDs and MTP change; not full model or numerical/performance evidence."
+  }
+}

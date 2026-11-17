@@ -1,0 +1,165 @@
+{
+  "kind": "r29_budget_torch",
+  "run_id": "ascend-910b3-r29",
+  "captured_at": "2026-11-17T15:27:48+0800",
+  "ascend_rt_visible_devices": "5,6",
+  "host": {
+    "hostname": "localhost.localdomain",
+    "kernel": "Linux-5.10.0-216.0.0.115.oe2203sp4.aarch64-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "cpu_count": 192
+  },
+  "git": {
+    "commit": "a857142523fea92b42e64c6df270ddc873e2a2ed",
+    "branch": "main",
+    "dirty": "?? docs/evidence/ascend-910b3-r29/"
+  },
+  "modules": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "unknown",
+    "numpy": "2.5.4"
+  },
+  "api": "torch_npu（memory_allocated / memory_reserved / mem_get_info）",
+  "timing_boundary": "allocator statistics, single process, sequential stages",
+  "devices": {
+    "device_count": 2,
+    "devices": [
+      {
+        "logical_index": 0,
+        "name": "Ascend910B3"
+      },
+      {
+        "logical_index": 1,
+        "name": "Ascend910B3"
+      }
+    ]
+  },
+  "devices_detail": [
+    {
+      "logical_dev": 0,
+      "snapshots": [
+        {
+          "stage": "startup",
+          "free_bytes": 65065009152,
+          "total_bytes": 65452113920,
+          "used_bytes": 387104768,
+          "allocated_bytes": 0,
+          "reserved_bytes": 0,
+          "active_bytes": 0
+        },
+        {
+          "stage": "after_first_tensor",
+          "free_bytes": 65039843328,
+          "total_bytes": 65452113920,
+          "used_bytes": 412270592,
+          "allocated_bytes": 2097664,
+          "reserved_bytes": 20971520,
+          "active_bytes": 2097664
+        },
+        {
+          "stage": "after_1GiB_held",
+          "block_bytes": 1073741824,
+          "free_bytes": 63964004352,
+          "total_bytes": 65452113920,
+          "used_bytes": 1488109568,
+          "allocated_bytes": 1075840000,
+          "reserved_bytes": 1096810496,
+          "active_bytes": 1075840000
+        },
+        {
+          "stage": "after_release",
+          "free_bytes": 63964004352,
+          "total_bytes": 65452113920,
+          "used_bytes": 1488109568,
+          "allocated_bytes": 2097664,
+          "reserved_bytes": 1096810496,
+          "active_bytes": 2097664
+        },
+        {
+          "stage": "after_empty_cache",
+          "free_bytes": 65039843328,
+          "total_bytes": 65452113920,
+          "used_bytes": 412270592,
+          "allocated_bytes": 2097664,
+          "reserved_bytes": 20971520,
+          "active_bytes": 2097664
+        }
+      ],
+      "note": "after_release 只表示该进程的 allocator 统计；缓存区是否归还设备由 empty_cache 阶段单独观测。"
+    },
+    {
+      "logical_dev": 1,
+      "snapshots": [
+        {
+          "stage": "startup",
+          "free_bytes": 65062359040,
+          "total_bytes": 65452113920,
+          "used_bytes": 389754880,
+          "allocated_bytes": 0,
+          "reserved_bytes": 0,
+          "active_bytes": 0
+        },
+        {
+          "stage": "after_first_tensor",
+          "free_bytes": 65037193216,
+          "total_bytes": 65452113920,
+          "used_bytes": 414920704,
+          "allocated_bytes": 2097664,
+          "reserved_bytes": 20971520,
+          "active_bytes": 2097664
+        },
+        {
+          "stage": "after_1GiB_held",
+          "block_bytes": 1073741824,
+          "free_bytes": 63961354240,
+          "total_bytes": 65452113920,
+          "used_bytes": 1490759680,
+          "allocated_bytes": 1075840000,
+          "reserved_bytes": 1096810496,
+          "active_bytes": 1075840000
+        },
+        {
+          "stage": "after_release",
+          "free_bytes": 63961354240,
+          "total_bytes": 65452113920,
+          "used_bytes": 1490759680,
+          "allocated_bytes": 2097664,
+          "reserved_bytes": 1096810496,
+          "active_bytes": 2097664
+        },
+        {
+          "stage": "after_empty_cache",
+          "free_bytes": 65037193216,
+          "total_bytes": 65452113920,
+          "used_bytes": 414920704,
+          "allocated_bytes": 2097664,
+          "reserved_bytes": 20971520,
+          "active_bytes": 2097664
+        }
+      ],
+      "note": "after_release 只表示该进程的 allocator 统计；缓存区是否归还设备由 empty_cache 阶段单独观测。"
+    }
+  ],
+  "stage_names": [
+    {
+      "stage": "startup"
+    },
+    {
+      "stage": "after_first_tensor"
+    },
+    {
+      "stage": "after_1GiB_held"
+    },
+    {
+      "stage": "after_release"
+    },
+    {
+      "stage": "after_empty_cache"
+    }
+  ],
+  "comparison_boundary": "torch allocator numbers are not comparable with ACL pyacl snapshots; no cross-API subtraction is performed here."
+}

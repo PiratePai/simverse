@@ -1,0 +1,249 @@
+{
+  "kind": "r29_manifest",
+  "run_id": "ascend-910b3-r29",
+  "captured_at": "2026-11-17T16:25:49+0800",
+  "ascend_rt_visible_devices": "5,6",
+  "host": {
+    "hostname": "localhost.localdomain",
+    "kernel": "Linux-5.10.0-216.0.0.115.oe2203sp4.aarch64-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "cpu_count": 192
+  },
+  "git": {
+    "commit": "a857142523fea92b42e64c6df270ddc873e2a2ed",
+    "branch": "main",
+    "dirty": "?? docs/evidence/ascend-910b3-r29/\n?? docs/validation/ascend-910b3-r29.md"
+  },
+  "modules": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "0.19.1rc2.dev2959+g450e55698",
+    "numpy": "2.5.4"
+  },
+  "run_dir": "docs/evidence/ascend-910b3-r29",
+  "device_restriction": "ASCEND_RT_VISIBLE_DEVICES=5,6 (physical cards 5 and 6 only)",
+  "raw": [
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/budget_acl.json",
+      "role": "ACL 分阶段 malloc/free + 返回码 + context 句柄",
+      "limits": "空闲快照，不是容量保证",
+      "bytes": 4716,
+      "sha256": "0f6275474e68891358850516f5380f5cfbe0b393b8cfc2da211e20c5ca23d188"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/budget_torch.json",
+      "role": "torch allocator 分阶段统计",
+      "limits": "与 ACL 不可相减",
+      "bytes": 4749,
+      "sha256": "f05c29db2bb7f4022eee1918550e179a45915da551495d9915760ed3dc9d6f3d"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/collectives_rank0.json",
+      "role": "rank0 五类 collective × 10 尺寸 + 数值校验",
+      "limits": "批内墙钟；transport 未验证",
+      "bytes": 43448,
+      "sha256": "d13c905b872a4b11b7373ed3ef805a650bfc259c602e7434937f54b6a05fce82"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/collectives_rank1.json",
+      "role": "rank1 同规格记录",
+      "limits": "同上",
+      "bytes": 43430,
+      "sha256": "0b42a65c46e6f0bfc2d447271690588e799f3fbd0c465e4db91d1e2f75327d79"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/env_identity.json",
+      "role": "栈/设备/板卡/版本文件/脚本哈希",
+      "limits": "板卡序列号可核对；HCCS 路由未验证",
+      "bytes": 10625,
+      "sha256": "6704c98b635e08915fbf3ba1c98b7f48fb329f13dcb6180d6e79da581b9afc3d"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/forward_execute.json",
+      "role": "vLLM 0.32 + vllm-ascend fixture 执行结果",
+      "limits": "2 层随机权重，非整模",
+      "bytes": 11204,
+      "sha256": "a5a491157e299d066b0fa0eb0b96a8ed161a5dc5733a54595308d68265403a50"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/forward_execute.log",
+      "role": "执行日志（含两次 OOM 负例）",
+      "limits": "原始日志，未编辑",
+      "bytes": 16614,
+      "sha256": "aca73752ed69100be5a2791e5be4a3d9b7a020e90f2dad315cf5b64be0a83197"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/forward_plan.json",
+      "role": "forward 预检计划（dry-run）",
+      "limits": "计划不等于执行",
+      "bytes": 10170,
+      "sha256": "d73d4e5f7183333edbee45faee06756bcb5e4701ddd0eeeade541d75adee7042"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/graph_pools.json",
+      "role": "eager/预热/baseline/capture/replay/release 分阶段",
+      "limits": "单 workload，不是整模峰值",
+      "bytes": 4583,
+      "sha256": "57ed4bc78894a9838c70046d1b44ec2c2b02bdf8b5783544cb643dea548ed89a"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/mrope.json",
+      "role": "Qwen3.6 参数域 MRoPE 数值 + 融合入口能力探测",
+      "limits": "非融合路径 fixture 级",
+      "bytes": 8475,
+      "sha256": "260776d76db4a49535de0fe24e0a216312a62216d5fb30ddee8c849ce627b0b4"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/tp2_slice_rank0.json",
+      "role": "TP2/EP2 切片：数值、路由、显存（rank0）",
+      "limits": "切片级；均衡路由，不代表倾斜分布",
+      "bytes": 5039,
+      "sha256": "3b85d702e281be5b634b89b1f05309ff8380aa904f26b55c4f2071764e089f12"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/raw/tp2_slice_rank1.json",
+      "role": "TP2/EP2 切片：数值、路由、显存（rank1）",
+      "limits": "同上",
+      "bytes": 5039,
+      "sha256": "d0edbc5fd47a2bb03b50b9285b6b161fa0fb4ad052e15d986f26353e00eb0bb5"
+    }
+  ],
+  "scripts": [
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_budget_acl.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 6388,
+      "sha256": "f53a519e86261694fe91c42d238e39400475fb40ce106d7251d3de03769e2deb"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_budget_torch.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 2968,
+      "sha256": "78e4019503773c8a4e41331db89c03757845486ca305f4499878d52d40a099a6"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_collectives.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 11878,
+      "sha256": "c11b221532738cada1a4026255200f7f9473b6d12b963226b6a90110c0556f8d"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_common.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 4238,
+      "sha256": "88e92e0c2feaafc87cd29386b9fd3aae706070d47bdecbea8b92b988bfbae9f2"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_env.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 2742,
+      "sha256": "2f5be77cca8a74ffd7bc2e386c432bef8e1625b545b50c1dd7b3051b51967865"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_graph.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 5398,
+      "sha256": "085becdad4214fda8a1ec1c2fda862b48a5fb22e6c41bd879f78670ff29e9d42"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_manifest.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 3867,
+      "sha256": "b2596fa1891dba04f52cb897ff048fc7bf582d54a067ef9451cfa54f8f9eca98"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_mrope.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 9657,
+      "sha256": "78477cafb305c6b7935619f51b3a296a8f088210d07b9e5a930bc7b5f5fc7bc0"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3-r29/scripts/r29_tp2.py",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 13201,
+      "sha256": "baed513acb6e39497800dc132fab1252298ff85ee9342035bb95d2d490b4d2e5"
+    }
+  ],
+  "docs": [
+    {
+      "path": "docs/evidence/ascend-910b3-r29/README.md",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 2951,
+      "sha256": "7761d3eb7230410e0db3fa007e1d67d2af038a3c65a8b7e83b25769026d8de38"
+    },
+    {
+      "path": "docs/validation/ascend-910b3-r29.md",
+      "role": "本轮脚本/说明",
+      "limits": "见 README",
+      "bytes": 11200,
+      "sha256": "c74cf9ec37c4e897309929385f0a56ce5671071cfc01787d1fa49d06d3d3a787"
+    }
+  ],
+  "stack": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "0.19.1rc2.dev2959+g450e55698",
+    "numpy": "2.5.4"
+  },
+  "devices": {
+    "device_count": 2,
+    "devices": [
+      {
+        "logical_index": 0,
+        "name": "Ascend910B3"
+      },
+      {
+        "logical_index": 1,
+        "name": "Ascend910B3"
+      }
+    ]
+  },
+  "version_files": {
+    "toolkit_version_cfg": {
+      "path": "/usr/local/Ascend/ascend-toolkit/latest/version.cfg",
+      "sha256": null,
+      "missing": true
+    },
+    "driver_version_info": {
+      "path": "/usr/local/Ascend/driver/version.info",
+      "sha256": "ca716136ba96edbc856980f7b658c19ed9c72ad471b97990559103fa9acd6f77",
+      "missing": false
+    },
+    "cann_version_cfg": {
+      "path": "/usr/local/Ascend/cann-9.1.0/version.cfg",
+      "sha256": null,
+      "missing": true
+    }
+  },
+  "calibration_admission": "not-admitted",
+  "does_not_unblock": [
+    "G-D7",
+    "R02b",
+    "R17",
+    "R18"
+  ],
+  "not_executed": [
+    "A-N3 TP2 numerical/shard reassembly/state conservation",
+    "A-N5 profiling import and local calibration",
+    "A-N6 matched E2E",
+    "HCCS transport verification (no plog captured)",
+    "fused torch_npu.npu_mrope on Qwen3.6 geometry (error 161002)"
+  ],
+  "boundary": "Archival consistency only: hashes prove files are unchanged since capture. They do not prove numerical correctness of the full model, performance, or calibration admission."
+}

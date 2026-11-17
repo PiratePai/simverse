@@ -1,0 +1,277 @@
+{
+  "kind": "r29_mrope",
+  "run_id": "ascend-910b3-r29",
+  "captured_at": "2026-11-17T15:35:57+0800",
+  "ascend_rt_visible_devices": "5,6",
+  "host": {
+    "hostname": "localhost.localdomain",
+    "kernel": "Linux-5.10.0-216.0.0.115.oe2203sp4.aarch64-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "cpu_count": 192
+  },
+  "git": {
+    "commit": "a857142523fea92b42e64c6df270ddc873e2a2ed",
+    "branch": "main",
+    "dirty": "?? docs/evidence/ascend-910b3-r29/"
+  },
+  "modules": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "unknown",
+    "numpy": "2.5.4"
+  },
+  "config_path": "assets/config/qwen36_35b_a3b_main__config.json",
+  "config_sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+  "extracted_params": {
+    "head_dim": 256,
+    "partial_rotary_factor": 0.25,
+    "rope_theta": 10000000,
+    "mrope_section": [
+      11,
+      11,
+      10
+    ],
+    "mrope_interleaved": true,
+    "max_position_embeddings": 262144,
+    "num_attention_heads": 16,
+    "num_key_value_heads": 2
+  },
+  "domain": {
+    "head_dim": 256,
+    "partial_rotary_factor": 0.25,
+    "rotary_dim": 64,
+    "rope_theta": 10000000.0,
+    "mrope_section": [
+      11,
+      11,
+      10
+    ],
+    "section_sum": 32,
+    "half_rotary": 32,
+    "mrope_interleaved": true,
+    "section_sum_matches_half": true
+  },
+  "fused_kernel_probe": {
+    "op": "torch_npu.npu_mrope",
+    "note": "accepted=False 表示该参数组合在本栈返回错误（错误码随记录），不等于语义错误",
+    "cases": [
+      {
+        "label": "documented example (control)",
+        "head_size": 128,
+        "cache_width": 128,
+        "mrope_section": [
+          16,
+          24,
+          24
+        ],
+        "accepted": true
+      },
+      {
+        "label": "same sum, different split",
+        "head_size": 128,
+        "cache_width": 128,
+        "mrope_section": [
+          32,
+          16,
+          16
+        ],
+        "accepted": false,
+        "error": "npu_mrope:../third_party/op-plugin/op_plugin/ops/opapi/RopeWithSinCosCacheKernelNpuOpApi.cpp:95 NPU function error: call aclnnRopeWithSinCosCacheV2 failed, error code is 161002"
+      },
+      {
+        "label": "skewed split",
+        "head_size": 128,
+        "cache_width": 128,
+        "mrope_section": [
+          8,
+          8,
+          48
+        ],
+        "accepted": false,
+        "error": "npu_mrope:../third_party/op-plugin/op_plugin/ops/opapi/RopeWithSinCosCacheKernelNpuOpApi.cpp:95 NPU function error: call aclnnRopeWithSinCosCacheV2 failed, error code is 161002"
+      },
+      {
+        "label": "partial rotary, half-width cache",
+        "head_size": 128,
+        "cache_width": 64,
+        "mrope_section": [
+          16,
+          8,
+          8
+        ],
+        "accepted": false,
+        "error": "npu_mrope:../third_party/op-plugin/op_plugin/ops/opapi/RopeWithSinCosCacheKernelNpuOpApi.cpp:95 NPU function error: call aclnnRopeWithSinCosCacheV2 failed, error code is 161002"
+      },
+      {
+        "label": "Qwen3.6 target geometry",
+        "head_size": 256,
+        "cache_width": 64,
+        "mrope_section": [
+          11,
+          11,
+          10
+        ],
+        "accepted": false,
+        "error": "npu_mrope:../third_party/op-plugin/op_plugin/ops/opapi/RopeWithSinCosCacheKernelNpuOpApi.cpp:95 NPU function error: call aclnnRopeWithSinCosCacheV2 failed, error code is 161002"
+      },
+      {
+        "label": "head256 rot128",
+        "head_size": 256,
+        "cache_width": 128,
+        "mrope_section": [
+          32,
+          32,
+          32
+        ],
+        "accepted": false,
+        "error": "npu_mrope:../third_party/op-plugin/op_plugin/ops/opapi/RopeWithSinCosCacheKernelNpuOpApi.cpp:95 NPU function error: call aclnnRopeWithSinCosCacheV2 failed, error code is 161002"
+      },
+      {
+        "label": "full rotary 256",
+        "head_size": 256,
+        "cache_width": 256,
+        "mrope_section": [
+          64,
+          64,
+          64
+        ],
+        "accepted": false,
+        "error": "npu_mrope:../third_party/op-plugin/op_plugin/ops/opapi/RopeWithSinCosCacheKernelNpuOpApi.cpp:95 NPU function error: call aclnnRopeWithSinCosCacheV2 failed, error code is 161002"
+      },
+      {
+        "label": "head64",
+        "head_size": 64,
+        "cache_width": 64,
+        "mrope_section": [
+          16,
+          16,
+          16
+        ],
+        "accepted": false,
+        "error": "npu_mrope:../third_party/op-plugin/op_plugin/ops/opapi/RopeWithSinCosCacheKernelNpuOpApi.cpp:95 NPU function error: call aclnnRopeWithSinCosCacheV2 failed, error code is 161002"
+      }
+    ],
+    "target_geometry_accepted": false,
+    "accepted_count": 1
+  },
+  "numeric_check": {
+    "path": "non-fused device path: fp32 cos/sin computed on NPU + NeoX rotate on NPU, fp64 CPU oracle",
+    "n_heads_used": 4,
+    "positions": [
+      0,
+      1,
+      127,
+      1000,
+      32767
+    ],
+    "dtype": "float32",
+    "per_position": [
+      {
+        "pos": 0,
+        "max_abs_rotary": 0.0,
+        "max_rel_rotary": 0.0,
+        "bands": {
+          "pairs_0_10_low_freq": {
+            "max_abs": 0.0,
+            "max_rel": 0.0
+          },
+          "pairs_11_21_mid": {
+            "max_abs": 0.0,
+            "max_rel": 0.0
+          },
+          "pairs_22_31_high": {
+            "max_abs": 0.0,
+            "max_rel": 0.0
+          }
+        }
+      },
+      {
+        "pos": 1,
+        "max_abs_rotary": 5.6017631866467354e-08,
+        "max_rel_rotary": 1.2283571490363875e-07,
+        "bands": {
+          "pairs_0_10_low_freq": {
+            "max_abs": 4.649065266093544e-08,
+            "max_rel": 1.2283571490363875e-07
+          },
+          "pairs_11_21_mid": {
+            "max_abs": 5.394033975036905e-08,
+            "max_rel": 4.943126333374336e-08
+          },
+          "pairs_22_31_high": {
+            "max_abs": 5.6017631866467354e-08,
+            "max_rel": 3.5778165619475787e-08
+          }
+        }
+      },
+      {
+        "pos": 127,
+        "max_abs_rotary": 3.5228570882672727e-07,
+        "max_rel_rotary": 2.2815503085650947e-06,
+        "bands": {
+          "pairs_0_10_low_freq": {
+            "max_abs": 3.5228570882672727e-07,
+            "max_rel": 2.2815503085650947e-06
+          },
+          "pairs_11_21_mid": {
+            "max_abs": 3.2127725679842456e-07,
+            "max_rel": 1.15008679793598e-06
+          },
+          "pairs_22_31_high": {
+            "max_abs": 6.723738010805391e-08,
+            "max_rel": 4.561765707050654e-08
+          }
+        }
+      },
+      {
+        "pos": 1000,
+        "max_abs_rotary": 1.4036818395513073e-05,
+        "max_rel_rotary": 2.4377704925957197e-05,
+        "bands": {
+          "pairs_0_10_low_freq": {
+            "max_abs": 7.282755565940491e-06,
+            "max_rel": 1.1229173503452933e-05
+          },
+          "pairs_11_21_mid": {
+            "max_abs": 1.4036818395513073e-05,
+            "max_rel": 2.4377704925957197e-05
+          },
+          "pairs_22_31_high": {
+            "max_abs": 5.4219295719803995e-08,
+            "max_rel": 1.7652180847848906e-07
+          }
+        }
+      },
+      {
+        "pos": 32767,
+        "max_abs_rotary": 0.00027478852089035666,
+        "max_rel_rotary": 0.0041860332903398655,
+        "bands": {
+          "pairs_0_10_low_freq": {
+            "max_abs": 0.0002494588420023369,
+            "max_rel": 0.0041860332903398655
+          },
+          "pairs_11_21_mid": {
+            "max_abs": 0.00027478852089035666,
+            "max_rel": 0.0010217858428386841
+          },
+          "pairs_22_31_high": {
+            "max_abs": 6.527473375816939e-06,
+            "max_rel": 6.726005027577548e-06
+          }
+        }
+      }
+    ],
+    "overall_max_abs": 0.00027478852089035666,
+    "overall_max_rel": 0.0041860332903398655,
+    "tail_passthrough_bitwise_equal": true,
+    "identity_text_degeneration": {
+      "check": "三个位置分量相等 → MRoPE 装配后频率应等于同一位置的 T 分量频率",
+      "max_abs_diff_vs_t_component": 0.0
+    }
+  },
+  "boundary": "该数值对照是非融合设备路径上的 fixture 级观测：不证明 torch_npu.npu_mrope 融合核语义，也不证明 Qwen3.6 在 vLLM/vLLM-Ascend 中的 MRoPE 集成路径；融合入口在本栈只接受文档示例参数组合（见 fused_kernel_probe）。"
+}

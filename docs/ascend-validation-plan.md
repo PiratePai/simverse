@@ -8,10 +8,19 @@ SKU 接 910C/950DT/950PR；后几款没有匹配规格/实现证据时保持候�
 
 ## 1. 已有证据与下一批交付
 
-PR #21 的 910B3 产物属于局部、未准入的采集记录，审查见
-[报告](validation/ascend-910b3-20261117.md)。AllReduce 指标派生错误已更正；
-ReduceScatter、graph 归因、MRoPE identity、launch 归因和代理比值等待修正后重采。
-这些产物未解除 G-D7、R02b、R17、R18，也未证明完整模型在 NPU 执行。
+PR #21（R28）与 PR #23（R29）均作为局部、未准入采集归档。R29 已补 ACL 返回码/context 和 ReduceScatter list 形状，并记录 TP1 少层 fixture 产出 token；但 AllGather 规范化、逐头 MRoPE、来源完整性、实际后端数值与容量仍有缺口。以 [R29 审查](validation/ascend-910b3-r29-review.md) 与派生 review.json 为准，采集时报告保留作历史材料；不把原 manifest 的「A-N3 未执行」或原文「7/7」当作整体状态。
+
+**下一批按以下可独立验收的小项推进，不重新跑已无问题的全部网格，也不因误读 OOM 先缩小 fixture。** 本轮审查没有执行硬件任务；后续 NPU 执行仍需明确设备与运行窗口。
+
+| 次序 / 子项 | 具体动作 | 验收与边界 |
+|---|---|---|
+| P0 / A-N1a 来源与采集器 | 新 run ID + 新目录，拒绝覆盖；归档 runtime commit/dirty diff、本地 warmup 补丁、CANN/驱动实际版本、各尝试完整命令/退出码/日志；修复 ACL 非 int/非零返回码、collective mismatch、KV/路由 flag 不进入失败汇总 | 离线坏返回码/坏 shape/掉 rank/metadata 缺失必须失败；manifest 覆盖最终脚本且提交后离线逐字节检查。R29 日志 hash 差异不能靠重新计算原 manifest 消除 |
+| P0 / A-N1b MRoPE | 每头 reshape 后旋转；Q/K、head0–末头、位置与频率带逐项独立 oracle；identity 对照独立 T 行，NeoX 带用 j/j+32；先核实融合接口与实际 vLLM 调用链，再定位 161002 | 非零位置对全部 head 逐元素 abs/rel/finite，尾部按 head 比较；已 pin R26 CPU oracle 可先行。错误布局/section 必须拒绝。非融合成功不升格为融合或模型集成通过 |
+| P0 / A-N2a 实际后端数值与状态 | 沿用小 fixture（成功日志权重 0.32 GiB），显式限制 KV budget；先单卡，再 TP2。归档每次失败与成功；GDN/full-attn/MoE 中间张量、cached decode vs 重算、chunk 边界与回退；固定 runtime patches 后与独立参考对照 | TP1 产 token只算执行接线；TP2 与 EP2 各自验收。至少 16 decode 步、空/偏斜专家、重复/漏 token、逆置换与实际 NPU 专家核；玩具 CPU GELU 路由不能代替 Qwen SwiGLU/真实分片 |
+| P0 / A-N3a 同栈容量与通信补点 | 同一进程记录 init/load/KV/warmup/capture/replay/release；graph 加 clone-only 控制与输出 finite/等价检查；通信修 AllGather 分子、记录统一逻辑字节和联合批 ID、两 rank 最慢窗；补实际 transport | weights/KV/runtime/HCCL/graph/allocator 与 free 分列，峰值不重复相加；free 差不当分配粒度。只补必要点/独立重复，旧 100 项 exact 观测保留，但未证明跨 rank 同步窗口/拓扑 |
+| P1 / A-N4→A-N5 | 设备/实现独立登记；并行准备 trace parser、ownership 和差异表；身份与正确性通过的局部算子才接生产成本 | 原始计数不变、计时边界分栏、按 shape 去重留出、域外回退；不等待整模即可做局部审计。R29 本身不作生产 profile |
+
+这些交付未解除 G-D7、R02b、R17、R18，也未证明完整模型在 NPU 执行。R28 原审查仍见 [报告](validation/ascend-910b3-20261117.md)。
 
 | 顺序 / 任务 | 具体交付与依赖 | 通过条件；不能推导的结论 |
 |---|---|---|
@@ -22,9 +31,7 @@ ReduceScatter、graph 归因、MRoPE identity、launch 归因和代理比值等�
 | P1（昇腾第一顺位）/ A-N5 profiling 校对与局部校准（R17/R18） | 先提供原始 trace 审核、映射与差异表；只有设备/实现/形状域匹配后才接 CalibratedPricer | 行数/时间双覆盖、去重留出、域外回退、原账本不变；可独立交付局部校对，无需等待整模 |
 | P1 / A-N6 匹配 E2E（R07b/R09） | 权重、显存、后端集成条件满足后，固定 workload 实测 prefill/decode/verify 与接受长度分布 | 按 TTFT/ITL/吞吐/显存误差验收；没有真实配对和请求轨迹时保持缺口。DFlash/MTP 单独核对 |
 
-本轮 A-N2 已交付 `tools/ascend_forward_probe.py` 的 Qwen3.6 fixture/本地权重入口与离线门禁；
-真实 NPU 执行、数值对照和完整权重身份尚未验收。V4.1 仅交付明确阻断的部署计划，
-没有将 V4 或双910B3代理冒充整模。
+本轮 A-N2 已交付 `tools/ascend_forward_probe.py` 的 Qwen3.6 fixture/本地权重入口与离线门禁；R29 有 TP1、物理卡 5 的 fixture 成功记录，来源仍有限，数值正确性、TP2 集成和完整权重身份未验收。V4.1 仅交付明确阻断的部署计划，没有将 V4 或双 910B3 代理冒充整模。
 
 A-N1/A-N2/A-N3 可按模块推进；A-N5 的离线 parser/映射工作可先做，生产成本准入依赖
 A-N4 和匹配采数。没有足够显存加载整模时不等待扩容，转入以下少卡路径。
@@ -38,7 +45,7 @@ A-N4 和匹配采数。没有足够显存加载整模时不等待扩容，转入
 | 1 卡，无完整权重 | 保留真实 head_dim/hidden/专家维数的单层或少层随机权重；Qwen GDN+full attention+MoE，V4.1 分别测 mHC/Sinkhorn、CSA2 select/mask、clamp/router、Engram lookup；先标准算子再实际后端融合核 | FP32 oracle vs FP32/BF16/目标量化，逐中间张量 abs/rel/NaN 检查；融合与非融合一致性；登记未跑分支 | 缩小专家/层数改变路由与访存分布；不能得到真实 perplexity、接受率或整模性能 |
 | 1 卡，状态测试 | prefill 长度 1/16/128/512，decode 连续至少 16 步；prefix/chunk 边界；GDN/conv/KV cache 增长与回退；MRoPE pos=0/1/127/1000/32767，使用本仓旋转参数与分段 | cached decode vs 重算；chunk vs 不分块；拒绝后 cache/state 恢复；MTP 多步及接受 0/部分/全长 | 随机 token 的一致性不证明真实 DFlash 接受律；CPU/GPU kernel 不能互认 |
 | 1 卡，成本/容量 | GEMM M=1/8/64/256/1024、实际 K/N；attention S=128/2K/8K/32K 中可容纳点，Q=1/verify block/prefill；MoE 专家倾斜、热/冷缓存；内存对象分阶段 | warmup 后每批样本、重复进程统计；reserve/allocated/free/peak 与时间线；在可用显存内分块加载层或参数分片 | 单层时间乘层数只能给显式模型估计，不能替代跨层 cache、通信重叠、allocator 峰值 |
-| 2 卡 | TP1 对 TP2 可重组数值；EP2 dispatch/combine token 数、逆置换、重复/空专家、倾斜/丢 token；五类 collective 1 KiB–256 MiB（按内存限额），两 rank 正确性与延迟；若机器允许测同域/跨域卡对 | 每 rank 原始输入/输出 shape、dtype、send/recv/total 字节、collective 次数、同步窗、最慢 rank；核验 HCCS/RoCE 实际路径 | 当前卡6/7只代表一个卡对；不能推 TP8/EP8、全互联饱和、跨机带宽或负载均衡 |
+| 2 卡 | TP1 对 TP2 可重组数值；EP2 dispatch/combine token 数、逆置换、重复/空专家、倾斜/丢 token；五类 collective 1 KiB–256 MiB（按内存限额），两 rank 正确性与延迟；若机器允许测同域/跨域卡对 | 每 rank 原始输入/输出 shape、dtype、send/recv/total 字节、collective 次数、同步窗、最慢 rank；核验 HCCS/RoCE 实际路径 | R28 卡6/7、R29 卡5/6分别仅代表各自卡对与栈；不能推 TP8/EP8、全互联饱和、跨机带宽或负载均衡 |
 | 4 卡（可获得时） | TP1/2/4、EP2/4 合法域，2×2 子组与全组；卡对并发、通信/计算重叠、straggler、峰值 rank；真实层尺寸在 TP4 的分片单卡可先测 | 分片数值/通信量/状态守恒；多组同时运行的 trace 与非重叠对照；拓扑身份清楚 | 仍不是 8 卡/多机验证；GEMM 单卡 TP8-shaped 分片可测局部形状，集合通信不外推 |
 | 权重分片或外部已有 trace | 单层/模块加载，或离线导入相同版本的完整 profiling；逐算子/阶段对账 | 明确哪些是执行、哪些是他人实测数据复核、哪些是解析；保留来源及缺失字段 | CPU offload/逐层搬运改变数据路径；除非目标场景本就如此，否则不报整模吞吐 |
 

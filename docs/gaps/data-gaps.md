@@ -1,5 +1,7 @@
 # 数据采集缺口清单（需要额外采集的数据）
 
+> 2026-11-17 R29 / PR #23：[审查修正](../validation/ascend-910b3-r29-review.md)已归档。仍缺完整 runtime commit/本地补丁/CANN 身份、失败尝试日志、逐头 MRoPE 正确采样、实际后端数值与状态、同栈容量/通信联合窗口及原始 profiler trace。现有 TP1 产 token 与通用切片不解除 G-D7/R02b/R17/R18；按 A-N1a/b、A-N2a、A-N3a 补齐，不重写原始测量。下列 R28 内容是历史审查记录。
+
 > 2026-11-17 R28 更新：昇腾先于 NVIDIA 新卡；见 [有限硬件与 profiling 计划](../ascend-validation-plan.md)。
 > PR #21 的 910B3 单/双卡采集已入审查归档，**未解除** G-D7/R02b/R17/R18 或
 > G-C13/G-C16/G-C18。AllReduce 派生指标已纠正；ReduceScatter、graph、MRoPE、

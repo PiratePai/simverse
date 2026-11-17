@@ -1,0 +1,104 @@
+{
+  "kind": "r29_env_identity",
+  "run_id": "ascend-910b3-r29",
+  "captured_at": "2026-11-17T15:47:12+0800",
+  "ascend_rt_visible_devices": "5,6",
+  "host": {
+    "hostname": "localhost.localdomain",
+    "kernel": "Linux-5.10.0-216.0.0.115.oe2203sp4.aarch64-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "cpu_count": 192
+  },
+  "git": {
+    "commit": "a857142523fea92b42e64c6df270ddc873e2a2ed",
+    "branch": "main",
+    "dirty": "?? docs/evidence/ascend-910b3-r29/\n?? docs/validation/ascend-910b3-r29.md\n?? runtime/"
+  },
+  "modules": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "0.19.1rc2.dev2959+g450e55698",
+    "numpy": "2.5.4"
+  },
+  "npu": {
+    "device_count": 2,
+    "devices": [
+      {
+        "logical_index": 0,
+        "name": "Ascend910B3"
+      },
+      {
+        "logical_index": 1,
+        "name": "Ascend910B3"
+      }
+    ]
+  },
+  "board": {
+    "npu_smi_info": {
+      "argv": [
+        "npu-smi",
+        "info"
+      ],
+      "returncode": 0,
+      "stdout": "+------------------------------------------------------------------------------------------------------------------+\n| npu-smi 26.0.rc1                            Version: 26.0.rc1                                                    |\n+---------------------------+---------------+----------------------------------------------------------------------+\n| NPU   Name                | Health        | Power(W)             Temp(C)                 Hugepages-Usage(page)   |\n| Chip                      | Bus-Id        | AICore(%)            Memory-Usage(MB)        HBM-Usage(MB)           |\n+===========================+===============+======================================================================+\n| 0     910B3               | OK            | 100.7                43                      0    / 0                |\n| 0                         | 0000:C1:00.0  | 0                    0    / 0                3434 / 65536            |\n+===========================+===============+======================================================================+\n| 1     910B3               | OK            | 93.4                 42                      0    / 0                |\n| 0                         | 0000:C2:00.0  | 0                    0    / 0                3430 / 65536            |\n+===========================+===============+======================================================================+\n| 2     910B3               | OK            | 92.2                 41                      0    / 0                |\n| 0                         | 0000:81:00.0  | 0                    0    / 0                3427 / 65536            |\n+===========================+===============+======================================================================+\n| 3     910B3               | OK            | 95.0                 41                      0    / 0                |\n| 0                         | 0000:82:00.0  | 0                    0    / 0                3427 / 65536            |\n+===========================+===============+======================================================================+\n| 4     910B3               | OK            | 94.8                 46                      0    / 0                |\n| 0                         | 0000:01:00.0  | 0                    0    / 0                3437 / 65536            |\n+===========================+===============+======================================================================+\n| 5     910B3               | OK            | 89.5                 44                      0    / 0                |\n| 0                         | 0000:02:00.0  | 0                    0    / 0                3427 / 65536            |\n+===========================+===============+======================================================================+\n| 6     910B3               | OK            | 90.7                 43                      0    / 0                |\n| 0                         | 0000:41:00.0  | 0                    0    / 0                3428 / 65536            |\n+===========================+===============+======================================================================+\n| 7     910B3               | OK            | 88.9                 43                      0    / 0                |\n| 0                         | 0000:42:00.0  | 0                    0    / 0                47405/ 65536            |\n+===========================+===============+======================================================================+\n+---------------------------+---------------+----------------------------------------------------------------------+\n| NPU     Chip              | Process id    | Process name       | Process memory(MB)    | Process id in container |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 0                                                                              |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 1                                                                              |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 2                                                                              |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 3                                                                              |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 4                                                                              |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 5                                                                              |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 6                                                                              |\n+===========================+===============+======================================================================+\n| No running processes found in NPU 7                                                                              |\n+===========================+===============+======================================================================+",
+      "stderr": ""
+    }
+  },
+  "version_files": {
+    "toolkit_version_cfg": {
+      "path": "/usr/local/Ascend/ascend-toolkit/latest/version.cfg",
+      "missing": true
+    },
+    "driver_version_info": {
+      "path": "/usr/local/Ascend/driver/version.info",
+      "sha256": "ca716136ba96edbc856980f7b658c19ed9c72ad471b97990559103fa9acd6f77",
+      "content": "Version=26.0.rc1\nascendhal_version=7.35.23\naicpu_version=1.0\ntdt_version=1.0\nlog_version=1.0\nprof_version=2.0\ndvppkernels_version=1.1\ntsfw_version=1.0\nInnerversion=V100R001C10SPC001B260\ncompatible_version=[V100R001C21],[V100R001C22],[V100R001C23],[V100R001C25],[V100R001C10]\ncompatible_version_fw=[7.0.0,9.9.9]\npackage_version=26.0.rc1\n"
+    },
+    "cann_version_cfg": {
+      "path": "/usr/local/Ascend/cann-9.1.0/version.cfg",
+      "missing": true
+    }
+  },
+  "script_hashes": {
+    "r29_budget_acl.py": "f53a519e86261694fe91c42d238e39400475fb40ce106d7251d3de03769e2deb",
+    "r29_budget_torch.py": "78e4019503773c8a4e41331db89c03757845486ca305f4499878d52d40a099a6",
+    "r29_collectives.py": "c11b221532738cada1a4026255200f7f9473b6d12b963226b6a90110c0556f8d",
+    "r29_common.py": "88e92e0c2feaafc87cd29386b9fd3aae706070d47bdecbea8b92b988bfbae9f2",
+    "r29_env.py": "2f5be77cca8a74ffd7bc2e386c432bef8e1625b545b50c1dd7b3051b51967865",
+    "r29_graph.py": "085becdad4214fda8a1ec1c2fda862b48a5fb22e6c41bd879f78670ff29e9d42",
+    "r29_manifest.py": "0fefbb78279c706855881a8ca8693e4fbd83933c351bef688d0630b320e3a978",
+    "r29_mrope.py": "78477cafb305c6b7935619f51b3a296a8f088210d07b9e5a930bc7b5f5fc7bc0"
+  },
+  "runtime_probe": {
+    "tiny_tensor_sum": 8.0,
+    "mem_info_dev0": {
+      "free_bytes": 65053290496,
+      "total_bytes": 65452113920
+    }
+  },
+  "npu_smi_cards": {
+    "5": {
+      "argv": [
+        "bash",
+        "-lc",
+        "npu-smi info -t board -i 5"
+      ],
+      "returncode": 0,
+      "stdout": "NPU ID                         : 5\n\tProduct Name                   : IT21HMDA6_N0\n\tModel                          : NA\n\tManufacturer                   : Huawei\n\tSerial Number                  : 102557029681\n\tSoftware Version               : 26.0.rc1\n\tFirmware Version               : 9.0.0.0.205\n\tCompatibility                  : OK\n\tBoard ID                       : 0x62\n\tPCB ID                         : A\n\tBOM ID                         : 1\n\tPCIe Bus Info                  : 0000:02:00.0\n\tSlot ID                        : 5\n\tClass ID                       : NA\n\tPCI Vendor ID                  : 0x19E5\n\tPCI Device ID                  : 0xD802\n\tSubsystem Vendor ID            : 0x19E5\n\tSubsystem Device ID            : 0x3000\n\tChip Count                     : 1",
+      "stderr": ""
+    },
+    "6": {
+      "argv": [
+        "bash",
+        "-lc",
+        "npu-smi info -t board -i 6"
+      ],
+      "returncode": 0,
+      "stdout": "NPU ID                         : 6\n\tProduct Name                   : IT21HMDA6_N0\n\tModel                          : NA\n\tManufacturer                   : Huawei\n\tSerial Number                  : 102557029781\n\tSoftware Version               : 26.0.rc1\n\tFirmware Version               : 9.0.0.0.205\n\tCompatibility                  : OK\n\tBoard ID                       : 0x62\n\tPCB ID                         : A\n\tBOM ID                         : 1\n\tPCIe Bus Info                  : 0000:41:00.0\n\tSlot ID                        : 6\n\tClass ID                       : NA\n\tPCI Vendor ID                  : 0x19E5\n\tPCI Device ID                  : 0xD802\n\tSubsystem Vendor ID            : 0x19E5\n\tSubsystem Device ID            : 0x3000\n\tChip Count                     : 1",
+      "stderr": ""
+    }
+  }
+}

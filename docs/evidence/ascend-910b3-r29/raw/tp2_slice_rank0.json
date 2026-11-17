@@ -1,0 +1,195 @@
+{
+  "kind": "r29_tp2_slice",
+  "run_id": "ascend-910b3-r29",
+  "captured_at": "2026-11-17T16:24:52+0800",
+  "ascend_rt_visible_devices": "5,6",
+  "host": {
+    "hostname": "localhost.localdomain",
+    "kernel": "Linux-5.10.0-216.0.0.115.oe2203sp4.aarch64-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "cpu_count": 192
+  },
+  "git": {
+    "commit": "a857142523fea92b42e64c6df270ddc873e2a2ed",
+    "branch": "main",
+    "dirty": "?? docs/evidence/ascend-910b3-r29/\n?? docs/validation/ascend-910b3-r29.md"
+  },
+  "modules": {
+    "python": "3.12.13",
+    "executable": "/usr/local/python3.12.13/bin/python3",
+    "torch": "2.10.0+cpu",
+    "torch_npu": "2.10.0.post4",
+    "vllm": "0.32.0",
+    "vllm_ascend": "0.19.1rc2.dev2959+g450e55698",
+    "numpy": "2.5.4"
+  },
+  "rank": 0,
+  "world_size": 2,
+  "device_name": "Ascend910B3",
+  "shapes": {
+    "hidden": 2048,
+    "intermediate": 512,
+    "seq": 32,
+    "heads": 16,
+    "kv_heads": 2,
+    "head_dim": 256
+  },
+  "tolerances": {
+    "float32": {
+      "abs_tol_scaled_by_ref_max": 1e-05,
+      "note": "fixture level criterion, not an acceptance threshold"
+    },
+    "bfloat16": {
+      "abs_tol_scaled_by_ref_max": 0.02,
+      "note": "fixture level criterion, not an acceptance threshold"
+    }
+  },
+  "cases": [
+    {
+      "case": "mlp_column_parallel[float32]",
+      "max_abs_err": 3.601038926492883e-07,
+      "max_rel_err": 0.026254715603786557,
+      "ref_scale": 0.4954787749482015,
+      "tol_abs": 1e-05,
+      "passed": true
+    },
+    {
+      "case": "mlp_column_parallel[bfloat16]",
+      "max_abs_err": 0.0018230717442473399,
+      "max_rel_err": 254.2779953917794,
+      "ref_scale": 0.4954787749482015,
+      "tol_abs": 0.02,
+      "passed": true
+    },
+    {
+      "case": "mlp_row_parallel[float32]",
+      "max_abs_err": 1.7608708741123635e-07,
+      "max_rel_err": 0.008248157170916107,
+      "ref_scale": 0.5587255033586447,
+      "tol_abs": 1e-05,
+      "passed": true
+    },
+    {
+      "case": "mlp_row_parallel[bfloat16]",
+      "max_abs_err": 0.002663436496735394,
+      "max_rel_err": 249.289966774065,
+      "ref_scale": 0.5587255033586447,
+      "tol_abs": 0.02,
+      "passed": true
+    },
+    {
+      "case": "gqa_attention_head_shard[float32]",
+      "max_abs_err": 1.3089854006276269e-08,
+      "max_rel_err": 0.001621415621415793,
+      "ref_scale": 0.06048969961932548,
+      "tol_abs": 1e-05,
+      "passed": true
+    },
+    {
+      "case": "gqa_attention_head_shard[bfloat16]",
+      "max_abs_err": 0.0003467113814833167,
+      "max_rel_err": 40.077768250978366,
+      "ref_scale": 0.06048969961932548,
+      "tol_abs": 0.02,
+      "passed": true
+    },
+    {
+      "case": "moe_ep2_combine",
+      "max_abs_err": 1.1310792746854759e-08,
+      "max_rel_err": 2.06374712357548e-05,
+      "ref_scale": 0.16991711616799804,
+      "tol_abs": 1e-05,
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "mem": [
+    {
+      "stage": "startup",
+      "free_bytes": 65063350272,
+      "total_bytes": 65452113920,
+      "allocated_bytes": 0,
+      "reserved_bytes": 0,
+      "peak_allocated_bytes": 0
+    },
+    {
+      "stage": "after_mlp_tp2",
+      "free_bytes": 64592760832,
+      "total_bytes": 65452113920,
+      "allocated_bytes": 1379840,
+      "reserved_bytes": 23068672,
+      "peak_allocated_bytes": 3624960
+    },
+    {
+      "stage": "after_attention_tp2",
+      "free_bytes": 64584372224,
+      "total_bytes": 65452113920,
+      "allocated_bytes": 2384896,
+      "reserved_bytes": 23068672,
+      "peak_allocated_bytes": 3624960
+    },
+    {
+      "stage": "after_moe_ep2",
+      "free_bytes": 64584372224,
+      "total_bytes": 65452113920,
+      "allocated_bytes": 2394624,
+      "reserved_bytes": 23068672,
+      "peak_allocated_bytes": 3624960
+    }
+  ],
+  "kv_shard_conservation": {
+    "per_rank_kv_heads": 1,
+    "sum_over_ranks": 2,
+    "expected": 2,
+    "passed": true
+  },
+  "moe_ep2": {
+    "config": {
+      "tokens": 32,
+      "experts": 8,
+      "routed_experts": 6,
+      "top_k": 2,
+      "hidden": 64,
+      "expert_hidden": 32
+    },
+    "expert_counts": [
+      15,
+      9,
+      8,
+      16,
+      8,
+      8,
+      0,
+      0
+    ],
+    "zero_count_experts": [
+      6,
+      7
+    ],
+    "entries_per_rank_sent": 32,
+    "entries_per_rank_received": 32,
+    "send_counts_by_dest": [
+      16,
+      16
+    ],
+    "recv_counts_by_src": [
+      16,
+      16
+    ],
+    "total_entries": 64,
+    "roundtrip_permutation_identity": true,
+    "token_coverage": {
+      "local_tokens": 16,
+      "combined_rows": 16,
+      "covered": true
+    },
+    "balance_boundary": "路由为确定性构造（不含真实倾斜分布）；空专家 6/7 覆盖分片分支，但极端倾斜/丢 token 仍需单独注入测试"
+  },
+  "summary": {
+    "cases": 7,
+    "passed": 7,
+    "failed": 0,
+    "failed_cases": []
+  },
+  "boundary": "算子切片级证据：随机权重下的分片/重组与路由一致性；不是 Qwen3.6 整模 forward，不覆盖跨层 cache、通信重叠、allocator 峰值，也不外推 TP>2。"
+}
