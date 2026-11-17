@@ -14,6 +14,9 @@ Qwen3.6提供真实vLLM/vllm-ascend入口（少层fixture与本地权重），V4
 主控全量验收：`py -3.12 -m pytest tests -q` → **542 passed**（19.53s）；
 `node --check simverse/static/workbench.js`、默认 `simverse.cli run-v2` 与新增 fixture dry-run 均退出0。
 远端 required CI 另按 PR #21 的最终提交检查；没有新增硬件测量。
+首次远端检查发现 Windows clean checkout 将源 config 转为 CRLF、破坏其固定 SHA256；
+已为该配置固定 LF（内容/原哈希不变），不放宽来源校验；autocrlf=true 的干净索引导出
+再次全量 **542 passed**（21.11s），源配置哈希一致。最终 CI 以修后提交为准。
 
 
 更新：2026-11-17（R27：cost-integrity 轮——计算口径/统计身份/指标元数据/运行身份六项修复：
