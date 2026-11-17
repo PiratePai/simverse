@@ -132,6 +132,14 @@
       });
       dv.value = 'h100_sxm'; dd.value = 'l40';
       var pf = $('sel-profile');
+      var rc = $('sel-record-cost');
+      if (rc) {
+        rc.innerHTML = '<option value="">不使用，保留纯解析</option>';
+        (cat.cost_record_sets || []).forEach(function (item) {
+          var o = document.createElement('option'); o.value = item.id; o.textContent = item.label;
+          rc.appendChild(o);
+        });
+      }
       if (pf && cat.profile_sets) {
         pf.innerHTML = '<option value="">（无 · 纯解析 T0）</option>';
         cat.profile_sets.forEach(function (id) {
@@ -188,6 +196,17 @@
     if (model === 'deepseek_v41_flash') hints.push(COMBO.v41QuantFrozen);
     var targetSpec = state.catalog && state.catalog.devices[$('sel-target-dev').value];
     var targetAscend = targetSpec && targetSpec.backend === 'ascend';
+    var recordSelect = $('sel-record-cost');
+    if (targetAscend && state.recordTarget !== $('sel-target-dev').value
+        && recordSelect && !recordSelect.value) recordSelect.value = 'ascend-r29-hccl';
+    state.recordTarget = $('sel-target-dev').value;
+    if (recordSelect && recordSelect.value) {
+      $('sel-profile').value = '';
+      $('sel-profile').disabled = true;
+      hints.push('记录档仅作同类算子/通信的条件成本对照；不同软件栈不混用，不等于实测校准。');
+      if (recordSelect.value === 'ascend-r29-hccl' && $('sel-tp').value !== '2')
+        hints.push('R29 通信只有双卡记录；当前 TP 不匹配时保留解析值，选择 TP2 可检查命中。');
+    } else $('sel-profile').disabled = false;
     if (targetAscend) {
       if (model === 'deepseek_v41_flash') {
         hints.push('910B3 尚无 V4.1 后端配方；请选择 Qwen3.6，或切回支持该配方的设备。');
@@ -274,6 +293,7 @@
       // dense_w 只是计价位宽，不决定该分支。
       draft_ctx_kv_path: 'fused_raw',
       cost_profile: ($('sel-profile') && $('sel-profile').value) || null,
+      cost_records: ($('sel-record-cost') && $('sel-record-cost').value) || null,
       seed: 0
     };
     // 预算输入（R03a 契约）：数值输入 → hypothesis 假设预算（只产生条件结论，
@@ -359,7 +379,8 @@
       state.bundle = b;
       renderBundle();
       setStatus('run_id <span class="mono">' + b.manifest.run_id + '</span> · ' +
-        '代码 ' + b.manifest.code_revision.slice(0, 10) + ' · 全部数字 T0 解析估算（Q2）·' +
+        '代码 ' + b.manifest.code_revision.slice(0, 10) + (b.cost && b.cost.record_cost
+          ? ' · 独立记录条件对照 + 解析回退（非生产校准）·' : ' · 全部数字 T0 解析估算（Q2）·') +
         ' 接受率为假设输入（Q8）');
     }).catch(function (e) {
       setStatus('运行失败：' + esc(e.message), true);
@@ -385,8 +406,16 @@
       $('kpi-tpot-sub').textContent = '实测校准（算子级组合；解析值 '
         + fmt(tpot, 'ms', 4) + ' 保留在指标区）';
     }
+    var recordTpot = val(b, 'M01_record_tpot');
+    $('kpi-tpot-label').textContent = recordTpot !== null
+      ? 'M01 等效 TPOT（记录条件对照）'
+      : (tpotC !== null ? 'M01 等效 TPOT（算子校准组合）' : 'M01 等效 TPOT（解析）');
+    if (recordTpot !== null) {
+      $('kpi-tpot').textContent = fmt(recordTpot, 'ms', 4);
+      $('kpi-tpot-sub').textContent = '记录条件对照；纯解析 ' + fmt(tpot, 'ms', 4) + '（原值保留）';
+    }
     var base = val(b, 'M01_tpot_baseline');
-    var sp = metric(b, 'M02_speedup_vs_baseline');
+    var sp = metric(b, 'M02_record_speedup') || metric(b, 'M02_speedup_vs_baseline');
     $('kpi-speedup').textContent = sp && sp.value !== null
       ? fmt(sp.value, '×', 3) : '未知';
     $('kpi-speedup-sub').textContent = sp && sp.reason
@@ -398,7 +427,8 @@
       + ' / K=' + (val(b, 'M03_K') || 0) : '未知';
     $('kpi-en-sub').textContent = reason(b, 'M03_E_N')
       ? '原因：' + reason(b, 'M03_E_N').slice(0, 40) : '假设输入（Q8）';
-    var round = val(b, 'M04_round_ms');
+    var round = val(b, 'M04_record_round_ms');
+    if (round === null) round = val(b, 'M04_round_ms');
     $('kpi-round').textContent = round !== null ? fmt(round, 'ms', 3) : '未知';
     var br = b.metrics['M04_stage_breakdown_ms'] || {};
     $('kpi-round-sub').textContent = round !== null
@@ -406,6 +436,8 @@
         return k.replace('_block', '').replace('draft_', 'd:') +
           ' ' + fmt(br[k].value, '', 2);
       }).join(' + ').slice(0, 60) : '—';
+    if (val(b, 'M04_record_round_ms') !== null)
+      $('kpi-round-sub').textContent = '条件记录成本；纯解析 ' + fmt(val(b, 'M04_round_ms'), 'ms', 3);
     var moe = metric(b, 'M05_moe_union');
     $('kpi-moe').textContent = moe ? fmtBytes(moe.value) + '/层' : '–';
     renderMemory(b);
@@ -426,6 +458,7 @@
     renderOps(b);
     renderTimeline(b);
     renderEvidence(b);
+    renderRecordCosts(b);
   }
 
   // ---------- M06 显存（逐端；target/draft 不合并；detail 非 Metric） ----------
@@ -504,7 +537,9 @@
   }
   function rooflineIndex(b) {
     var idx = {};
-    (((b.cost || {}).row_prices) || ((b.cost || {}).roofline_points) || []).forEach(function (p) {
+    var rc = (b.cost || {}).record_cost;
+    ((rc && rc.matched ? rc.selected_row_prices : null)
+      || ((b.cost || {}).row_prices) || ((b.cost || {}).roofline_points) || []).forEach(function (p) {
       idx[p.row_id] = p;
     });
     return idx;
@@ -703,7 +738,9 @@
   function drawRoofline(row) {
     var svg = $('roofline-svg');
     var b = state.bundle;
-    var pts = (b.cost && b.cost.roofline_points) || [];
+    var rc = (b.cost || {}).record_cost;
+    var pts = (rc && rc.matched ? rc.selected_roofline_points : null)
+      || (b.cost && b.cost.roofline_points) || [];
     var ptIdx = rooflineIndex(b);
     var repId = row ? rowKey(row) : null;
     var pt = repId ? ptIdx[repId] : null;
@@ -810,18 +847,22 @@
       ? '未选择行'
       : (pt
         ? '代表行 L' + row.layer + '：AI=' + pt.ai_flop_per_byte.toFixed(1)
-          + ' F/B · 解析估算（T0，非实测）' + pt.attained_tflops.toFixed(1) + ' TF/s'
+          + ' F/B · ' + (pt.record_refs && pt.record_refs.length
+            ? '记录条件对照（含host/sync）' : '解析估算（T0，非实测）')
+          + pt.attained_tflops.toFixed(1) + ' TF/s'
         : '代表行 L' + row.layer + ' 无对应点（未进后端导出计价行）');
   }
 
   // ---------- timeline（事件来自 execution.rounds，含依赖） ----------
   function renderTimeline(b) {
-    var rounds = (b.execution && b.execution.rounds) || [];
+    var rc = (b.cost || {}).record_cost;
+    var execution = rc && rc.matched ? rc.selected_execution : b.execution;
+    var rounds = (execution && execution.rounds) || [];
     var evs = (rounds[0] && rounds[0].events) || [];
     var el = $('timeline');
     if (!evs.length) {
       el.innerHTML = '<div class="unknown-note">无事件（baseline 或接受分布未知：'
-        + (b.execution && b.execution.note || '') + '）</div>';
+        + (execution && execution.note || '') + '）</div>';
       $('tl-summary').textContent = '–';
       return;
     }
@@ -852,11 +893,62 @@
       });
     el.innerHTML = html;
     var en = val(b, 'M03_E_N');
-    $('tl-summary').textContent = 'T_round=' + fmt(total, 'ms', 3) +
+    $('tl-summary').textContent = (rc && rc.matched ? '记录条件对照 · ' : '') + 'T_round=' + fmt(total, 'ms', 3) +
       '（串行：阶段和=墙钟）· E[N]=' + fmt(en, '', 2) + ' · 事件依赖可追溯（悬停查看）';
   }
 
   // ---------- evidence drawer ----------
+  function renderRecordCosts(b) {
+    var rc = (b.cost || {}).record_cost, panel = $('cost-records-panel');
+    if (!panel) return;
+    panel.hidden = !rc;
+    if (!rc) return;
+    var html = '<p><b>' + esc(rc.label) + '</b> · 命中 ' + rc.matched + '/' + rc.total
+      + ' 个成本实例。' + (rc.matched ? 'KPI/逐行成本/时间轴显示条件对照，原解析值保留。'
+        : '本场景无匹配记录，全部保留原解析值。') + '</p>'
+      + '<p>覆盖统计按独立基线/验证/草稿的成本评估实例计算，不是真机 E2E 时间覆盖；不参与部署排名。</p>'
+      + '<table class="plain"><tr><th>阶段</th><th>命中/总数</th><th>记录成本 ms</th><th>解析回退 ms</th><th>记录成本占比</th></tr>';
+    Object.keys(rc.stages || {}).forEach(function (stage) {
+      var s = rc.stages[stage];
+      html += '<tr><td>' + esc(stage) + '</td><td>' + s.matched + '/' + s.total + '</td><td>'
+        + fmt(s.record_ms, '', 4) + '</td><td>' + fmt(s.fallback_ms, '', 4) + '</td><td>'
+        + fmt(s.record_cost_fraction * 100, '%', 1) + '</td></tr>';
+    });
+    html += '</table><details><summary>记录身份、范围与未准入原因</summary><pre>'
+      + esc(JSON.stringify(rc.domain, null, 2)) + '</pre><ul>'
+      + (rc.limits || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('')
+      + '</ul><p>完整 SHA256：<code>' + esc(rc.content_digest) + '</code></p>';
+    if ((rc.unpriced_components || []).length)
+      html += '<p>另有未计价方法阶段，时长 unknown，不计入上述覆盖分母，不能认作 0ms。</p><pre>'
+        + esc(JSON.stringify(rc.unpriced_components, null, 2)) + '</pre>';
+    (rc.available_curves || []).forEach(function (c) {
+      html += '<p>' + esc(c.op) + ' · ' + c.points + ' 点 · 每 rank 逻辑输入 '
+        + fmtBytes(c.input_bytes[0]) + '–' + fmtBytes(c.input_bytes[1]) + '</p>';
+    });
+    if (rc.available_operator_shapes && rc.available_operator_shapes.length)
+      html += '<pre>' + esc(JSON.stringify(rc.available_operator_shapes, null, 2)) + '</pre>';
+    html += '</details><h4>按本次回退调整的补采顺序</h4><ol>'
+      + (rc.prerequisites || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>'
+      + '<table class="plain"><tr><th>回退原因</th><th>实例/不同形状</th><th>回退解析成本 ms</th><th>下一步</th></tr>';
+    (rc.measurement_plan || []).forEach(function (p) {
+      html += '<tr><td>' + esc(p.reason) + '</td><td>' + p.instances + '/' + p.unique_cases
+        + '</td><td>' + fmt(p.fallback_analytic_ms, '', 3) + '</td><td>' + esc(p.action)
+        + '<details><summary>待补形状示例</summary><pre>' + esc(JSON.stringify(p.examples, null, 2))
+        + '</pre></details></td></tr>';
+    });
+    html += '</table><details><summary>逐项命中与回退（前 200 项；完整清单随 JSON 导出）</summary>'
+      + '<table class="plain"><tr><th>阶段/算子</th><th>范围</th><th>解析→选用 ms</th><th>记录或回退原因</th></tr>';
+    (rc.entries || []).slice().sort(function (a, z) { return z.record_refs.length - a.record_refs.length; })
+      .slice(0, 200).forEach(function (e) {
+        html += '<tr><td>' + esc(e.stage + '/' + e.name) + '</td><td>' + esc(JSON.stringify(e.shape))
+          + '</td><td>' + fmt(e.analytic_ms, '', 4) + ' → ' + fmt(e.selected_ms, '', 4) + '</td><td>'
+          + esc(e.record_refs.length ? e.lookup + ': ' + e.record_refs.join(';') : e.fallback_reason) + '</td></tr>';
+      });
+    html += '</table></details><details><summary>已隔离的代理/缺来源记录</summary><pre>'
+      + esc(JSON.stringify(rc.excluded_records || [], null, 2)) + '</pre></details>';
+    $('cost-records-body').innerHTML = html;
+  }
+
   function renderEvidence(b) {
     var checks = (b.capability && b.capability.checks) || {};
     var html = '<table class="plain"><tr><th>检查</th><th>状态</th><th>原因/受影响</th></tr>';
@@ -1002,8 +1094,9 @@
         return;
       }
       state.matrixRuns[deploy + '-' + method] = b;
-      var tpot = val(b, 'M01_tpot_analytical');
-      var sp = metric(b, 'M02_speedup_vs_baseline');
+      var tpot = val(b, 'M01_record_tpot');
+      if (tpot === null) tpot = val(b, 'M01_tpot_analytical');
+      var sp = metric(b, 'M02_record_speedup') || metric(b, 'M02_speedup_vs_baseline');
       if (tpot === null) {
         td.className = 'mx-cell na';
         td.innerHTML = '未知<div style="font-size:9.5px;font-weight:400">' +
@@ -1118,11 +1211,25 @@
       't_ms', 'bound', 'shape'];
     // t_ms/bound 从完整逐行计价按 row_id 关联；旧结果兼容 top-40。
     var ptIdx = rooflineIndex(state.bundle);
+    var recordCosts = (state.bundle.cost || {}).record_cost;
+    var useRecords = !!recordCosts;
+    if (useRecords) {
+      ptIdx = {};
+      (recordCosts.selected_row_prices || []).forEach(function (p) { ptIdx[p.row_id] = p; });
+    }
+    if (useRecords) cols = cols.concat(['analytic_t_ms', 'record_t_ms', 'cost_source', 'record_refs', 'fallback_reason']);
     var records = rows.map(function (r) {
       var p = ptIdx[rowKey(r)] || {};
       var o = {}; cols.forEach(function (c) { o[c] = r[c]; });
       o.t_ms = p.t_ms !== undefined ? p.t_ms : '';
       o.bound = p.bound !== undefined ? p.bound : '';
+      if (useRecords) {
+        o.analytic_t_ms = p.analytic_ms !== undefined ? p.analytic_ms : '';
+        o.record_t_ms = p.t_ms !== undefined ? p.t_ms : '';
+        o.cost_source = p.cost_source || '';
+        o.record_refs = (p.record_refs || []).join(';');
+        o.fallback_reason = p.fallback_reason || '';
+      }
       return o;
     });
     download('simverse-ops-' + state.bundle.manifest.run_id.slice(7, 19) + '.csv',
@@ -1132,7 +1239,7 @@
   // ---------- wire ----------
   ['sel-model', 'sel-method', 'sel-deploy', 'sel-target-dev', 'sel-tp',
     'sel-ep', 'sel-draft-dev', 'inp-ctx', 'inp-batch', 'sel-acc', 'inp-blk',
-    'sel-prec', 'inp-budget', 'inp-draft-budget', 'inp-overhead'
+    'sel-prec', 'inp-budget', 'inp-draft-budget', 'inp-overhead', 'sel-record-cost'
   ].forEach(function (id) {
     $(id).addEventListener('change', syncControls);
   });

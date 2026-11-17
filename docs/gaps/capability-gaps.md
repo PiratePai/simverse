@@ -1,5 +1,7 @@
 # 能力缺口清单（需要工程实现的能力）
 
+> 2026-11-17：逐记录查表/域内通信插值、双重哈希、按实例回退、覆盖/待补形状与 CLI/Web/导出链路已实现，见 [记录成本说明](../validation/ascend-record-costs.md)。工程接入不解除真实数据准入缺口；下一步实现与采数按实际回退原因联合验收，不将条件档标为生产 profile 或已部署模型。
+
 > 2026-11-17 R29 / PR #23：新增离线审查回放与 7 项证据回归，未改生产计数/成本/资格。下一批先补采集器唯一 run/拒绝覆盖/失败聚合、逐头 Q/K MRoPE oracle、实际后端中间张量与 cache/state 检查、graph clone-only 对照；详见 [审查](../validation/ascend-910b3-r29-review.md) 和 [昇腾计划](../ascend-validation-plan.md)。归档脚本保留已知缺陷，不作为推荐复跑入口；下列 R28 内容是历史记录。
 
 > 2026-11-17 R28 更新：昇腾先于 NVIDIA 新卡；见 [有限硬件与 profiling 计划](../ascend-validation-plan.md)。

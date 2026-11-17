@@ -97,6 +97,7 @@ def docs_static(fn):
 
 @app.get("/api/v2/catalog")
 def api_v2_catalog():
+    from .cost.records import catalog as record_catalog
     from .model_ir import catalog_json
     from .devices import DEVICES, LINKS
     from .methods.plans import UNSUPPORTED
@@ -113,6 +114,7 @@ def api_v2_catalog():
                     "research": ["mtp"],
                     "unsupported": UNSUPPORTED},
         "profile_sets": sorted(PRODUCT_PROFILE_SETS),
+        "cost_record_sets": record_catalog(),
         "archived_profiles": archived_profiles_json(),
         "profile_bindings": {sid: profile_model_id(sid)
                              for sid in sorted(PRODUCT_PROFILE_SETS)},

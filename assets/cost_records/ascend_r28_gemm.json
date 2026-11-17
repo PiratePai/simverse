@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "id": "ascend-r28-gemm",
+  "label": "R28 独立 BF16 GEMM 记录对照（有条件，非校准）",
+  "source_commit": "6a16fbed8e6dc0982ed9abdea0ea1df6c006e429",
+  "source_kind": "assumed-from-archived-observation",
+  "admission": "conditional-only",
+  "measured_profile_admitted": false,
+  "domain": {
+    "device": "ascend_910b3",
+    "model_id": "qwen36_35b_a3b",
+    "dtype": "bfloat16",
+    "torch": "2.9.0+cpu",
+    "torch_npu": "2.9.0.post9",
+    "stack_identity": "collector-declared-incomplete",
+    "implementation": "isolated torch.matmul, contiguous random BF16 operands",
+    "timing_boundary": "host wallclock / iterations, 20 warmup, 5 synchronized batches"
+  },
+  "sources": [
+    {
+      "path": "docs/evidence/ascend-910b3/p3_per_op_qwen.json",
+      "sha256": "004249cb6aa2514946b62430b4a8ee20645ef358a576cc3e0bb13881042f877d"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3/scripts/p3_per_op.py",
+      "sha256": "23d2cc2c618ec596071a957d61798c9f2bc6e64c8259fe776927ba6720c6f5a1"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3/p2_bench_gemm.txt",
+      "sha256": "ac941d91d051dc9fe0807e9716d2a05c5653d498eda61197cf850a12c98ed75e"
+    },
+    {
+      "path": "docs/evidence/ascend-910b3/env.txt",
+      "sha256": "36220c49c3a95558a33fffdeeb44d6c132a5ad8051a9cdb3a52f0aed3a0133dc"
+    }
+  ],
+  "limits": [
+    "仅主模型的独立matmul数学/形状匹配；非vLLM融合核、非TP并发实测",
+    "只有min/median/max摘要，无原始五批样本、完整输入清单或kernel版本",
+    "不插值、不外推；缺匹配或边界不同逐项回退；不用于真实profile准入",
+    "R28与R29的软件栈不同，不能拼成同一成本档",
+    "算子留出误差未知；不得用这些单点拟合全局倍率"
+  ],
+  "operators": [
+    {
+      "id": "r28:in_proj_qkv:1:2048:1024",
+      "op": "in_proj_qkv",
+      "shape": [
+        1,
+        2048,
+        1024
+      ],
+      "selected_ms": 0.01874302513897419,
+      "min_ms": 0.01864442601799965,
+      "max_ms": 0.019122222438454628,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:in_proj_z:1:2048:512",
+      "op": "in_proj_z",
+      "shape": [
+        1,
+        2048,
+        512
+      ],
+      "selected_ms": 0.018749027512967587,
+      "min_ms": 0.018622251227498055,
+      "max_ms": 0.01893454696983099,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:in_proj_ba:1:2048:8",
+      "op": "in_proj_ba",
+      "shape": [
+        1,
+        2048,
+        8
+      ],
+      "selected_ms": 0.03203765023499727,
+      "min_ms": 0.031987023539841175,
+      "max_ms": 0.03205237444490194,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:out_proj:1:512:2048",
+      "op": "out_proj",
+      "shape": [
+        1,
+        512,
+        2048
+      ],
+      "selected_ms": 0.021263500675559044,
+      "min_ms": 0.021140999160706997,
+      "max_ms": 0.021336348727345467,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:moe_router:1:2048:256",
+      "op": "moe_router",
+      "shape": [
+        1,
+        2048,
+        256
+      ],
+      "selected_ms": 0.021480373106896877,
+      "min_ms": 0.021415650844573975,
+      "max_ms": 0.021519875153899193,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:q_proj:1:2048:1024",
+      "op": "q_proj",
+      "shape": [
+        1,
+        2048,
+        1024
+      ],
+      "selected_ms": 0.021554147824645042,
+      "min_ms": 0.021315324120223522,
+      "max_ms": 0.02175427507609129,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:k_proj:1:2048:512",
+      "op": "k_proj",
+      "shape": [
+        1,
+        2048,
+        512
+      ],
+      "selected_ms": 0.02101765014231205,
+      "min_ms": 0.020944648422300816,
+      "max_ms": 0.02119479700922966,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:v_proj:1:2048:512",
+      "op": "v_proj",
+      "shape": [
+        1,
+        2048,
+        512
+      ],
+      "selected_ms": 0.0212618475779891,
+      "min_ms": 0.021032746881246567,
+      "max_ms": 0.021402551792562008,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:o_proj:1:512:2048",
+      "op": "o_proj",
+      "shape": [
+        1,
+        512,
+        2048
+      ],
+      "selected_ms": 0.022009676322340965,
+      "min_ms": 0.02179955132305622,
+      "max_ms": 0.022140871733427048,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:lm_head:1:2048:31040",
+      "op": "lm_head",
+      "shape": [
+        1,
+        2048,
+        31040
+      ],
+      "selected_ms": 0.0732024759054184,
+      "min_ms": 0.0731374230235815,
+      "max_ms": 0.07331419736146927,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:m_scale:8:2048:1024",
+      "op": "in_proj_qkv",
+      "shape": [
+        8,
+        2048,
+        1024
+      ],
+      "selected_ms": 0.0209957268089056,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:m_scale:64:2048:1024",
+      "op": "in_proj_qkv",
+      "shape": [
+        64,
+        2048,
+        1024
+      ],
+      "selected_ms": 0.021707676351070404,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:m_scale:256:2048:1024",
+      "op": "in_proj_qkv",
+      "shape": [
+        256,
+        2048,
+        1024
+      ],
+      "selected_ms": 0.02143422607332468,
+      "sample_count": 5,
+      "samples_available": false
+    },
+    {
+      "id": "r28:m_scale:1024:2048:1024",
+      "op": "in_proj_qkv",
+      "shape": [
+        1024,
+        2048,
+        1024
+      ],
+      "selected_ms": 0.022707520984113216,
+      "sample_count": 5,
+      "samples_available": false
+    }
+  ],
+  "excluded": [
+    {
+      "op": "causal_conv1d",
+      "shape": "depthwise c=1024 k=4",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "moe_routed",
+      "shape": "grouped k=8 h=2048 inter=512",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "moe_shared",
+      "shape": "1×2048×512 + 1×512×2048",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "attn_norm",
+      "shape": "rmsnorm w=2048",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "mlp_norm",
+      "shape": "rmsnorm w=2048",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "attn_add",
+      "shape": "add w=2048",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "mlp_add",
+      "shape": "add w=2048",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "attention_core",
+      "shape": "dense-SDPA h=2 S=32769 d=256",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "q_norm",
+      "shape": "rmsnorm h=16 d=256",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "k_norm",
+      "shape": "rmsnorm h=2 d=256",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "rope",
+      "shape": "rotary d=64",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "final_norm",
+      "shape": "rmsnorm w=2048",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "embed_lookup",
+      "shape": "gather V=248320 h=2048",
+      "reason": "组合/代理/非独立GEMM，缺等价实现证据"
+    },
+    {
+      "op": "msprof/kernel summaries",
+      "reason": "无逐调用关联/预热剔除与完整身份，不把摘要时长替换独立算子"
+    }
+  ]
+}

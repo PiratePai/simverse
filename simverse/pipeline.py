@@ -127,6 +127,70 @@ def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
 
 def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
            allow_internal_methods: bool = False) -> ResultBundle:
+    """Evaluate T0 and optionally the same pipeline with conditional record costs.
+
+    Both evaluations use the same counting/lowering/execution implementation.
+    The original analytical metrics and ledgers remain unchanged.
+    """
+    analytic = _evaluate_v2(scenario, catalog, allow_internal_methods)
+    if not scenario.cost_records or analytic.manifest.status != "completed":
+        return analytic
+    from .cost.records import RecordPricer
+    models = (catalog or build_catalog())["models"]
+    records = RecordPricer(scenario, models[scenario.model_id])
+    selected = _evaluate_v2(scenario, catalog, allow_internal_methods, records)
+    report = records.report()
+    report["unpriced_components"] = [
+        {"id": key, "time_ms": None, "reason": value["reason"]}
+        for key, value in analytic.capability["checks"].items()
+        if key == "stage_cost_complete" and value["status"] != "supported"]
+    if report["unpriced_components"]:
+        report["prerequisites"].append(
+            "未计价方法阶段仍为unknown，不在覆盖分母内：先确认Ascend实现，再采接受/回退/hidden提取，不按0ms忽略")
+    analytic.cost["record_cost"] = report
+    report["selected_row_prices"] = selected.cost.get("row_prices", [])
+    report["selected_roofline_points"] = selected.cost.get("roofline_points", [])
+    report["selected_execution"] = selected.execution
+    if selected.cost.get("pipeline_sim"):
+        report["selected_pipeline_sim"] = selected.cost["pipeline_sim"]
+    note = (f"{report['label']}：{report['matched']}/{report['total']} 成本实例命中；"
+            "其余按原解析回退；记录含host/sync且身份不完备，仅作条件对照，不是生产校准或E2E实测")
+    if report["unpriced_components"]:
+        note += "；仅包含已计价阶段，方法运行时阶段尚缺时长"
+    analytic.capability["checks"]["archived_cost_records"] = {
+        "status": "approximated" if report["matched"] else "unknown", "reason": note,
+        "affected_metrics": ["M01_record_tpot", "M02_record_speedup", "M04_record_round_ms"]}
+    if "M07_support_summary" in analytic.metrics:
+        analytic.metrics["M07_support_summary"]["capability_checks"]["archived_cost_records"] = (
+            "approximated" if report["matched"] else "unknown")
+    analytic.assumption_dict["archived_cost_records"] = note
+    analytic.formula_dict["record-cost:" + scenario.cost_records] = {
+        "expr": "selected = matching archived latency + unchanged analytical fallback; same execution plan",
+        "source": "sha256:" + records.content_digest, "applies": "conditional archived cost experiment",
+        "version": "1"}
+    if report["matched"]:
+        for dst, src in {"M01_record_tpot": "M01_tpot_analytical",
+                         "M01_record_baseline": "M01_tpot_baseline",
+                         "M02_record_speedup": "M02_speedup_vs_baseline",
+                         "M04_record_round_ms": "M04_round_ms"}.items():
+            old = selected.metrics.get(src)
+            if not isinstance(old, Metric):
+                continue
+            analytic.metrics[dst] = Metric(
+                old.value, old.unit, scope=old.scope, statistic=old.statistic,
+                support=Support.APPROXIMATED if old.value is not None else Support.UNKNOWN,
+                feasibility=Feasibility.UNKNOWN, result_kind=ResultKind.ANALYTICAL_ESTIMATE,
+                reason="；".join(filter(None, [old.reason, note])),
+                evidence_refs=[Evidence.ASSUMED], formula_ref="record-cost:" + scenario.cost_records,
+                input_refs=["sha256:" + records.content_digest])
+    analytic.manifest.cost_digest = digest({"base": analytic.manifest.cost_digest,
+                                          "cost_records": records.content_digest})
+    analytic.manifest.compute_run_id()
+    return analytic
+
+
+def _evaluate_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
+                 allow_internal_methods: bool = False, _records=None) -> ResultBundle:
     """生产入口：默认只解析活跃目录（两款主模型 + DFlash）。
 
     catalog 仅允许离线测试显式注入 archive/fixture 目录；CLI/API 不暴露该参数。
@@ -134,6 +198,19 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     不进入产品/部署选择。
     """
     scenario.validate()
+    def priced_rows(rows, device, *args, **kwargs):
+        prices = price_rows(rows, device, *args, **kwargs)
+        if not _records:
+            return prices
+        quant = scenario.draft_quant if rows and rows[0].role == "draft" else scenario.quant
+        return _records.rows(rows, prices, device, quant)
+
+    def priced_row(row, device, *args, **kwargs):
+        price = price_row(row, device, *args, **kwargs)
+        if not _records:
+            return price
+        return _records.rows([row], [price], device,
+                             scenario.draft_quant if row.role == "draft" else scenario.quant)[0]
     cat = catalog if catalog is not None else build_catalog()
     if allow_internal_methods and "tiny_gqa" not in cat["models"]:
         # 仅补 tiny 合成 fixture，不引入历史归档模型；供 chain 内部研究测试。
@@ -388,14 +465,15 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                  plan=pplan,
                                  v41_kv_record=dep.v41_kv_record,
                                  device_sms=target_dev.sm_count)
-    base_prices = price_rows(base_rows, target_dev, gemm_dt, ew_dt,
+    base_prices = priced_rows(base_rows, target_dev, gemm_dt, ew_dt,
                              engram_lookup_host, gemm_basis, ew_basis)
     t_base = stage_total(base_prices)
     # 元数据（compute_dtype/峰值/带宽/cost_basis）直接取自 base_prices 的
     # 同一次计价输出（R27；不另建路由，前端不得自行推导物理参数）
     roofline_points = _roofline_points(base_rows, base_prices)
     # 通信（R01 按层配方：attn allreduce 恒有；MLP 段 TP allreduce 或 EP all2all）
-    col_base = _collectives_cost(model, pplan, B, quant, tp_link)
+    col_base = _collectives_cost(model, pplan, B, quant, tp_link,
+                                 records=_records, device=target_dev, stage="target_decode")
     t_base += col_base["t_ms"]
     if pricer:
         cal = pricer.price_stage("target_decode", base_rows, base_prices, B, ctx, 1)
@@ -466,7 +544,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             d_gemm, d_ew = dtype_route(dquant)
             d_dev = target_dev if dep.mode == "colocated" else draft_dev
             # 草稿无 extras.quant 执行配方（DFlash 为场景计价档）→ 启发档
-            d_prices = price_rows(draft_rows, d_dev, d_gemm, d_ew,
+            d_prices = priced_rows(draft_rows, d_dev, d_gemm, d_ew,
                                   gemm_basis=gemm_cost_basis(None),
                                   ew_basis=ew_cost_basis())
             t_draft = stage_total(d_prices)
@@ -477,7 +555,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                      "; ".join(draft_plan.errors))
             col_d = _collectives_cost(draft_model, draft_plan,
                                       B * plan.block_size, dquant, tp_link,
-                                      lm_head_tokens=B * (plan.block_size - 1))
+                                      lm_head_tokens=B * (plan.block_size - 1),
+                                      records=_records, device=d_dev, stage="draft_block")
             t_draft += col_d["t_ms"]
             verify_rows = build_model_work(model, "verify_block", B, ctx,
                                            plan.block_size, quant, dep.target_tp,
@@ -485,11 +564,12 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            plan=pplan,
                                            v41_kv_record=dep.v41_kv_record,
                                            device_sms=target_dev.sm_count)
-            v_prices = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
+            v_prices = priced_rows(verify_rows, target_dev, gemm_dt, ew_dt,
                                   engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices)
             col_v = _collectives_cost(model, pplan, B * plan.block_size,
-                                      quant, tp_link)
+                                      quant, tp_link, records=_records,
+                                      device=target_dev, stage="verify_block")
             t_verify += col_v["t_ms"]
             if pricer:
                 calibration["stages"]["verify_block"] = pricer.price_stage(
@@ -570,7 +650,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                                     dep.target_tp))
                 # draft_lm_head 读目标物理对象 → 目标档与目标 basis；
                 # 其余草稿行用草稿档（计数与计价同源 dquant，R27 一致性修复）
-                p_j = [price_row(r, target_dev,
+                p_j = [priced_row(r, target_dev,
                                  gemm_dt if r.op == "draft_lm_head" else mtp_gemm_dt,
                                  ew_dt if r.op == "draft_lm_head" else mtp_ew_dt,
                                  False,
@@ -582,12 +662,16 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 # fc gather_output=True all-gather + lm_head logits gather
                 #（每步 B 行候选；TP1 全零）
                 col_j = _collectives_cost(mtp_model, mtp_plan, B, mtp_quant,
-                                          tp_link, lm_head_tokens=B)
+                                          tp_link, lm_head_tokens=B, records=_records,
+                                          device=target_dev, stage=stage)
                 fc_gather = engram_gather(
                     B, model.hidden, dep.target_tp, mtp_quant["act"] / 8,
                     tp_link, "mtp_fc_allgather",
                     "MTP fc ColumnParallelLinear gather_output=True → "
                     "[B,h/tp] all-gather 为 [B,h]（qwen3_5_mtp.py L99-104）")
+                if _records:
+                    _records.collective(fc_gather, dep.target_tp, "bfloat16",
+                                        target_dev, stage)
                 col_j["t_ms"] += fc_gather.t_ms
                 col_j["detail"]["counts_by_kind"]["mtp_fc_allgather"] = (
                     col_j["detail"]["counts_by_kind"].get("mtp_fc_allgather", 0) + 1)
@@ -601,11 +685,12 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            ep=dep.target_ep, plan=pplan,
                                            v41_kv_record=dep.v41_kv_record,
                                            device_sms=target_dev.sm_count)
-            v_prices_m = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
+            v_prices_m = priced_rows(verify_rows, target_dev, gemm_dt, ew_dt,
                                     engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices_m)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
-                                      quant, tp_link)
+                                      quant, tp_link, records=_records,
+                                      device=target_dev, stage="verify")
             t_verify += col_v["t_ms"]
             if pricer:
                 calibration["stages"]["verify"] = pricer.price_stage(
@@ -650,7 +735,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 weight = (1 - p_full if j == 0 else 1.0)
                 rows = chain_step_rows(f"draft_step_{j}", draft_model, m, ctx,
                                        dquant, 1, batch=B)
-                t = stage_total(price_rows(rows, c_dev, c_gemm, c_ew,
+                t = stage_total(priced_rows(rows, c_dev, c_gemm, c_ew,
                                            gemm_basis=c_gemm_basis,
                                            ew_basis=c_ew_basis))
                 t_draft += t * (weight if j == 0 else 1.0) + (
@@ -662,11 +747,12 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                                            ep=dep.target_ep, plan=pplan,
                                            v41_kv_record=dep.v41_kv_record,
                                            device_sms=target_dev.sm_count)
-            v_prices_c = price_rows(verify_rows, target_dev, gemm_dt, ew_dt,
+            v_prices_c = priced_rows(verify_rows, target_dev, gemm_dt, ew_dt,
                                     engram_lookup_host, gemm_basis, ew_basis)
             t_verify = stage_total(v_prices_c)
             col_v = _collectives_cost(model, pplan, B * (plan.k_effective + 1),
-                                      quant, tp_link)
+                                      quant, tp_link, records=_records,
+                                      device=target_dev, stage="verify")
             t_verify += col_v["t_ms"]
             if pricer:
                 calibration["stages"]["verify"] = pricer.price_stage(
@@ -692,6 +778,9 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             t_d2t = t_t2d = 0.0
         step_map = {"d2t": t_d2t, "t2d": t_t2d}
         stage_costs.update(step_map)
+        if _records and dep.mode in ("dt_serial", "dt_pipeline_sim"):
+            for direction, ms in step_map.items():
+                _records.point_to_point(direction, dep.link, msg_bytes[direction], ms)
         cost["link"] = {"t_d2t_ms": t_d2t, "t_t2d_ms": t_t2d, "bytes": msg_bytes}
         if dep.mode == "dt_pipeline_sim":
             # M3 资源事件核：真实调度（互斥资源+半双工链路），周期≠请求延迟
@@ -886,7 +975,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
 
 
 def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,
-                      lm_head_tokens: Optional[int] = None):
+                      lm_head_tokens: Optional[int] = None,
+                      records=None, device=None, stage=""):
     """按层通信配方（R01）：EP 开 MoE 层为 dispatch/combine，非 2×allreduce；
     层外 lm_head logits_gather 一次（TP>1；lm_head_tokens 默认=tokens，
     草稿阶段传 B×(blk−1) 候选行）。"""
@@ -904,6 +994,10 @@ def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,
     cols = model_collectives(model, plan, model.hidden, act_bytes,
                              tokens, link, moe_top_k=top_k,
                              lm_head_tokens=lm_head_tokens)
+    if records:
+        for c in cols:
+            records.collective(c, plan.tp, "bfloat16" if act_bytes == 2 else "other",
+                               device, stage)
     t = sum(c.t_ms for c in cols)
     per_kind: Dict[str, int] = {}
     for c in cols:
@@ -946,6 +1040,9 @@ def _roofline_points(rows, prices, limit: Optional[int] = 40,
             "bandwidth_tb_s": price.get("bandwidth_tb_s"),
             "cost_basis": price.get("cost_basis"),
         })
+        for key in ("analytic_ms", "cost_source", "record_refs", "fallback_reason"):
+            if key in price:
+                pts[-1][key] = price[key]
     pts.sort(key=lambda x: -x["t_ms"])
     return pts[:limit] if limit is not None else pts
 

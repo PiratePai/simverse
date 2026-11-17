@@ -209,14 +209,24 @@ def _ops_csv_v2(bundle: dict) -> str:
             "bound", "shape"]
     rows = ((bundle.get("work") or {}).get("target_decode") or {}).get("rows") or []
     cost = bundle.get("cost") or {}
+    record_cost = cost.get("record_cost") or {}
+    use_records = bool(record_cost)
+    if use_records:
+        cols += ["analytic_t_ms", "record_t_ms", "cost_source", "record_refs", "fallback_reason"]
     pts = {p["row_id"]: p for p in
-           (cost.get("row_prices") or cost.get("roofline_points") or [])}
+           ((record_cost.get("selected_row_prices") if use_records else None)
+            or cost.get("row_prices") or cost.get("roofline_points") or [])}
     records = []
     for o in rows:
         p = pts.get(f"{o.get('stage')}:{o.get('layer')}:{o.get('op')}") or {}
         rec = {c: o.get(c) for c in cols}
         rec["t_ms"] = p.get("t_ms", "")
         rec["bound"] = p.get("bound", "")
+        if use_records:
+            rec.update(analytic_t_ms=p.get("analytic_ms", ""), record_t_ms=p.get("t_ms", ""),
+                       cost_source=p.get("cost_source", ""),
+                       record_refs=";".join(p.get("record_refs") or []),
+                       fallback_reason=p.get("fallback_reason") or "")
         records.append(rec)
     return _csv(cols, records)
 
@@ -224,12 +234,15 @@ def _ops_csv_v2(bundle: dict) -> str:
 def _trace_csv_v2(bundle: dict) -> str:
     cols = ["event_id", "round_id", "role", "stage", "t_ms", "start_ms",
             "depends_on", "label"]
-    events = [e for rnd in (bundle.get("execution") or {}).get("rounds") or []
+    record = (bundle.get("cost") or {}).get("record_cost") or {}
+    execution = record.get("selected_execution") if record.get("matched") else bundle.get("execution")
+    events = [e for rnd in (execution or {}).get("rounds") or []
               for e in rnd.get("events") or []]
     return _csv(cols, events)
 
 
 def _report_html_v2(bundle: dict) -> str:
+    from html import escape as escape_html
     m = bundle.get("metrics") or {}
 
     def row(name):
@@ -237,15 +250,15 @@ def _report_html_v2(bundle: dict) -> str:
         v = x.get("value")
         reason = x.get("reason") or ""
         return ("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
-                % (name, "UNKNOWN" if v is None else v, x.get("unit", ""),
-                   reason[:80]))
+                % (escape_html(name), "UNKNOWN" if v is None else v,
+                   escape_html(x.get("unit", "")), escape_html(reason[:80])))
 
     checks = (bundle.get("capability") or {}).get("checks") or {}
     cap_rows = "".join(
-        "<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (k, v.get("status"),
-                                                         v.get("reason", ""))
+        "<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (escape_html(k), escape_html(v.get("status", "")),
+                                                         escape_html(v.get("reason", "")))
         for k, v in sorted(checks.items()))
-    return ("<!DOCTYPE html><html lang=zh><meta charset=utf-8>"
+    html = ("<!DOCTYPE html><html lang=zh><meta charset=utf-8>"
             "<title>simverse run report</title>"
             "<body style=font-family:sans-serif;margin:24px>"
             "<h2>simverse ResultBundle 摘要</h2>"
@@ -256,10 +269,20 @@ def _report_html_v2(bundle: dict) -> str:
             "<table border=1 cellpadding=6 style=border-collapse:collapse>"
             "<tr><th>检查</th><th>状态</th><th>原因</th></tr>%s</table>"
             "<p style=color:#64748b>静态导出：结果身份与假设随文件携带；"
-            "非实时后端。全部性能为 T0 解析估算（Q2）。</p></body></html>"
+            "非实时后端。性能为 T0 解析估算或显式选择的记录条件对照，非端到端实测。</p></body></html>"
             % (bundle["manifest"]["run_id"], bundle["manifest"]["status"],
-               "".join(row(k) for k in sorted(m) if not isinstance(m[k], dict)),
+               "".join(row(k) for k in sorted(m) if isinstance(m[k], dict) and "value" in m[k]),
                cap_rows))
+    records = (bundle.get("cost") or {}).get("record_cost")
+    if records:
+        from html import escape
+        summary = {key: records[key] for key in
+                   ("set_id", "admission", "domain", "limits", "content_digest", "matched",
+                    "total", "stages", "unpriced_components", "prerequisites", "measurement_plan")}
+        details = "<h3>记录成本覆盖、回退与补采计划</h3><pre>" + escape(
+            json.dumps(summary, ensure_ascii=False, indent=2)) + "</pre>"
+        html = html.replace("</body>", details + "</body>")
+    return html
 
 
 def cmd_run_v2(args):
@@ -294,6 +317,7 @@ def _summary_v2(bundle: dict):
           f"code={man['code_revision'][:10]}")
     m = bundle.get("metrics") or {}
     for key in ("M01_tpot_analytical", "M01_tpot_profile_calibrated",
+                "M01_record_tpot", "M01_record_baseline", "M02_record_speedup",
                 "M01_tpot_baseline", "M02_speedup_vs_baseline", "M03_E_N",
                 "M04_round_ms"):
         x = m.get(key)

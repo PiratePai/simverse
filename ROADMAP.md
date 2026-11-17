@@ -19,6 +19,8 @@ PR #23（R29）审查后：保留卡 5/6 的新采集归档；TP1/物理卡 5 �
 
 910B3 设备选择已独立接入：[旧仓参数迁移](docs/validation/ascend-910b3-device.md)。使用 model-verse 固定提交的 `ascend_910B_64G` 参数与显式 910B3 场景映射，提供 BF16 受限解析档；来源为 inherited assumption，未获实测/官方规格/实际后端联合验证。不再把完整模型实测当作设备出现在下拉框的前置条件；A-N4 的官方 SKU、实现与量化补齐继续保留。
 
+记录成本已按项接入：[覆盖与回退](docs/validation/ascend-record-costs.md)。R29 通信与 R28 独立 GEMM 分档做条件对照，逐项显示精确/插值命中、解析回退和来源；未升格生产 profile。实测顺序据七场景及当前 run 的未覆盖清单细化为「身份/独立重复 → Ascend 实际 gather/EP 原语 → TP2 与 verify M16 形状 → 真实 MoE/GDN/attention → 草稿身份」，TP4/8 通信等待资源，不阻塞少卡闭环；详见昇腾计划。
+
 ## 当前已交付
 
 - [x] 重点模型产品目录、DFlash 配对门禁、具体资格失败原因。

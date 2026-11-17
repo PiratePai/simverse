@@ -203,6 +203,8 @@
         <select id="sel-draft-dev"></select></div>
       <div class="wb-ctrl"><label for="sel-profile">成本校准 Profile</label>
         <select id="sel-profile"><option value="">（无 · 纯解析 T0）</option></select></div>
+      <div class="wb-ctrl"><label for="sel-record-cost">归档成本记录（有条件对照）</label>
+        <select id="sel-record-cost"><option value="">不使用，保留纯解析</option></select></div>
       <div class="wb-ctrl"><label for="sel-prec">精度 Quant</label>
         <select id="sel-prec">
           <option value="bf16">BF16（16/16/16/16）</option>
@@ -237,7 +239,7 @@
     </div>
 
     <div class="wb-kpi-strip" id="kpi-strip">
-      <div class="kpi-box"><div class="k-label">M01 等效 TPOT（解析）</div>
+      <div class="kpi-box"><div class="k-label" id="kpi-tpot-label">M01 等效 TPOT（解析）</div>
         <div class="k-val" id="kpi-tpot">–</div>
         <div class="k-sub" id="kpi-tpot-sub">E[T_round]/E[N]，committed 口径</div></div>
       <div class="kpi-box"><div class="k-label">M01 基线 TPOT / M02 加速比</div>
@@ -260,6 +262,10 @@
         <div class="k-sub" id="kpi-ev-sub">结构/容量/来源逐项</div></div>
     </div>
 
+    <details class="drawer" id="cost-records-panel" open hidden>
+      <summary>记录成本、覆盖与解析回退</summary>
+      <div class="body" id="cost-records-body">运行后显示。</div>
+    </details>
     <div class="wb-grid">
       <div class="wb-pane">
         <div class="wb-pane-head"><span>① 部署 × 方法矩阵（每格独立 run_id）</span>

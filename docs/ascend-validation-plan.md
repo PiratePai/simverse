@@ -41,6 +41,22 @@ A-N4 和匹配采数。没有足够显存加载整模时不等待扩容，转入
 
 ## 2. 无法全量跑时，分别能测什么
 
+### 记录接入后的补采顺序（2026-11-17）
+
+按 [七场景回放](evidence/ascend-record-costs/coverage-plan.json) 与当前 run 的 `cost.record_cost.measurement_plan` 排序。以下只调整采测计划，没有授权或启动硬件执行；解析回退权重是缺口定位依据，不当成实测瓶颈。
+
+| 顺序 / 原因 | 下一批具体交付 | 资源与验收 |
+|---|---|---|
+| P0 / 来源与统计先行 | 固定且核验目标栈、CANN/driver/runtime commits、dirty 补丁、卡对/拓扑、原语/布局、采集命令与唯一 run；保存每批原样窗口、输出正确性与脚本哈希。R29 现有栈若可保留则补齐身份；若更换栈，新建该栈记录，不拼 R28/R29 | 无卡可准备 schema/拒错与独立 oracle；数值正确后至少三次独立进程、每进程≥五批，按 shape 分组留出；不能用摘要或曲线内部诊断冒充独立留出 |
+| P0 / `primitive-unresolved` | 核对 Ascend logits 的 gather-to-root/allgather 分支；TP2/EP2 的 dispatch/combine 固定 variable split、元数据、空/偏斜专家、逆置换。当前 EP2 有 80 个 dispatch/combine 实例不能用 equal-split alltoall 记录替代 | 现有双卡；先原语/数值再延迟，保留两 rank 联合批 ID 与最慢窗口；logits 实际载荷样例按当前 run 的字段补点，不按 wire bytes 猜 input |
+| P1 / `shape-missing`、验证 M16 | 先补 TP2 真实分片 GEMM：M=1/16，K=2048，N=4096/2048/32/256；对应 out/o `[M,2048]@[2048,2048]`，lm_head N=124160。已有 R28 单点保留作独立条件对照；若要与 R29 通信组合，在统一栈补采所需算子，不混用旧栈 | 单卡可测真实局部形状，双卡再查并发/通信影响；decode 与 verify 分列。TP8-shaped 的 N=1024/512/8、lm_head N=31040 也可单卡局部测，但不能称 TP8 部署实测；优先补 M16 缺点，不重复完整 M 网格 |
+| P1 / `operator-not-equivalent`、`operator-set-missing` | 在统一栈采实际 MoE（gate/up/down+clamp/路由所有权）、GDN recurrence/conv/state 和 full-attn/cache 路径；两 GEMM MoE、稠密 SDPA 或组合 norm 不顶替实际融合核。首轮按当前回退清单的阶段与大额项拆小交付 | 1–2 卡、模块/少层；保留真实维度与中间张量 oracle；明确融合组拥有的账本行，原始计数不变。成本可局部验收，不等完整模型 |
+| P1 / `model-role-mismatch` | DFlash 草稿独立模型/形状/实现身份，先确认 Ascend 集成路径，再采草稿投影、attention、KV/hidden、验收与回退；不继承目标模型样本 | 单卡局部张量与双卡通信可分开；未实现的服务集成继续 unsupported/unknown，独立算子探针不能升级为 served 通过 |
+| P1 / 未计价运行时、`point-to-point-uncovered` | 接受/拒绝恢复、hidden 提取等未计价阶段先确认实现，再独立计时；DT 的 token/hidden/KV 逐方向点到点往返另采，登记 payload、同步与所有权 | 未计价时间保持 null 且不进入覆盖分母；点到点链路保留解析回退，不拿集合通信样本顶替 |
+| P2 / `rank-domain`、域外载荷 | world=2 内只补当前缺失载荷与独立重复；TP4/8 需要更多卡或匹配外部 trace 后单独验收，不从双卡曲线外推 | 不阻塞现有双卡闭环；R29 TP8 零命中如实保留；范围、数据身份、插值/外推拒绝都有负例 |
+
+每次新 run 的覆盖/回退清单随 JSON 导出；按原因、去重形状、阶段与现有成本权重更新本表。R29 通信已有的 50 点、R28 已核对的 14 个独立 GEMM 形状不为“再验一次”盲目全量重采；只有栈、实施配方或统计验收目标变化才建立新样本，保留旧原始记录。统一栈数据满足条件后才能从 conditional-only 提升到正式局部校准，部署资格另验。
+
 | 可用资源 | 测试与建议网格 | 判定与产物 | 不覆盖 |
 |---|---|---|---|
 | 无 NPU / CPU | config 全叶键、源码分支、shape/次数/FLOPs、量化打包、TP/EP 守恒；独立小张量 oracle；坏 trace/跨模型/跨 dtype/未知计时边界负例 | 数值与结构 fixture；失败原因及源码哈希；parser/接线回归 | NPU 数值、kernel 时间、容量或可部署性 |
