@@ -42,3 +42,5 @@ docs/evidence/ascend-910b3/** -text diff
 # R29 昇腾 910B3 卡 5/6 重采（同 R28 先例）：整目录保留捕获字节，
 # 其 manifest.json 与报告均以 LF 采集时的 SHA256 为归档依据。
 docs/evidence/ascend-910b3-r29/** -text diff
+# R29 capture manifest also hashes this original report outside the archive.
+docs/validation/ascend-910b3-r29.md text eol=lf

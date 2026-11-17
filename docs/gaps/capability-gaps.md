@@ -1,5 +1,7 @@
 # 能力缺口清单（需要工程实现的能力）
 
+> 2026-11-17 R29 / PR #23：新增离线审查回放与 7 项证据回归，未改生产计数/成本/资格。下一批先补采集器唯一 run/拒绝覆盖/失败聚合、逐头 Q/K MRoPE oracle、实际后端中间张量与 cache/state 检查、graph clone-only 对照；详见 [审查](../validation/ascend-910b3-r29-review.md) 和 [昇腾计划](../ascend-validation-plan.md)。归档脚本保留已知缺陷，不作为推荐复跑入口；下列 R28 内容是历史记录。
+
 > 2026-11-17 R28 更新：昇腾先于 NVIDIA 新卡；见 [有限硬件与 profiling 计划](../ascend-validation-plan.md)。
 > PR #21 的 910B3 单/双卡采集已入审查归档，**未解除** G-D7/R02b/R17/R18 或
 > G-C13/G-C16/G-C18。AllReduce 派生指标已纠正；ReduceScatter、graph、MRoPE、
