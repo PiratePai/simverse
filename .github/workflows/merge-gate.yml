@@ -40,3 +40,9 @@ jobs:
 
       - name: Run merge gate and full test suite
         run: python -m pytest tests -q
+
+      # R10c：编辑模式检查之外，独立验证 wheel 安装路径——完整 Git 快照
+      # 构建、隔离 venv 安装、仓库外执行真实 run-v2 与工作台端点（tools/
+      # wheel_smoke.py 内含逐步断言；失败即 exit 非 0）。
+      - name: Wheel install smoke (R10c)
+        run: python tools/wheel_smoke.py
