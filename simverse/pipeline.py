@@ -1008,8 +1008,8 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
     m["M01_tpot_baseline"] = metric_from(
         t_base, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION, scope=sc,
         evidence=(Evidence.COUNTED,), assumptions=["无投机基线同 B/ctx"])
-    # M02 加速比（与自身基线同 run 配对；资格检查）
-    elig = _eligibility(cap)
+    # M02 加速比（与自身基线同 run 配对；资格检查——统一规则带场景适用域）
+    elig = _eligibility(cap, scenario)
     if round_obj.tpot_ms and t_base:
         m["M02_speedup_vs_baseline"] = metric_from(
             t_base / round_obj.tpot_ms, "ratio", FR.F_ROOFLINE,
@@ -1021,7 +1021,8 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
             statistic=Statistic.EXPECTATION,
             support=Support.APPROXIMATED, feasibility=Feasibility.UNKNOWN,
             evidence_refs=[], formula_ref=FR.F_ROOFLINE,
-            reason="不参与排名：" + "; ".join(_eligibility_issues(cap)))
+            reason="不参与排名：" + "; ".join(
+                _eligibility_issues(cap, scenario)))
     else:
         m["M02_speedup_vs_baseline"] = Metric.unknown("ratio", "TPOT 缺失")
     # M03 每轮产出（baseline：恒 1 精确值）
@@ -1129,26 +1130,18 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
     return m
 
 
-def _eligibility(cap: CapabilityReport) -> bool:
-    """比较资格：结构完整 + 无 OOM + 容量非 unknown/条件（§7.2；R03b：
-    假设预算（approximated/feasible-conditional）不进实际部署排名）。"""
-    return not _eligibility_issues(cap)
+def _eligibility(cap: CapabilityReport, scenario=None) -> bool:
+    """比较资格：统一走 experiments.eligibility（R10e/R10f；与 compare_runs
+    同一套按场景适用域的规则）。结构完整 + 无 OOM + 容量非 unknown/条件
+    （§7.2；R03b：假设预算（approximated/feasible-conditional）不进实际
+    部署排名）；必需证据缺失保留 unknown 与具体原因。"""
+    return not _eligibility_issues(cap, scenario)
 
 
-def _eligibility_issues(cap: CapabilityReport) -> list[str]:
-    issues = []
-    for cid, chk in cap.checks.items():
-        if cid in ("model_structure_complete", "model_config_coverage",
-                   "model_forward_evidence", "draft_forward_evidence",
-                   "method_recipe_ready", "stage_cost_complete",
-                   "model_cpu_forward", "model_gpu_measurement",
-                   "deployment_ranking_evidence", "ascend_device_recipe") \
-                and chk["status"] != "supported":
-            issues.append(str(chk["reason"]))
-        elif cid.startswith("memory_") and chk["status"] in (
-                "unsupported", "unknown", "approximated"):
-            issues.append(str(chk["reason"]))
-    return issues
+def _eligibility_issues(cap: CapabilityReport, scenario=None) -> list[str]:
+    from .experiments.eligibility import eligibility_issues
+    snapshot = scenario.to_json() if scenario is not None else None
+    return eligibility_issues(cap.checks, snapshot)
 
 
 def _moe_union_summary(rows) -> Optional[Dict[str, Any]]:

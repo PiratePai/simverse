@@ -3,12 +3,26 @@
   * objectives：并列目标（metric/statistic/scope/time_basis/单位/方向），无默认加权；
   * resource_policy：equal_total_inventory | equal_target_plus_disclosed_delta；
   * ranking_metric_ref：可空的临时排序（切换不改资格与数值）；
-  * eligibility：逐谓词 status/reason/affected；OOM/unknown/外推不进排名。
+  * eligibility：统一走 experiments.eligibility（R10e/R10f；与管线 M02 同一
+    套按场景适用域的规则——修复清空 capability.checks 仍 eligible、以及
+    声明未检查的 same_time_basis/result_kind_compatible）。
+
+R10e/R10f 比较侧规则：
+  * 资格：目标端/草稿端（按场景适用域）/方法执行/阶段成本/容量证据全部
+    满足才 eligible；必需检查缺失保留 unknown 与具体原因；baseline 只检查
+    其适用项；预算 unknown、假设预算、OOM 均不可排名；
+  * 口径核对：相对变化（delta）要求双方指标的单位、时间基准、统计量、
+    适用范围（role/phase/aggregation）与结果类型相容——不相容时保留双方
+    数值与原因、delta=None（新增 objectives[*].compatibility 字段仅补充
+    该核对结论；既有键语义不变；旧行为会给出混口径差值，正是修复点）；
+  * 未通过资格/口径的结果保留可用数值与原因，不删除行。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+from .eligibility import eligibility_issues
 
 
 @dataclass(frozen=True)
@@ -67,46 +81,66 @@ def default_policy(resource_policy: str = "equal_total_inventory") -> Comparison
         resource_policy=resource_policy, objectives=list(DEFAULT_OBJECTIVES))
 
 
+def _scope_tuple(metric) -> tuple:
+    """适用范围可比键：role/phase/aggregation/time_basis（rank/group 等
+    单运行身份字段不进比较）。"""
+    sc = getattr(metric, "scope", None)
+    if sc is None:
+        return ()
+    return (getattr(sc, "role", None), getattr(sc, "phase", None),
+            getattr(sc, "aggregation", None), getattr(sc, "time_basis", None))
+
+
+def metric_compatibility(baseline_metric, candidate_metric) -> Dict[str, Any]:
+    """口径核对：单位/时间基准/统计量/适用范围/结果类型。
+
+    任一维度不一致 → compatible=False + 具体原因（双方数值保留在调用方）。
+    任一侧缺失 → compatible=False（无法核对，不给相对变化）。
+    """
+    if baseline_metric is None or candidate_metric is None:
+        return {"compatible": False,
+                "reason": "基线或候选指标缺失，无法核对口径"}
+    dims = {
+        "unit": (baseline_metric.unit, candidate_metric.unit),
+        "statistic": (str(getattr(baseline_metric, "statistic", None)),
+                      str(getattr(candidate_metric, "statistic", None))),
+        "time_basis": (_scope_tuple(baseline_metric)[3:4],
+                       _scope_tuple(candidate_metric)[3:4]),
+        "scope": (_scope_tuple(baseline_metric)[:3],
+                  _scope_tuple(candidate_metric)[:3]),
+        "result_kind": (str(getattr(baseline_metric, "result_kind", None)),
+                        str(getattr(candidate_metric, "result_kind", None))),
+    }
+    mismatch = [f"{name}：{a} ≠ {b}"
+                for name, (a, b) in dims.items() if a != b]
+    if mismatch:
+        return {"compatible": False, "reason": "口径不匹配——" + "；".join(mismatch)}
+    return {"compatible": True, "reason": None}
+
+
 def compare_runs(baseline_bundle: Any, candidate_bundles: List[Any],
                  policy: Optional[ComparisonPolicy] = None) -> Dict[str, Any]:
     """并列多目标比较：绝对值 + 相对基线变化 + 资源披露；不选唯一赢家。
 
-    资格：capability 检查中 structure/memory 全 supported 才 eligible；
-    不合格保留数值与原因。
+    资格与口径规则见模块 docstring；不合格/口径不匹配时保留数值与原因。
     """
     policy = policy or default_policy()
     rows = []
-
-    def _eligible(bundle) -> tuple:
-        checks = bundle.capability.get("checks", {})
-        method = checks.get("method_recipe_ready")
-        if method and method["status"] != "supported":
-            return False, f"方法：{method['reason']}"
-        structure = checks.get("model_structure_complete")
-        if structure and structure["status"] != "supported":
-            return False, f"结构缺口：{structure['reason']}"
-        for cid in ("model_config_coverage", "model_forward_evidence",
-                    "draft_forward_evidence", "model_cpu_forward",
-                    "model_gpu_measurement", "deployment_ranking_evidence"):
-            chk = checks.get(cid)
-            if chk and chk["status"] != "supported":
-                return False, f"证据缺口（{cid}）：{chk['reason']}"
-        for cid, chk in checks.items():
-            if cid.startswith("memory_") and chk["status"] != "supported":
-                return False, f"容量：{chk['reason']}"
-        stage = checks.get("stage_cost_complete")
-        if stage and stage["status"] != "supported":
-            return False, f"阶段成本缺口：{stage['reason']}"
-        return True, None
-
-    base_elig, base_reason = _eligible(baseline_bundle)
+    base_scenario = getattr(baseline_bundle, "scenario_snapshot", None) or {}
+    base_elig_reasons = eligibility_issues(
+        baseline_bundle.capability.get("checks", {}), base_scenario)
+    base_elig = not base_elig_reasons
     base_metrics = baseline_bundle.metrics
     for cand in candidate_bundles:
-        elig, reason = _eligible(cand)
+        cand_scenario = getattr(cand, "scenario_snapshot", None) or {}
+        reasons = eligibility_issues(cand.capability.get("checks", {}),
+                                     cand_scenario)
+        elig = not reasons
         row: Dict[str, Any] = {
             "run_id": cand.manifest.run_id,
             "scenario": cand.scenario_snapshot.get("name"),
-            "eligible": elig, "ineligible_reason": reason,
+            "eligible": elig,
+            "ineligible_reason": ("；".join(reasons) if reasons else None),
             "objectives": {},
             "resource_delta": _resource_delta(baseline_bundle, cand),
         }
@@ -118,12 +152,17 @@ def compare_runs(baseline_bundle: Any, candidate_bundles: List[Any],
                 bm = _first_memory(baseline_bundle)
             val_c = cm.value if cm else None
             val_b = bm.value if bm else None
+            compat = metric_compatibility(bm, cm)
+            delta = (val_c - val_b) if (val_c is not None and val_b is not None
+                                        and compat["compatible"]) else None
             row["objectives"][obj.metric_id] = {
                 "candidate": val_c, "baseline": val_b,
                 "unit": obj.unit, "direction": obj.direction,
-                "delta": (val_c - val_b) if (val_c is not None and val_b is not None)
-                else None,
+                "delta": delta,
                 "reason": (cm.reason if cm and cm.value is None else None),
+                # 新增（R10e/f）：口径核对结论；不改变既有键的语义。
+                # 旧行为在口径不匹配时仍给 delta（混口径差值），已修复。
+                "compatibility": compat,
             }
         rows.append(row)
     return {
@@ -131,6 +170,9 @@ def compare_runs(baseline_bundle: Any, candidate_bundles: List[Any],
         "policy": policy.to_json(),
         "baseline_run_id": baseline_bundle.manifest.run_id,
         "baseline_eligible": base_elig,
+        # baseline 适用项未满足时列出原因（baseline 只检查其适用项）
+        "baseline_ineligible_reason": ("；".join(base_elig_reasons)
+                                       if base_elig_reasons else None),
         "rows": rows,
         "note": "多目标并列（Q11）：不默认赢家；排序需显式 ranking_metric_ref",
     }

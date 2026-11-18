@@ -49,6 +49,10 @@ PR #23（R29）审查后：保留卡 5/6 的新采集归档；TP1/物理卡 5 �
   MoE scoring/top-k/分组路由已 source-checked 建模
   （R21，2026-11-12；MegaMoE/DSpark 草稿 MoE/padding skip 部署变体仍缺，
   见 B 组表）。
+- [x] 安装与入口修复（2026-11-19，R10c/d/b/e/f）：wheel 资产定位与 CI 冒烟、
+  Qwen3.6+DFlash 共享默认预设（CLI/目录 API/工作台同源）、run/sweep 结构化
+  输入校验、状态页根文档白名单、sweep 指标口径配对与交叉点确定性规则、
+  管线/比较共用部署资格判定与口径核对（[报告](docs/validation/entry-scan-compare-fixes-20261119.md)）。
 - [x] 生产工作台交互/展示/导出一致性修复（2026-11-17，R10b 范围：文档
   链接、矩阵串行、Sweep 错误处理、控件联动反映后端硬事实、七维透视聚合
   口径、Roofline 元数据能力检测、M06 逐端显存、CSV RFC 4180 转义；
