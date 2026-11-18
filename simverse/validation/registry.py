@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from ..assets import code_revision as _code_revision
+from ..assets import docs_dir, repo_root
 from ..contracts import EvidenceRecord
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = repo_root() or Path(__file__).resolve().parent.parent / "_data"
 ASSETS = ROOT / "assets"
-REFS = ROOT / "docs" / "rebuild-20261106" / "references"
+REFS = docs_dir() / "rebuild-20261106" / "references"
 
 # 固定身份（assets/identity/*.json 由抓取脚本落盘；此处登记 claim）
 _IDENTITY_FILES = {
@@ -666,15 +667,8 @@ def _sha256_file(path: Path) -> Optional[str]:
 
 
 def code_revision() -> str:
-    """当前代码身份（git HEAD；不可用时如实返回 unknown）。"""
-    try:
-        out = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
-                             capture_output=True, text=True, timeout=10)
-        if out.returncode == 0:
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return "unknown"
+    """当前代码身份（git HEAD；wheel/无 git 环境如实返回 unknown）。"""
+    return _code_revision()
 
 
 def build_registry() -> Dict[str, EvidenceRecord]:

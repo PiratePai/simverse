@@ -18,7 +18,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-PROFILES_ROOT = Path(__file__).resolve().parent.parent.parent / "assets" / "profiles"
+def _profiles_root() -> Path:
+    """源码检出→仓库 assets/profiles；wheel→包内 _data（仅 manifest 入包，
+    归档校准数据按用途留在仓库；load_profile_set 缺文件时拒绝加载）。"""
+    from ..assets import assets_dir
+    return assets_dir() / "profiles"
+
+
+PROFILES_ROOT = _profiles_root()
 
 PROFILE_SETS = {
     "h200-qwen3-30b-a3b-tiny-op-v1": "h200_qwen3_30b_a3b_tiny",

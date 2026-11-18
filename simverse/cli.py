@@ -20,11 +20,11 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .assets import default_output_dir, scenario_dir
 from .contracts import ScenarioSpec, canonical_json
 from .engine import run
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SCENARIO = ROOT / "assets" / "scenarios" / "v41_flash_dt_verification.json"
+DEFAULT_SCENARIO = scenario_dir() / "v41_flash_dt_verification.json"
 
 
 def _configure_stdio():
@@ -130,7 +130,7 @@ def cmd_sweep(args):
     _require_active_v01(scenario)
     data = sweep_suite(scenario)
     print("boundaries:", json.dumps(data["boundaries"], ensure_ascii=False))
-    out = Path(args.out) if args.out else ROOT / "outputs" / "sweep.json"
+    out = Path(args.out) if args.out else default_output_dir() / "sweep.json"
     _dump(data, out)
     charts = Path(args.charts) if args.charts else out.parent
     charts.mkdir(parents=True, exist_ok=True)
@@ -356,7 +356,7 @@ def cmd_sweep_v2(args):
     from .experiments import sweep_suite
     scenario = _v2_scenario(args.scenario)
     data = sweep_suite(scenario)
-    out = Path(args.out) if args.out else ROOT / "outputs" / "sweep_v2.json"
+    out = Path(args.out) if args.out else default_output_dir() / "sweep_v2.json"
     _dump(data, out)
     import json as _json
     print("breakevens:", _json.dumps(data["breakevens"], ensure_ascii=False))

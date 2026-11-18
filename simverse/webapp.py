@@ -13,16 +13,21 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
+from .assets import docs_dir, repo_root, scenario_dir
 from .contracts import ScenarioSpec, js_safe
 from .engine import run
 from .formulas import formulas_json
 from .models import registry_json
 
-ROOT = Path(__file__).resolve().parent.parent
-SCENARIO_DIR = ROOT / "assets" / "scenarios"
+SCENARIO_DIR = scenario_dir()
 # 工作台顶栏文档链接的只读根（send_from_directory 自带穿越/绝对路径拒绝，
 # 只开放仓库 docs/ 一层，不提供任意本地文件访问）
-DOCS_DIR = ROOT / "docs"
+DOCS_DIR = docs_dir()
+
+# 状态/验证文档指向的根目录文档白名单（R10b）：docs/ 内的相对链接
+# ``[ROADMAP](../ROADMAP.md)`` 会落到站点根；只显式开放这两个被引用的
+# 根文档，未列出的根路径仍 404。wheel 安装无仓库 docs/，如实 404。
+ROOT_DOC_WHITELIST = ("ROADMAP.md", "AGENTS.md")
 
 
 def _linked_markdown(text: str) -> str:
