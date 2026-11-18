@@ -20,9 +20,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .assets import assets_dir
 from .contracts import DraftSpec, LayerSpec, ModelSpec
 
-ASSETS = Path(__file__).resolve().parent.parent / "assets"
+ASSETS = assets_dir()
 
 # ---------------------------------------------------------------------------
 # 模型适配器

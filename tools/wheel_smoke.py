@@ -88,7 +88,7 @@ def main() -> None:
     # 3. 隔离 venv 安装
     venv = work / "venv"
     _run([sys.executable, "-m", "venv", str(venv)])
-    py = venv / ("Scripts" / "python.exe" if os.name == "nt" else "bin" / "python")
+    py = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     _run([str(py), "-m", "pip", "install", "--quiet", "--upgrade", "pip"])
     _run([str(py), "-m", "pip", "install", "--quiet", str(wheel)])
 
