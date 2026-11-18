@@ -89,12 +89,18 @@ def default_output_dir() -> Path:
 
 
 def iter_manifest_files(repo: Path) -> list[tuple[Path, Path]]:
-    """展开清单为 (仓库源文件, 包内目标文件) 列表；源缺失时报错。"""
+    """展开清单为 (仓库源文件, 包内目标文件) 列表；源缺失时报错。
+
+    目录展开排除 ``__pycache__``/``*.pyc`` 等本地生成物（与 git 提交树
+    对齐；assets/identity 下的 pinned *.py 被导入过会产生本地缓存）。
+    """
     out: list[tuple[Path, Path]] = []
     for src_rel, dst_rel in WHEEL_DATA_MANIFEST:
         src = repo / src_rel
         if src.is_dir():
-            files = sorted(p for p in src.rglob("*") if p.is_file())
+            files = sorted(
+                p for p in src.rglob("*") if p.is_file()
+                and p.suffix != ".pyc" and "__pycache__" not in p.parts)
             if not files:
                 raise FileNotFoundError(f"清单目录为空：{src_rel}")
             for f in files:
