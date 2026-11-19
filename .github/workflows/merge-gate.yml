@@ -20,6 +20,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch frozen evidence revision
+        run: git fetch --no-tags --depth=1 origin a457c76665234fb09c9026b9e3ff5aad4ed89b2a
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
@@ -40,6 +43,11 @@ jobs:
 
       - name: Run merge gate and full test suite
         run: python -m pytest tests -q
+
+      - name: Workbench browser regression
+        run: |
+          npm ci --prefix tests/browser --no-audit --no-fund
+          python -X utf8 tests/browser/run.py
 
       # R10c：编辑模式检查之外，独立验证 wheel 安装路径——完整 Git 快照
       # 构建、隔离 venv 安装、仓库外执行真实 run-v2 与工作台端点（tools/

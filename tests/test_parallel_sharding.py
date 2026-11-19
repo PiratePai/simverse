@@ -186,19 +186,19 @@ def test_tp_sharded_gemm_conservation_qwen36():
 
 
 def test_kv_proj_shard_or_replicate_by_tp():
-    """k/v_proj：kvh≥tp 切分（Σ=整模型）；kvh<tp 复制（per-rank=整模型）。"""
+    """k/v_proj：kvh≥tp 切分（Σ=整模型）；kvh<tp 单头跨 rank 复制。"""
     m = _qwen36()
 
     def per_rank(tp, rank, ops):
         return _sharded_op_flops(m, tp, 1, rank, ops)
-    whole = per_rank(1, 1, {"k_proj", "v_proj"}) if False else \
-        _sharded_op_flops(m, 1, 1, 0, {"k_proj", "v_proj"})
+    whole = per_rank(1, 0, {"k_proj", "v_proj"})
+    assert whole == 10 * 2 * 2 * 2048 * 2 * 256
     # tp2：kvh=2 ≥ 2 → 切分，Σ = whole
     assert sum(_sharded_op_flops(m, 2, 1, r, {"k_proj", "v_proj"})
                for r in range(2)) == whole
-    # tp4/8：kvh=2 < tp → 复制，每 rank == whole
+    # tp4/8：kvh=2 < tp，每 rank 只持 1 个 KV 头。
     for tp in (4, 8):
-        assert _sharded_op_flops(m, tp, 1, 0, {"k_proj", "v_proj"}) == whole
+        assert per_rank(tp, 0, {"k_proj", "v_proj"}) == whole // 2
 
 
 def test_ep_routed_conservation_qwen36():
@@ -220,7 +220,7 @@ def test_replicated_objects_not_summed():
 
 
 def test_kv_replication_rule_qwen36():
-    """kvh=2：tp2 切分（KV/2）；tp4/8 复制（KV 同 TP1）。"""
+    """kvh=2：tp2 切分（KV/2）；tp4/8 单头复制（每 rank 与 TP2 同）。"""
     m = _qwen36()
 
     def kv_bytes(tp):
@@ -228,8 +228,8 @@ def test_kv_replication_rule_qwen36():
         return sum(r.kv_write for r in rows if r.op == "attention_core")
     b1 = kv_bytes(1)
     assert kv_bytes(2) == b1 // 2      # 2 % 2 == 0 → 切分
-    assert kv_bytes(4) == b1           # 2 < 4 且 4 % 2 == 0 → 复制
-    assert kv_bytes(8) == b1
+    assert kv_bytes(4) == b1 // 2
+    assert kv_bytes(8) == b1 // 2
 
 
 def test_gdn_state_per_rank():

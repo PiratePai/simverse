@@ -116,9 +116,9 @@ def test_independent_hand_oracle_steady_bytes():
            + (8192 // 8) * 4                    # conv1d（kernel=4）
            + (4096 // 8) * h                    # out_proj
            + 2 * (32 // 8) * 4)                 # A_log/dt_bias fp32
-    # ② full attn 层 per rank（q 门控 2×；kvh=2<tp → 复制；q/k norm）
+    # ② full attn 层 per rank（q 门控 2×；kvh=2<tp → 单头跨 rank 复制；q/k norm）
     attn = ((16 * 256 * 2) // 8 * h             # q_proj（gated 2×，列切）
-            + (2 * 2 * 256) * h                 # k/v（复制，每 rank 全量）
+            + (2 * 1 * 256) * h                 # k/v（每 rank 一个头）
             + ((16 * 256) // 8) * h             # o_proj 行切
             + 2 * 256)                          # q/k norm 权重
     dense_per_rank = 30 * gdn + 10 * attn
@@ -132,8 +132,8 @@ def test_independent_hand_oracle_steady_bytes():
     # ④ 词表行切 embed/lm_head + final norm
     head = 2 * h * (V // 8) + h
     target_w = dense_per_rank + moe_per_rank + head
-    # ⑤ KV（kvh=2<tp 复制）+ GDN 状态（per-rank 切分）
-    kv = 10 * 2 * 2 * 256 * 32768 * 1
+    # ⑤ KV（每 rank 一个头）+ GDN 状态（per-rank 切分）
+    kv = 10 * 2 * 1 * 256 * 32768 * 1
     state = 30 * ((32 // 8) * 128 * 128 * 4 + (8192 // 8) * 3 * 1)
     # ⑥ 草稿 per rank（层权重切分 + fc(replicated)+2norm+mask+final norm
     #    + fused ctx-KV 副本/k_norm 堆叠——2026-11-10 二轮审计补漏，

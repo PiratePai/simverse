@@ -16,7 +16,7 @@
 (function () {
   'use strict';
   var state = {
-    catalog: null, bundle: null, matrixRunning: false
+    catalog: null, bundle: null, matrixRunning: false, latestRunRequest: 0
   };
   var $ = function (id) { return document.getElementById(id); };
   // 精度档（后端 scenario.validate 契约：dense_w/expert_w/act/kv ∈ {4,8,16}，state=32）
@@ -454,9 +454,10 @@
 
   function doRun() {
     var sc = currentScenario();
-    $('btn-run').disabled = true;
+    var requestId = ++state.latestRunRequest;
     setStatus('运行中… ' + sc.model_id + ' × ' + sc.method_id);
-    runScenario(sc).then(function (b) {
+    return runScenario(sc).then(function (b) {
+      if (requestId !== state.latestRunRequest) return;
       var err = bundleError(b);
       if (err) {
         setStatus('运行被拒绝（后端判定）：' + esc(err), true);
@@ -469,8 +470,10 @@
           ? ' · 独立记录条件对照 + 解析回退（非生产校准）·' : ' · 全部数字 T0 解析估算（Q2）·') +
         ' 接受率为假设输入（Q8）');
     }).catch(function (e) {
-      setStatus('运行失败：' + esc(e.message), true);
-    }).finally(function () { $('btn-run').disabled = false; });
+      if (requestId === state.latestRunRequest) {
+        setStatus('运行失败：' + esc(e.message), true);
+      }
+    });
   }
 
   // ---------- render bundle ----------
@@ -620,9 +623,9 @@
   }
   function rooflineIndex(b) {
     var idx = {};
-    var rc = (b.cost || {}).record_cost;
-    ((rc && rc.matched ? rc.selected_row_prices : null)
-      || ((b.cost || {}).row_prices) || ((b.cost || {}).roofline_points) || []).forEach(function (p) {
+    var cost = b.cost || {};
+    var selection = cost.selection || {};
+    (selection.selected_row_prices || cost.row_prices || cost.roofline_points || []).forEach(function (p) {
       idx[p.row_id] = p;
     });
     return idx;
@@ -819,9 +822,8 @@
   function drawRoofline(row) {
     var svg = $('roofline-svg');
     var b = state.bundle;
-    var rc = (b.cost || {}).record_cost;
-    var pts = (rc && rc.matched ? rc.selected_roofline_points : null)
-      || (b.cost && b.cost.roofline_points) || [];
+    var cost = b.cost || {};
+    var pts = (cost.selection || {}).selected_roofline_points || cost.roofline_points || [];
     var ptIdx = rooflineIndex(b);
     var repId = row ? rowKey(row) : null;
     var pt = repId ? ptIdx[repId] : null;
@@ -939,7 +941,8 @@
     var rc = (b.cost || {}).record_cost;
     var execution = ((b.cost || {}).selection || {}).execution || b.execution;
     var rounds = (execution && execution.rounds) || [];
-    var evs = (rounds[0] && rounds[0].events) || [];
+    var round = rounds[0] || {};
+    var evs = round.events || [];
     var el = $('timeline');
     if (!evs.length) {
       el.innerHTML = '<div class="unknown-note">无事件（baseline 或接受分布未知：'
@@ -947,7 +950,8 @@
       $('tl-summary').textContent = '–';
       return;
     }
-    var total = evs[evs.length - 1].start_ms + evs[evs.length - 1].t_ms;
+    var total = round.t_round_ms;
+    var unpriced = evs.filter(function (e) { return e.t_ms == null; });
     var lanes = { draft: [], link: [], target: [], commit: [] };
     evs.forEach(function (e) { (lanes[e.role] || lanes.target).push(e); });
     var colors = { draft: '#0d9488', link: '#7c3aed', target: '#2563eb',
@@ -963,8 +967,10 @@
             'justify-content:center;color:#94a3b8;font-size:11px">（本部署无此轨事件）</div>';
         }
         lane.forEach(function (e) {
+          if (e.t_ms == null || !total) return;
+          var start = e.start_ms == null ? e.start_lower_bound_ms : e.start_ms;
           var l = Math.max(1.2, e.t_ms / total * 100);
-          var off = e.start_ms / total * 100;
+          var off = start / total * 100;
           html += '<div class="tl-seg" title="' + esc(e.event_id) + ' ← ' +
             esc((e.depends_on || []).join(',')) + '" style="position:absolute;left:' +
             off + '%;width:' + l + '%;background:' + colors[e.role] + '">' +
@@ -972,10 +978,17 @@
         });
         html += '</div></div>';
       });
+    if (unpriced.length) {
+      html += '<div class="unknown-note">' + unpriced.map(function (e) {
+        return '<span title="' + esc(e.reason || '') + '">' +
+          esc(e.stage) + '（未计价）</span>';
+      }).join(' · ') + '</div>';
+    }
     el.innerHTML = html;
     var en = val(b, 'M03_E_N');
-    $('tl-summary').textContent = (rc && rc.matched ? '记录条件对照 · ' : '') + 'T_round=' + fmt(total, 'ms', 3) +
-      '（串行：阶段和=墙钟）· E[N]=' + fmt(en, '', 2) + ' · 事件依赖可追溯（悬停查看）';
+    var basis = unpriced.length ? '已计价阶段下界 ' : '串行轮耗时 ';
+    $('tl-summary').textContent = (rc && rc.matched ? '记录条件对照 · ' : '') +
+      basis + fmt(total, 'ms', 3) + ' · E[N]=' + fmt(en, '', 2);
   }
 
   // ---------- evidence drawer ----------
@@ -1352,7 +1365,7 @@
   if (/[?&]testhook=1/.test(location.search)) {
     window.__wb = {
       state: state, currentScenario: currentScenario, syncControls: syncControls,
-      runCell: runCell, runMatrix: runMatrix, runSweep: runSweep,
+      doRun: doRun, runCell: runCell, runMatrix: runMatrix, runSweep: runSweep,
       renderBundle: renderBundle, renderInspector: renderInspector,
       renderMemory: renderMemory, drawRoofline: drawRoofline,
       classifyMem: classifyMem, aggOp: aggOp, bundleError: bundleError,

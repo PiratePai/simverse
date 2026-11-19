@@ -231,7 +231,7 @@ def plan_dflash(draft_ir, k_limit: Optional[int] = None,
                     FR.F_DFLASH_MSG),
     ]
     return MethodPlan(
-        method_id="dflash_v1", version="0.2",
+        method_id="dflash_v1", version="0.3",
         label=f"DFlash v1（并行块草稿 blk={blk}，单次前向提案）",
         source_pin=DFLASH_PIN,
         steps=[
@@ -247,6 +247,7 @@ def plan_dflash(draft_ir, k_limit: Optional[int] = None,
             MethodStep("hidden_extract", "target",
                        f"target_hidden 取 produced 前缀（{n_ctx_layers} 层拼接，offset+1）",
                        "produced×8 层"),
+            MethodStep("t2d", "link", "提交前缀的 hidden 状态 T→D", "E[N] token"),
         ],
         messages=msgs,
         en_formula=FR.F_EN_BLOCK, k_effective=k_eff, block_size=blk,

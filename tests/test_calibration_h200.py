@@ -153,7 +153,7 @@ def test_gap_policy_no_double_billing():
 
 def test_metrics_disclosure_and_result_kind():
     b = _run_archive(_scenario()).to_json()
-    m = b["metrics"]["M01_tpot_profile_calibrated"]
+    m = b["metrics"]["M01_tpot_selected"]
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert m["value"] == pytest.approx(
         cal["selected_ms"] + cal["collectives_ms"], rel=1e-9)
@@ -184,7 +184,7 @@ def test_domain_reject_tp8_all_fallback_with_reason():
     assert cal["selected_ms"] is None and cal["groups"] == []
     assert cal["fallback_ms"] == pytest.approx(cal["analytic_ms"])
     assert b["metrics"]["M01_tpot_analytical"]["value"] > 0
-    assert "M01_tpot_profile_calibrated" not in b["metrics"]
+    assert b["cost"]["selection"]["source"] == "analytic"
     chk = b["capability"]["checks"]["cost_profile_domain"]
     assert chk["status"] == "approximated"
 
@@ -260,7 +260,7 @@ def test_chain_draft_verify_mixed_coverage():
     blk = groups["attn_decode_block"]
     assert blk["source"] == "analytic" and "Q=" in blk["reason"]
     # 投机轮仍产出校准 TPOT（draft 解析 + verify 混合）
-    assert b["metrics"]["M01_tpot_profile_calibrated"]["value"] > 0
+    assert b["metrics"]["M01_tpot_selected"]["value"] > 0
 
 
 def test_cli_flag_applies_profile():
@@ -299,7 +299,7 @@ BF16_UI_SCENARIO = {   # workbench.js QUANT_PRESETS.bf16 档拼出的场景等�
 def test_archive_bf16_calibration_still_verified_offline():
     """离线归档通道：保留校准数值验证；不得经 API/CLI 产品入口运行。"""
     inproc = _run_archive(ScenarioV2.from_json(BF16_UI_SCENARIO)).to_json()
-    m = inproc["metrics"].get("M01_tpot_profile_calibrated")
+    m = inproc["metrics"].get("M01_tpot_selected")
     assert m is not None and m["value"] > 0
     assert inproc["capability"]["checks"]["cost_profile_domain"]["status"] == \
         "supported"

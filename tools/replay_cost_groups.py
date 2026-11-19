@@ -1,6 +1,5 @@
-"""Fixed pre-refactor numerical/ledger anchors; offline only, no device execution."""
+"""Check unchanged cost-group anchors and the attributed CUDA KV migration."""
 from __future__ import annotations
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -11,7 +10,19 @@ from simverse.model_ir import build_catalog
 from simverse.pipeline import run_v2
 from simverse.scenario import ScenarioV2
 
-OUT = ROOT / "docs/evidence/cost-groups/baseline.json"
+EVIDENCE = ROOT / "docs/evidence/cost-groups"
+CUDA_KV_CASES = ("qwen-default", "qwen-baseline", "qwen-mtp", "dt-serial", "dt-pipeline")
+CANONICAL_METRICS = {
+    "/M01_record_tpot": "/M01_tpot_selected",
+    "/M01_record_baseline": "/M01_baseline_selected",
+    "/M02_record_speedup": "/M02_speedup_selected",
+    "/M04_record_round_ms": "/M04_round_selected",
+    "/M01_tpot_profile_calibrated": "/M01_tpot_selected",
+    "/M01_tpot_baseline_calibrated": "/M01_baseline_selected",
+}
+UNPRICED_METRICS = {
+    "/M04_stage_breakdown_ms/commit_rewind", "/M04_stage_breakdown_ms/hidden_extract",
+}
 Q16 = dict(dense_w=16, expert_w=16, act=16, kv=16, state=32)
 
 def scenarios():
@@ -50,33 +61,42 @@ def snapshot():
                 else:
                     for k, v in obj.items(): visit(v, path + "/" + k)
         visit(bundle["metrics"])
-        # New canonical aliases are not pre-refactor anchors.
-        metrics = {k:v for k,v in metrics.items() if not any(x in k for x in (
-            "_selected", "M18_selected"))}
         result[name] = {"work": digest(bundle["work"]),
                         "memory": digest(bundle["cost"].get("memory", bundle.get("memory"))),
                         "metrics": metrics}
     return result
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--capture", action="store_true", help="Capture only from the reviewed original revision")
-    args = parser.parse_args()
-    current = snapshot()
-    if args.capture:
-        OUT.parent.mkdir(parents=True, exist_ok=True)
-        OUT.write_text(json.dumps({"source_commit":"75c048990b51dc73b7bfb8e6a88989225b61fae4",
-                                  "cases":current}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
-    else:
-        expected = json.loads(OUT.read_text(encoding="utf-8"))["cases"]
-        for name, old in expected.items():
-            new = current[name]
-            assert old["work"] == new["work"], (name, "work")
-            assert old["memory"] == new["memory"], (name, "memory")
-            for key, value in old["metrics"].items():
-                actual = new["metrics"].get(key)
-                assert actual == value or (value is not None and actual is not None and
-                    abs(actual - value) <= max(1e-10, abs(value) * 1e-12)), (name, key, value, actual)
-    print(f"{len(current)} scenarios: unchanged numerical/ledger anchors")
+def assert_value(name, key, expected, actual):
+    assert actual == expected or (expected is not None and actual is not None and
+        abs(actual - expected) <= max(1e-10, abs(expected) * 1e-12)), (
+            name, key, expected, actual)
 
-if __name__ == "__main__": main()
+
+def main():
+    current = snapshot()
+    old_cases = json.loads((EVIDENCE / "baseline.json").read_text(encoding="utf-8"))["cases"]
+    cuda = json.loads((EVIDENCE / "cuda-kv-replication.json").read_text(encoding="utf-8"))["cases"]
+    assert set(current) == set(old_cases)
+    assert set(cuda) == set(CUDA_KV_CASES)
+    for name, old in old_cases.items():
+        new = current[name]
+        if name in cuda:
+            anchor = cuda[name]
+            assert set(new["metrics"]) == set(anchor["metrics"]), name
+            metrics = anchor["metrics"]
+        else:
+            anchor = old
+            metrics = {
+                CANONICAL_METRICS.get(key, key): None if key in UNPRICED_METRICS else value
+                for key, value in old["metrics"].items()
+            }
+        assert anchor["work"] == new["work"], (name, "work")
+        assert anchor["memory"] == new["memory"], (name, "memory")
+        for key, value in metrics.items():
+            assert_value(name, key, value, new["metrics"][key])
+    print(f"{len(current)} scenarios: {len(cuda)} CUDA KV anchors, "
+          f"{len(current) - len(cuda)} original work/memory anchors")
+
+
+if __name__ == "__main__":
+    main()

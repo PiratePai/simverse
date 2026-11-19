@@ -429,8 +429,8 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                               plan=None,
                               engram_table_placement: str =
                               ENGRAM_PLACEMENT_CPU_OFFLOAD,
-                              quant_recipe: Optional[dict] = None,
-                              ) -> List[Allocation]:
+                              quant_recipe: Optional[dict] = None, *,
+                              replicate_full_kv: bool = False) -> List[Allocation]:
     """主模型每 rank 权重驻留（TP/EP 分片后口径；R01 统一配方）。
 
     embed/lm_head 词表行切 V/tp（VocabParallelEmbedding/ParallelLMHead）；
@@ -446,6 +446,8 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
       * embed/lm_head/final norm 未量化 → BF16 2B（fp8.py L174-203 返回
         None → 默认方法）。
     """
+    if plan is not None:
+        replicate_full_kv = plan.replicate_full_kv
     b_dense = quant["dense_w"] / 8
     b_expert = quant["expert_w"] / 8
     if quant_recipe is None:
@@ -470,7 +472,8 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
         dense_b = 0
         if layer.attn is not None:
             a = layer.attn
-            kv_rank = attention_shard_rule(a, tp).kv_heads_per_rank
+            kv_rank = attention_shard_rule(
+                a, tp, replicate_full_kv=replicate_full_kv).kv_heads_per_rank
             # q_proj（output_gated 输出 2×）列切；k/v 切或复制；o_proj 行切。
             # 权重字节 = 输出宽 × 输入宽 h（2026-11-10 修正：旧式漏乘 h，
             # attention 投影按输出宽单元素计，低估 h 倍）
@@ -675,11 +678,12 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
 
 def kv_allocations(model: ModelIR, quant: dict, batch: int, ctx: int,
                    role: str = "target", tp: int = 1,
-                   v41_kv_record: str = "fp8_ds_mla_sm90") -> List[Allocation]:
+                   v41_kv_record: str = "fp8_ds_mla_sm90", *,
+                   replicate_full_kv: bool = False) -> List[Allocation]:
     """KV/常数状态驻留（每请求；batch×ctx；per-rank 分片口径）。
 
-    GQA/SLIDING：KV 头按 plan 切分（kvh<tp 时每 rank 复制全量 = kv_rank
-    即 kvh，公式自然成立）。GDN 状态：v 头与 conv 通道按 tp 切分。
+    GQA/SLIDING 使用已选 KV 头分片和复制方案。GDN 状态的 v 头与
+    conv 通道按 tp 切分。
     """
     b_kv = quant["kv"] / 8
     b_state = quant.get("state", 32) / 8
@@ -723,7 +727,8 @@ def kv_allocations(model: ModelIR, quant: dict, batch: int, ctx: int,
         elems = 0
         for l in model.layers:
             if l.attn is not None:
-                kv_rank = attention_shard_rule(l.attn, tp).kv_heads_per_rank
+                kv_rank = attention_shard_rule(
+                    l.attn, tp, replicate_full_kv=replicate_full_kv).kv_heads_per_rank
                 elems += 2 * kv_rank * l.attn.head_dim
         allocs.append(Allocation(f"{role}-kv", "kv", role,
                                  int(elems * ctx * b_kv) * batch,
@@ -763,7 +768,8 @@ def _as_model(draft_ir) -> ModelIR:
 
 def draft_extra_allocations(draft_ir, quant: dict, tp: int,
                             role: str = "draft",
-                            ctx_kv_path: str = "unknown") -> List[Allocation]:
+                            ctx_kv_path: str = "unknown", *,
+                            replicate_full_kv: bool = False) -> List[Allocation]:
     """DFlash 草稿的块扩散专用对象（层权重另由 target_weight_allocations 计）。
 
     fc：ReplicatedLinear(len(layer_ids)·h → h)，每 rank 复制；
@@ -798,7 +804,8 @@ def draft_extra_allocations(draft_ir, quant: dict, tp: int,
         a = layer.attn
         if a is None:
             continue
-        kv_rank = attention_shard_rule(a, tp).kv_heads_per_rank
+        kv_rank = attention_shard_rule(
+                a, tp, replicate_full_kv=replicate_full_kv).kv_heads_per_rank
         fused_kv_elems += 2 * kv_rank * a.head_dim
         k_norm_elems += a.head_dim
     if k_norm_elems:
@@ -865,7 +872,8 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
                           batch: int, ctx: int, tp: int, block_size: int,
                           e_produced: float,
                           target_vocab_per_rank: int,
-                          ctx_kv_path: str = "unknown") -> List[Allocation]:
+                          ctx_kv_path: str = "unknown", *,
+                          replicate_full_kv: bool = False) -> List[Allocation]:
     """结构化临时缓冲（R02b；尺寸来自 pinned 形状，非运行时测量）。
 
     phase:draft（草稿前向，一轮内与 verify 串行；R07a 2026-11-12 起
@@ -914,7 +922,7 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
         for layer in draft_ir.layers:
             if layer.attn is not None:
                 a = layer.attn
-                shard = attention_shard_rule(a, tp)
+                shard = attention_shard_rule(a, tp, replicate_full_kv=replicate_full_kv)
                 kv_rank = shard.kv_heads_per_rank
                 q_rank = shard.heads_per_rank
                 d_head = a.head_dim
@@ -1074,7 +1082,8 @@ def add_target_allocations(
             a.consumers = ["target"]
             rank_mem.add(a)
     for a in kv_allocations(model, quant, batch, ctx, role="target", tp=tp,
-                            v41_kv_record=v41_kv_record):
+                            v41_kv_record=v41_kv_record,
+                            replicate_full_kv=plan.replicate_full_kv if plan is not None else False):
         a.consumers = ["target"]
         rank_mem.add(a)
 
@@ -1115,12 +1124,13 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
         engram_tokens=engram_tokens, v41_kv_record=v41_kv_record,
         device_sms=device_sms)
     draft_q = {**quant, **(draft_quant or {})}
+    replicate_full_kv = plan.replicate_full_kv if plan is not None else False
     if draft_ir is not None:
         path = require_ctx_kv_path(draft_ctx_kv_path)
         # 草稿层权重：同 tp 切分（gqa 家族路径）
         draft_model = _as_model(draft_ir)
         for a in target_weight_allocations(draft_model, draft_q, tp,
-                                           role="draft"):
+                                           role="draft", replicate_full_kv=replicate_full_kv):
             if "embed" in a.alloc_id or "lm_head" in a.alloc_id:
                 # 草稿共享 target 的词表行切对象：登记引用（零字节），
                 # 并把 consumer 并入 target 物理对象（去重键一致）
@@ -1135,11 +1145,12 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
             a.consumers = ["draft"]
             rank_mem.add(a)
         for a in draft_extra_allocations(draft_ir, draft_q, tp,
-                                         ctx_kv_path=path):
+                                         ctx_kv_path=path,
+                                            replicate_full_kv=replicate_full_kv):
             a.consumers = ["draft"]
             rank_mem.add(a)
         for a in kv_allocations(draft_model, draft_q, draft_batch, ctx,
-                                role="draft", tp=tp):
+                                role="draft", tp=tp, replicate_full_kv=replicate_full_kv):
             a.consumers = ["draft"]
             rank_mem.add(a)
         if with_transients and block_size:
@@ -1147,7 +1158,8 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
             for a in transient_allocations(model, draft_ir, quant, draft_quant,
                                            batch, ctx, tp, block_size,
                                            e_produced, vocab_r,
-                                           ctx_kv_path=path):
+                                           ctx_kv_path=path,
+                                            replicate_full_kv=replicate_full_kv):
                 rank_mem.add(a)
     if mtp_model is not None:
         # R23：原生 MTP 头（Qwen3.6 mtp 方法）——同 TP/EP 组、同
@@ -1155,7 +1167,8 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
         # （load_eagle_model；qwen3_5_mtp.py L303-320 只消费 mtp.*+
         # embed_tokens+lm_head，无独立副本）。
         for a in target_weight_allocations(mtp_model, draft_q, tp,
-                                           role="draft", ep=ep, rank=rank):
+                                           role="draft", ep=ep, rank=rank,
+                                           replicate_full_kv=replicate_full_kv):
             if a.alloc_id == "draft-w-final-norm":
                 # mtp.norm 已归 mtp_extra_allocations 的 3 个 norm，避免
                 # 伪模型通用 final norm 再记一份。
@@ -1176,7 +1189,7 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
             a.consumers = ["draft"]
             rank_mem.add(a)
         for a in kv_allocations(mtp_model, draft_q, draft_batch, ctx,
-                                role="draft", tp=tp):
+                                role="draft", tp=tp, replicate_full_kv=replicate_full_kv):
             a.consumers = ["draft"]
             rank_mem.add(a)
         if with_transients:

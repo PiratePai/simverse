@@ -120,7 +120,7 @@ def test_domain_reject_tp1_with_reason():
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("TP" in r for r in cal["reasons"])
-    assert "M01_tpot_profile_calibrated" not in b["metrics"]
+    assert b["cost"]["selection"]["source"] == "analytic"
 
 
 def test_domain_reject_precision():
@@ -182,7 +182,7 @@ def test_tp2_also_in_domain():
     b, cal = _stage_cal(2)
     assert cal["domain_ok"]
     assert cal["coverage_rows"][0] > 0
-    m = b["metrics"]["M01_tpot_profile_calibrated"]
+    m = b["metrics"]["M01_tpot_selected"]
     assert m["value"] > 0 and m["result_kind"] == "measured-composite"
 
 

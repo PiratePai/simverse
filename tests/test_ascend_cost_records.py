@@ -157,15 +157,16 @@ def test_pipeline_preserves_analytical_counts_memory_and_event_causality():
     assert conditional["work"] == plain["work"]
     assert conditional["cost"]["memory"] == plain["cost"]["memory"]
     assert conditional["metrics"]["M01_tpot_analytical"] == plain["metrics"]["M01_tpot_analytical"]
-    metric = conditional["metrics"]["M01_record_tpot"]
+    metric = conditional["metrics"]["M01_tpot_selected"]
     assert metric["result_kind"] == "analytical-estimate"
     assert metric["support"] == "approximated" and metric["feasibility"] == "unknown"
     assert metric["value"] != plain["metrics"]["M01_tpot_analytical"]["value"]
     report = conditional["cost"]["record_cost"]
     assert report["matched"] == 172
     assert all(e["kind"] == "communication" for e in report["entries"] if e["record_refs"])
-    stages = report["selected_execution"]["rounds"][0]
-    assert conditional["metrics"]["M04_record_round_ms"]["value"] == pytest.approx(stages["t_round_ms"])
+    assert "selected_execution" not in report
+    stages = conditional["cost"]["selection"]["execution"]["rounds"][0]
+    assert conditional["metrics"]["M04_round_selected"]["value"] == pytest.approx(stages["t_round_ms"])
     for stage in report["stages"].values():
         assert stage["selected_ms"] == pytest.approx(stage["record_ms"] + stage["fallback_ms"])
     assert conditional["manifest"]["run_id"] != plain["manifest"]["run_id"]
@@ -189,7 +190,7 @@ def test_plan_is_derived_from_unique_uncovered_cases_and_has_provenance_prerequi
     spec = importlib.util.spec_from_file_location("replay_records", ROOT / "tools/replay_ascend_record_costs.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.replay() == json.loads((ROOT / "docs/evidence/ascend-record-costs/coverage-plan.json").read_text(encoding="utf-8"))
+    assert module.replay() == module.expected_coverage_plan()
     report = run_v2(scenario("ascend-r28-gemm", tp=8)).cost["record_cost"]
     assert report["matched"] == 201
     assert report["deployment_ranking_eligible"] is False
@@ -231,12 +232,12 @@ def test_api_cli_json_csv_trace_and_coverage_are_consistent(tmp_path):
     assert hit["cost_source"] == "archived-observation-assumption"
     assert hit["fallback_reason"] == ""
     assert next(row for row in rows if row["op"] == "gdn_recurrence")["fallback_reason"]
-    assert "M01_record_tpot" in html.read_text(encoding="utf-8")
+    assert "M01_tpot_selected" in html.read_text(encoding="utf-8")
     assert "记录成本覆盖" in html.read_text(encoding="utf-8")
     from simverse.experiments.sweep_v2 import sweep_1d
     point = sweep_1d(sc, "workload.batch", [1])["points"][0]
-    assert point["metric_key"] == "M01_tpot_selected"  # canonical selection; legacy alias remains in the bundle
-    assert point["tpot_ms"] == expected["metrics"]["M01_record_tpot"]["value"]
+    assert point["metric_key"] == "M01_tpot_selected"
+    assert point["tpot_ms"] == expected["metrics"]["M01_tpot_selected"]["value"]
 
 
 def test_ep_variable_splits_and_mtp_explicit_gather_are_different_domains():

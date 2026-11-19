@@ -79,11 +79,12 @@ def _rope_row(toks: int, heads: int, width: int, rotary: int, b_act: float):
 
 
 def gqa_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
-                   h: int, quant: dict, tp: int = 1) -> List[OpRow]:
+                   h: int, quant: dict, tp: int = 1, *,
+                   replicate_full_kv: bool = False) -> List[OpRow]:
     from ..lowering.parallel import attention_shard_rule
 
     attn = layer.attn
-    shard = attention_shard_rule(attn, tp)
+    shard = attention_shard_rule(attn, tp, replicate_full_kv=replicate_full_kv)
     b_w, b_a, b_kv = quant["dense_w"] / 8, quant["act"] / 8, quant["kv"] / 8
     heads_c = shard.heads_per_rank
     kv_heads_c = shard.kv_heads_per_rank
@@ -98,7 +99,7 @@ def gqa_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
         shape=f"[{T},{ic}]@[{ic},{oc}]{note}")
     # q_proj（output_gated: 输出 2×，gate 与 query 同投影）；列切 /tp
     rows.append(gemm("q_proj", h, attn.q_out // tp))
-    # k/v_proj：kvh≥tp 列切 kvh/tp；kvh<tp 复制全量（每 rank 同字节）
+    # k/v_proj：列切或按已选 KV 头复制方案计每 rank 字节。
     kv_note = "（KV 头复制）" if kv_replicated else ""
     rows.append(gemm("k_proj", h, kv_heads_c * attn.head_dim, kv_note))
     rows.append(gemm("v_proj", h, kv_heads_c * attn.head_dim, kv_note))
@@ -1042,6 +1043,7 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     # 每层型（compress_ratio 去重值）每步一次（记在各型首层）
     prev_ratio = object()          # 哨兵：首个 CSA2 层必为其型首层
     first_csa2 = True
+    replicate_full_kv = plan.replicate_full_kv if plan is not None else False
     for layer in model.layers:
         li = layer.index
         type_first = False
@@ -1053,7 +1055,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         if layer.kind == MLA_CSA2:
             first_csa2 = False
         if layer.kind in (FULL, SLIDING) and layer.attn:
-            rows += gqa_layer_rows(stage, li, layer, B, S, Q, h, quant, tp)
+            rows += gqa_layer_rows(stage, li, layer, B, S, Q, h, quant, tp,
+                                   replicate_full_kv=replicate_full_kv)
         elif layer.kind == LINEAR and layer.linear:
             rows += gdn_layer_rows(stage, li, layer, B, Q, h, quant, prefill, tp)
         elif layer.kind == MLA and layer.mla:

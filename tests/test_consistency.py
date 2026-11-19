@@ -1,8 +1,4 @@
-"""三方一致性验收：Web API / CLI / 导出文件 消费同一入口，数字逐项相等。
-
-验收口径（用户验收条款）：Web、CLI、导出结果一致 —— RunResult 的
-metrics/comparisons/digests 在三条通道间精确相等（JSON 规范化后）。
-"""
+"""v0.1 离线重放、历史快照与导出一致性。"""
 import csv
 import hashlib
 import json
@@ -61,7 +57,7 @@ def cli_run(tmp_path_factory):
     """一次 CLI run 的落盘结果：后续导出测试复用同一份 RunResult。"""
     out = tmp_path_factory.mktemp("cli") / "run.json"
     proc = subprocess.run(
-        [sys.executable, "-m", "simverse.cli", "run", str(FIXED), "-o", str(out)],
+        [sys.executable, "-m", "simverse.cli", "archive", "run", str(FIXED), "-o", str(out)],
         cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
         env=_cli_env())
     assert proc.returncode == 0, proc.stderr
@@ -74,17 +70,11 @@ def cli_result(cli_run):
 
 
 @pytest.fixture(scope="module")
-def web_result():
-    from simverse.webapp import app
-    client = app.test_client()
-    # 通道 1：场景文件名（重放路径）
-    r1 = client.post("/api/run", json={"scenario_file": "v41_flash_dt_verification"})
-    assert r1.status_code == 200
-    # 通道 2：场景 JSON 内联（同一场景 → 同一结果）
-    r2 = client.post("/api/run", json=json.loads(FIXED.read_text(encoding="utf-8")))
-    assert r2.status_code == 200
-    assert r1.get_json() == r2.get_json()
-    return r1.get_json()
+def archive_result():
+    from simverse.contracts.legacy import ScenarioSpec
+    from simverse.engine import run
+    data = json.loads(FIXED.read_text(encoding="utf-8"))
+    return run(ScenarioSpec.from_json(data)).to_json()
 
 
 def _norm(o):
@@ -97,8 +87,8 @@ def _norm(o):
     return o
 
 
-def test_web_equals_cli(web_result, cli_result):
-    a, b = _norm(web_result), _norm(cli_result)
+def test_archive_engine_equals_cli(archive_result, cli_result):
+    a, b = _norm(archive_result), _norm(cli_result)
     assert a["digests"] == b["digests"]
     assert a["metrics"] == b["metrics"]
     assert a["comparisons"] == b["comparisons"]
@@ -119,7 +109,7 @@ def test_csv_export_matches_runresult(cli_run, tmp_path):
     """
     csv_path = tmp_path / "ops.csv"
     proc = subprocess.run(
-        [sys.executable, "-m", "simverse.cli", "export",
+        [sys.executable, "-m", "simverse.cli", "archive", "export",
          str(cli_run["path"]), "--csv", str(csv_path)],
         cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
         env=_cli_env())
@@ -136,7 +126,7 @@ def test_export_survives_non_utf8_stdout(cli_run, tmp_path):
     """
     csv_path = tmp_path / "ops_cp1252.csv"
     proc = subprocess.run(
-        [sys.executable, "-m", "simverse.cli", "export",
+        [sys.executable, "-m", "simverse.cli", "archive", "export",
          str(cli_run["path"]), "--csv", str(csv_path)],
         cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8",
         errors="replace", env=_cli_env("cp1252"))

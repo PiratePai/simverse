@@ -49,7 +49,7 @@ def test_dflash_plan_semantics_bound_to_pinned_source():
                              64, draft_ir=d)
     assert plan.source_pin.startswith("z-lab/dflash@07ebd93")
     assert [s.step_id for s in plan.steps] == ["draft_block", "d2t", "verify_block",
-                                               "commit_rewind", "hidden_extract"]
+                                               "commit_rewind", "hidden_extract", "t2d"]
     assert plan.k_effective == 15 and plan.block_size == 16
     msgs = {m.direction: m for m in plan.messages}
     assert "E[N]·8·2048" in msgs["T->D"].bytes_per_round_expr
@@ -104,8 +104,13 @@ def test_required_scenario_qwen36_dflash_closed_loop():
     base = m["M01_tpot_baseline"].value
     assert tpot > 0 and base > tpot          # 该假设下投机盈利（解析估算）
     assert m["M04_round_ms"].value == pytest.approx(
-        sum(v.value for v in m["M04_stage_breakdown_ms"].values()), rel=1e-9)
-    # 串行口径：轮墙钟 = 阶段和（V07 解析/事件相等的静态部分）
+        sum(v.value for v in m["M04_stage_breakdown_ms"].values() if v.value is not None),
+        rel=1e-9)
+    for stage in ("commit_rewind", "hidden_extract"):
+        metric = m["M04_stage_breakdown_ms"][stage]
+        assert metric.value is None and metric.reason and metric.support.value == "unknown"
+    assert "下界" in m["M04_round_ms"].reason
+    # 串行下界只累加已计价阶段。
     assert m["M04_round_ms"].value / m["M03_E_N"].value == pytest.approx(tpot, rel=1e-9)
 
 

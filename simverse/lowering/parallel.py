@@ -19,7 +19,7 @@ simverse/validation/registry.py 的 ev-vllm-parallel-recipe）：
     dense MLP 配方 inter/tp（需 shared_inter % tp==0，否则 L127 raise）；
     shared_expert_gate = ReplicatedLinear(h,1)（L205）。
   * full attention（qwen3_next.py Qwen3NextAttention L302-315）：
-    heads/tp；kvh ≥ tp → kvh/tp 切分（要求 kvh%tp==0），kvh < tp → 整组
+    heads/tp；kvh ≥ tp → kvh/tp 切分（要求 kvh%tp==0），kvh < tp → 单头跨 rank
     复制（要求 tp%kvh==0）；o_proj 行切。
   * GDN 线性注意力（mamba/gdn/qwen_gdn_linear_attn.py L753-838）：
     in_proj_qkvz 列切（(2·key_dim+2·value_dim)/tp）、in_proj_ba 列切
@@ -69,7 +69,7 @@ class AttnShardRule:
     """GQA/SLIDING 层 per-rank 注意力几何。"""
     heads_per_rank: int
     kv_heads_per_rank: int
-    kv_replicated: bool         # kvh < tp → 每 rank 全量 KV 头
+    kv_replicated: bool         # kvh < tp → 每个 KV 头由多个 rank 持有
 
     @property
     def kv_note(self) -> str:
@@ -123,7 +123,8 @@ def _gdn_rule(g: LinearAttnIR, tp: int) -> GDNShardRule:
         conv_dim=g.qkv_out // tp)
 
 
-def attention_shard_rule(a: AttentionIR, tp: int) -> AttnShardRule:
+def attention_shard_rule(a: AttentionIR, tp: int, *,
+                         replicate_full_kv: bool = False) -> AttnShardRule:
     """Resolve per-rank attention geometry for an engine tensor-parallel group."""
     if a.heads % tp:
         raise ValueError(f"TP{tp} 不整除 Q 头数 {a.heads}")
@@ -133,9 +134,9 @@ def attention_shard_rule(a: AttentionIR, tp: int) -> AttnShardRule:
         return AttnShardRule(a.heads // tp, a.kv_heads // tp, False)
     if tp % a.kv_heads:
         raise ValueError(f"TP{tp} 不整除 KV 头组 {a.kv_heads}（复制约束）")
-    # 保留现有账本的全量头口径。固定 vLLM 的 QKVParallelLinear
-    # 按单头跨 rank 复制，差异见 docs/IMPLEMENTATION_STATUS.md。
-    return AttnShardRule(a.heads // tp, a.kv_heads, True)
+    # vLLM QKVParallelLinear 在 TP > Hkv 时每 rank 持一个 KV 头。
+    # 非 CUDA 条件档和历史模型可保留其全量复制假设。
+    return AttnShardRule(a.heads // tp, a.kv_heads if replicate_full_kv else 1, True)
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,7 @@ class ParallelPlan:
     implementation_id: str = RECIPE_ID
     source_pin: str = VLLM_PARALLEL_PIN
     notes: Tuple[str, ...] = ()
+    replicate_full_kv: bool = False
 
     @property
     def valid(self) -> bool:
@@ -163,7 +165,7 @@ class ParallelPlan:
     def attn_rule(self, layer: LayerIR) -> Optional[AttnShardRule]:
         if layer.attn is None:
             return None
-        return attention_shard_rule(layer.attn, self.tp)
+        return attention_shard_rule(layer.attn, self.tp, replicate_full_kv=self.replicate_full_kv)
 
     def gdn_rule(self, layer: LayerIR) -> Optional[GDNShardRule]:
         if layer.linear is None:
@@ -199,7 +201,8 @@ class ParallelPlan:
 
 
 def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
-                      draft: Optional[DraftIR] = None) -> ParallelPlan:
+                      draft: Optional[DraftIR] = None, *,
+                      replicate_full_kv: bool = False) -> ParallelPlan:
     """判定 (tp, ep) 组合对 model（及可选 colocated draft）是否合法。
 
     返回 ParallelPlan；非法时不抛错（plan.errors 携带原因），由调用方
@@ -305,7 +308,7 @@ def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
         tp=tp, ep=ep, model_id=model.id, errors=tuple(errors),
         moe_ep_enabled=moe_ep and not errors,
         moe_layer_map=tuple(moe_rules), vocab_per_rank=vocab_per_rank,
-        notes=tuple(notes))
+        notes=tuple(notes), replicate_full_kv=replicate_full_kv)
 
 
 def plan_collective_recipe(plan: ParallelPlan, layer: LayerIR) -> str:

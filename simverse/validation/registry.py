@@ -395,7 +395,7 @@ _PINNED_ASSETS = [
      "EP 关 inter/tp 切分（fused_moe/config.py L1402）、EP 开整专家分置"
      "（FusedMoEParallelConfig.make L1157-1288 + expert_map_manager 余数规则）、"
      "router GateLinear replicated、shared expert TP 切分、attention KV 头 "
-     "kvh<tp 复制（qwen3_next.py L302-315）、GDN in_proj_qkvz/ba/conv 列切与"
+     "kvh<tp 单头跨 rank 复制（qwen3_next.py L302-315）、GDN in_proj_qkvz/ba/conv 列切与"
      "状态切分（qwen_gdn_linear_attn.py + mamba_utils state_shape）、词表行切、"
      "DFlash 草稿同 TP 组并共享 target embed/lm_head 模块对象"
      "（spec_decode/dflash/utils.py load_dflash_model）",

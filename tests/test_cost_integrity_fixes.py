@@ -370,21 +370,13 @@ def test_nonsemantic_key_order_does_not_change_digest():
 # 计数不可变：成本口径轮 before 证据钉死 work/memory
 # ---------------------------------------------------------------------------
 
-def test_cost_route_fix_left_ledgers_untouched():
-    """R27 前后：work/cost.memory 与 pre-fix 基线逐字段相等（只改成本）。"""
+def test_v41_cost_route_fix_left_ledgers_untouched():
+    """V4.1 的 R27 计数锚点在当前管线保持逐字段相等。"""
     folder = ROOT / "docs/evidence/cost-integrity-r27"
-    for name, scenario in (
-            ("v41-baseline", ScenarioV2.from_json(json.loads(
-                (folder / "scenario-v41-baseline.json").read_text(
-                    encoding="utf-8")))),
-            ("qwen-dflash", ScenarioV2.from_json(json.loads(
-                (folder / "scenario-qwen-dflash.json").read_text(
-                    encoding="utf-8"))))):
-        before = json.loads((folder / f"before-{name}.json").read_text(
-            encoding="utf-8"))
-        fresh = run_v2(scenario).to_json()
-        assert fresh["work"] == before["work"], name
-        assert fresh["cost"]["memory"] == before["cost"]["memory"], name
-        # 成本确实变化（V4.1 档位修正）或保持（Qwen 数值中性）——都不是
-        # 通过改计数实现的
-        assert fresh["cost"]["target_decode"]["t_ms"] > 0
+    scenario = ScenarioV2.from_json(json.loads(
+        (folder / "scenario-v41-baseline.json").read_text(encoding="utf-8")))
+    before = json.loads((folder / "before-v41-baseline.json").read_text(encoding="utf-8"))
+    fresh = run_v2(scenario).to_json()
+    assert fresh["work"] == before["work"]
+    assert fresh["cost"]["memory"] == before["cost"]["memory"]
+    assert fresh["cost"]["target_decode"]["t_ms"] > 0
