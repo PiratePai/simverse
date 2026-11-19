@@ -19,11 +19,12 @@ R10e 指标口径规则（修复前：显式请求 ``M01_tpot_analytical`` 仍�
 """
 from __future__ import annotations
 
-from dataclasses import replace
+from math import isfinite
 from typing import Any, Dict, List, Optional
 
 from ..pipeline import run_v2
 from ..scenario import ScenarioV2
+from .compare import metric_compatibility
 
 # 候选指标 → 同口径基线指标（speedup 的分子分母必须同口径）
 BASELINE_PAIR = {
@@ -77,49 +78,61 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
         bundle = run_v2(sc)
         record = bundle.cost.get("record_cost") or {}
         selection = bundle.cost.get("selection") or {}
-        # 口径选择：默认=选用成本（缺失回退解析并明示）；显式=严格该口径
-        chosen_key = metric_key
+        metrics = bundle.metrics
+        chosen_key = metric_key or DEFAULT_METRIC
         fallback_reason = None
-        if chosen_key is None:
-            if bundle.metrics.get(DEFAULT_METRIC) is not None:
-                chosen_key = DEFAULT_METRIC
-            elif bundle.metrics.get(FALLBACK_METRIC) is not None:
+        if metric_key is None:
+            missing = [key for key in (DEFAULT_METRIC, BASELINE_PAIR[DEFAULT_METRIC])
+                       if metrics.get(key) is None]
+            if missing and all(metrics.get(key) is not None for key in
+                               (FALLBACK_METRIC, BASELINE_PAIR[FALLBACK_METRIC])):
                 chosen_key = FALLBACK_METRIC
-                fallback_reason = (f"缺选用指标 {DEFAULT_METRIC}（旧结果/未走成本"
-                                   "选择路径），回退解析口径")
+                fallback_reason = f"缺选用指标 {', '.join(missing)}，整对回退解析口径"
                 sweep_fallback = fallback_reason
-            else:
-                chosen_key = FALLBACK_METRIC  # 两者皆缺：保留空值与原因
-        met = bundle.metrics.get(chosen_key)
+        met = metrics.get(chosen_key)
         baseline_key = BASELINE_PAIR[chosen_key]
-        baseline = bundle.metrics.get(baseline_key)
-        if baseline is None and chosen_key == DEFAULT_METRIC and \
-                bundle.metrics.get(BASELINE_PAIR[FALLBACK_METRIC]) is not None:
-            # 选用候选存在但选用基线缺失（旧结果）：基线回退解析并明示
-            baseline = bundle.metrics[BASELINE_PAIR[FALLBACK_METRIC]]
-            fallback_reason = (f"缺 {baseline_key}，基线回退解析口径"
-                               + ("；" + fallback_reason if fallback_reason else ""))
-            sweep_fallback = fallback_reason
+        baseline = metrics.get(baseline_key)
+        source = ("analytic" if chosen_key == FALLBACK_METRIC
+                  else selection.get("source", "unknown"))
+        source_id = selection.get("source_id") if source != "analytic" else None
+        value = met.value if met is not None else None
+        base_value = baseline.value if baseline is not None else None
+        reason = met.reason if met is not None else f"指标缺失：{chosen_key}"
+        speedup = None
+        if baseline is None:
+            reason = reason or f"指标缺失：{baseline_key}"
+        elif base_value is None:
+            reason = reason or baseline.reason
+        elif value is not None:
+            compatible = metric_compatibility(baseline, met)
+            if not compatible["compatible"]:
+                reason = compatible["reason"]
+            elif value > 0 and base_value > 0 and bundle.manifest.status == "completed":
+                speedup = base_value / value
+            else:
+                reason = reason or "扫描点未完成或耗时不为正"
         if chosen_key not in used_keys:
             used_keys.append(chosen_key)
         points.append({
             "value": v,
             "run_id": bundle.manifest.run_id,
             "status": bundle.manifest.status,
-            "tpot_ms": met.value if met else None,
-            "reason": met.reason if met else f"指标缺失：{chosen_key}",
+            "tpot_ms": value,
+            "reason": reason,
             "metric_key": chosen_key,
             "baseline_metric_key": baseline_key,
-            "metric_source": selection.get("source") or "unknown",
+            "metric_source": source,
+            "metric_source_id": source_id,
+            "metric_time_basis": met.scope.time_basis if met is not None else None,
+            "metric_result_kind": met.result_kind.value if met is not None else None,
             "record_coverage": {"matched": record.get("matched", 0),
                                 "total": record.get("total", 0)},
-            "baseline_tpot_ms": baseline.value if baseline else None,
-            "speedup": (baseline.value / met.value)
-            if (met and met.value and baseline and baseline.value) else None,
+            "baseline_tpot_ms": base_value,
+            "speedup": speedup,
             "fallback_reason": fallback_reason,
         })
     # 扫描级元数据反映实际使用口径（主口径=扫描序首个出现；混用时另列全表）
-    primary = used_keys[0] if used_keys else DEFAULT_METRIC
+    primary = used_keys[0] if used_keys else (metric_key or DEFAULT_METRIC)
     out: Dict[str, Any] = {
         "schema_version": "0.2", "field": field_path,
         "base_digest": base.scenario_digest(),
@@ -135,34 +148,26 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
 
 
 def find_crossover(scan: dict) -> Optional[float]:
-    """speedup=1 交点（保留单值接口；R10e 确定性规则）。
-
-    按原始扫描顺序处理，只对**相邻**且口径可比的点插值：
-      * 无效点（speedup 缺失/失败）截断区间——不跨未知区间插值；
-      * 口径不可比（相邻点 metric_key 不同）同样截断；
-      * 扫描顺序上第一个恰好等于 1 的点直接返回其值（连续等于 1 取首个）；
-      * 否则第一个相邻符号翻转区间线性插值；多个交点取扫描序首个；
-      * 无交点返回 None（不造数）。
-    """
-    points = scan.get("points") or []
-    xs: List[float] = []
-    ys: List[Optional[float]] = []
-    keys: List[Any] = []
-    for p in points:
-        xs.append(float(p["value"]))
-        ys.append(p.get("speedup"))
-        keys.append(p.get("metric_key"))
-    n = len(xs)
-    for i in range(n):
-        if ys[i] is not None and ys[i] == 1.0:
-            return xs[i]
-        if i == 0 or ys[i - 1] is None or ys[i] is None:
+    """返回扫描顺序中第一个已知交点或相邻可比点间的插值。"""
+    basis_fields = ("metric_key", "baseline_metric_key", "metric_source",
+                    "metric_source_id", "metric_time_basis", "metric_result_kind")
+    previous = None
+    for point in scan.get("points") or []:
+        speedup = point.get("speedup")
+        if (point.get("status", "completed") != "completed"
+                or speedup is None or not isfinite(speedup)):
+            previous = None
             continue
-        if keys[i - 1] != keys[i]:
-            continue  # 口径不可比：截断
-        f0, f1 = ys[i - 1] - 1.0, ys[i] - 1.0
-        if f0 * f1 < 0:
-            return xs[i - 1] + f0 / (f0 - f1) * (xs[i] - xs[i - 1])
+        value = float(point["value"])
+        basis = tuple(point.get(field) for field in basis_fields)
+        delta = speedup - 1.0
+        if delta == 0:
+            return value
+        if previous is not None:
+            prev_value, prev_delta, prev_basis = previous
+            if prev_basis == basis and prev_delta * delta < 0:
+                return prev_value + prev_delta / (prev_delta - delta) * (value - prev_value)
+        previous = value, delta, basis
     return None
 
 

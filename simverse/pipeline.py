@@ -25,7 +25,7 @@ from .methods import build_method_plan, acceptance_summary
 from .methods.plans import UNSUPPORTED
 from .model_ir import build_catalog
 from .validation import code_revision
-from .scenario import ScenarioV2
+from .scenario import ScenarioInputError, ScenarioV2
 
 _PROFILE_EVIDENCE = {
     "h200-qwen3-30b-a3b-tiny-op-v1": "ev-h200-tiny-distill",
@@ -105,7 +105,8 @@ def _device_snapshot(dep) -> dict:
     }
 
 
-def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
+def _device_budget(device_id: str, budget_input=None, *,
+                   path: str = "$.deployment.budget") -> DeviceBudget:
     """设备预算：标称容量 + 场景预算输入（R03a；缺省 unknown 不套标称）。"""
     d = DEVICES[device_id]
     b = DeviceBudget(device_id, int(d.mem_capacity), None,
@@ -118,7 +119,8 @@ def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
         b.extra_overhead_bytes = budget_input.extra_overhead_bytes
         b.overhead_source = budget_input.overhead_source
         if b.allocatable_bytes is not None and b.allocatable_bytes > b.nominal_bytes:
-            raise ValueError(
+            raise ScenarioInputError(
+                f"{path}.allocatable_bytes",
                 f"allocatable_bytes {b.allocatable_bytes} > 标称容量 "
                 f"{b.nominal_bytes}（{device_id}）：非法输入")
     return b
@@ -163,7 +165,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     # ---- 模型解析 + 能力检查 ----
     model = cat["models"].get(scenario.model_id)
     if model is None:
-        raise ValueError(f"未知模型 {scenario.model_id}")
+        raise ScenarioInputError("$.model_id", f"未知模型 {scenario.model_id}")
     cap.add("model_registered", "supported", model.id)
     if not model.structure_complete:
         cap.add("model_structure_complete", "unsupported",
@@ -941,7 +943,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
         if draft_ir is not None and dep.mode in ("dt_serial", "dt_pipeline_sim"):
             # 草稿独立设备 TP1：无共享对象配方（vLLM 配方为同组共享，
             # 独立组需全量 embed/lm_head 副本——服务栈未见证据，如实登记）
-            db = _device_budget(dep.draft_device, dep.draft_budget)
+            db = _device_budget(dep.draft_device, dep.draft_budget,
+                                path="$.deployment.draft_budget")
             drm = RM("draft-r0", dep.draft_device, db)
             from .lowering.memory import _as_model, draft_extra_allocations
             dm = _as_model(draft_ir)

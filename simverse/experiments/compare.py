@@ -135,12 +135,11 @@ def compare_runs(baseline_bundle: Any, candidate_bundles: List[Any],
         cand_scenario = getattr(cand, "scenario_snapshot", None) or {}
         reasons = eligibility_issues(cand.capability.get("checks", {}),
                                      cand_scenario)
-        elig = not reasons
+        if base_elig_reasons:
+            reasons.append("基线证据未通过：" + "；".join(base_elig_reasons))
         row: Dict[str, Any] = {
             "run_id": cand.manifest.run_id,
             "scenario": cand.scenario_snapshot.get("name"),
-            "eligible": elig,
-            "ineligible_reason": ("；".join(reasons) if reasons else None),
             "objectives": {},
             "resource_delta": _resource_delta(baseline_bundle, cand),
         }
@@ -153,6 +152,10 @@ def compare_runs(baseline_bundle: Any, candidate_bundles: List[Any],
             val_c = cm.value if cm else None
             val_b = bm.value if bm else None
             compat = metric_compatibility(bm, cm)
+            if not compat["compatible"]:
+                reasons.append(f"{obj.metric_id}：{compat['reason']}")
+            elif val_c is None or val_b is None:
+                reasons.append(f"{obj.metric_id}：{(cm.reason if val_c is None else bm.reason) or '指标值未知'}")
             delta = (val_c - val_b) if (val_c is not None and val_b is not None
                                         and compat["compatible"]) else None
             row["objectives"][obj.metric_id] = {
@@ -164,6 +167,8 @@ def compare_runs(baseline_bundle: Any, candidate_bundles: List[Any],
                 # 旧行为在口径不匹配时仍给 delta（混口径差值），已修复。
                 "compatibility": compat,
             }
+        row["eligible"] = not reasons
+        row["ineligible_reason"] = "；".join(reasons) if reasons else None
         rows.append(row)
     return {
         "schema_version": "0.2",

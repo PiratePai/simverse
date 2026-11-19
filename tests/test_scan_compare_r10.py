@@ -222,7 +222,8 @@ def test_r10e_crossover_equality_wins_before_later_crossing():
 # ---------------------------------------------------------------------------
 
 def _full_supported_checks(extra=None, memory_status="supported",
-                           memory_reason="feasible；预算 measured"):
+                           memory_reason="feasible；预算 measured",
+                           memory_id="memory_colocated_r0"):
     checks = {
         "model_structure_complete": ("supported", "完备"),
         "model_config_coverage": ("supported", "完备"),
@@ -231,7 +232,7 @@ def _full_supported_checks(extra=None, memory_status="supported",
         "model_gpu_measurement": ("supported", "model-measured"),
         "deployment_ranking_evidence": ("supported", "齐全"),
         "parallel_valid": ("supported", "TP8/EP1"),
-        "memory_colocated_r0": (memory_status, memory_reason),
+        memory_id: (memory_status, memory_reason),
     }
     if extra:
         checks.update(extra)
@@ -272,7 +273,7 @@ def test_r10f_single_required_missing_produces_specific_reason():
 
 
 def test_r10f_draft_evidence_required_only_for_draft_scenarios():
-    checks = _full_supported_checks()  # 无草稿/服务集成检查
+    checks = _full_supported_checks(memory_id="memory_target_r0")
     # baseline：只检查适用项 → 通过
     assert eligibility_issues(checks, BASELINE_SCENARIO) == []
     # dflash：草稿证据缺失 → 拦截并点名
@@ -282,7 +283,8 @@ def test_r10f_draft_evidence_required_only_for_draft_scenarios():
     # 补齐草稿证据后通过
     ok = _full_supported_checks(extra={
         "draft_forward_evidence": ("supported", "源码核过"),
-        "dflash_serving_integration": ("supported", "双栈核对")})
+        "dflash_serving_integration": ("supported", "双栈核对"),
+        "stage_cost_complete": ("supported", "ok")})
     assert eligibility_issues(ok, DFLASH_SCENARIO) == []
 
 
@@ -301,18 +303,20 @@ def test_r10f_budget_states_all_block_ranking(status, frag):
     assert frag in " ".join(issues)   # 容量原因在场且拦截
 
 
-def test_r10f_stage_cost_applies_only_to_v41_engram_host():
-    # qwen/dflash：不适用 stage_cost_complete，其余齐全 → 通过
-    assert eligibility_issues(_ok_checks(), DFLASH_SCENARIO) == []
+def test_r10f_stage_cost_applies_to_dflash_and_v41_engram_host():
+    checks = _ok_checks()
+    assert eligibility_issues(checks, DFLASH_SCENARIO) == []
+    del checks["stage_cost_complete"]
+    assert any("stage_cost_complete" in i for i in eligibility_issues(checks, DFLASH_SCENARIO))
     v41 = dict(DFLASH_SCENARIO, model_id="deepseek_v41_flash",
                draft_id=None, method_id="baseline",
                deployment={"mode": "baseline",
                            "engram_table_placement": "cpu_offload"})
-    issues = eligibility_issues(_full_supported_checks(), v41)
+    issues = eligibility_issues(_full_supported_checks(memory_id="memory_target_r0"), v41)
     assert any("stage_cost_complete" in i for i in issues)
     gpu_offload = dict(v41, deployment={"mode": "baseline",
                                         "engram_table_placement": "gpu"})
-    assert eligibility_issues(_full_supported_checks(), gpu_offload) == []
+    assert eligibility_issues(_full_supported_checks(memory_id="memory_target_r0"), gpu_offload) == []
 
 
 def _synth_bundle(checks, scenario, tpot=10.0, speedup=2.0, mem=1 << 30,
@@ -343,10 +347,14 @@ def _synth_bundle(checks, scenario, tpot=10.0, speedup=2.0, mem=1 << 30,
 
 
 def _ok_checks(method="dflash_v1"):
-    extra = {"draft_forward_evidence": ("supported", "源码核过"),
-             "dflash_serving_integration": ("supported", "双栈核对")} \
-        if method == "dflash_v1" else {}
-    return _full_supported_checks(extra=extra)
+    if method == "baseline":
+        return _full_supported_checks(memory_id="memory_target_r0")
+    return _full_supported_checks(extra={
+        "draft_forward_evidence": ("supported", "源码核过"),
+        "dflash_serving_integration": ("supported", "双栈核对"),
+        "stage_cost_complete": ("supported", "已计价"),
+    })
+
 
 
 def test_r10f_compare_empty_checks_bundle_not_eligible():
@@ -389,6 +397,7 @@ def test_r10f_time_basis_mismatch_blocks_delta_keeps_values():
     assert obj["candidate"] == 5.0 and obj["baseline"] == 20.0  # 数值保留
     assert obj["delta"] is None
     assert "time_basis" in obj["compatibility"]["reason"]
+    assert row["eligible"] is False and "time_basis" in row["ineligible_reason"]
 
 
 @pytest.mark.parametrize("over,frag", [
@@ -419,6 +428,7 @@ def test_r10f_metric_compat_dimensions_block_delta(over, frag):
     obj = row["objectives"]["M01_tpot_analytical"]
     assert obj["delta"] is None
     assert frag in (obj["compatibility"]["reason"] or "")
+    assert row["eligible"] is False
 
 
 def test_r10f_result_kind_mixing_blocks_delta():
@@ -500,3 +510,55 @@ def test_r10e_api_and_cli_sweep_compatible_point_metadata(tmp_path):
             # 点级缺失原因字段在（值可为 None）；run 状态携带
             assert "reason" in pc and pc["run_id"]
     assert cli["breakevens"] == api["breakevens"]
+
+
+def test_r10e_partial_selected_pair_does_not_mix_cost_bases(monkeypatch):
+    from simverse.experiments import sweep_v2
+    bundle = _fake_bundle({
+        "M01_tpot_selected": _m(4.0),
+        "M01_tpot_analytical": _m(8.0),
+        "M01_tpot_baseline": _m(16.0),
+    }, cost={"selection": {"source": "profile", "source_id": "test"}})
+    monkeypatch.setattr(sweep_v2, "run_v2", lambda sc: bundle)
+    scenario = ScenarioV2.from_json(_SMALL)
+    default = sweep_1d(scenario, "workload.batch", [1])["points"][0]
+    assert default["tpot_ms"] == 8.0 and default["speedup"] == 2.0
+    assert default["metric_source"] == "analytic"
+    assert default["baseline_metric_key"] == "M01_tpot_baseline"
+    explicit = sweep_1d(scenario, "workload.batch", [1],
+                        "M01_tpot_selected")["points"][0]
+    assert explicit["tpot_ms"] == 4.0 and explicit["speedup"] is None
+    assert "M01_baseline_selected" in explicit["reason"]
+    analytic = sweep_1d(scenario, "workload.batch", [1],
+                        "M01_tpot_analytical")["points"][0]
+    assert analytic["metric_source"] == "analytic" and analytic["metric_source_id"] is None
+
+
+def test_r10e_crossover_does_not_bridge_failed_or_incomparable_points():
+    first = {"value": 1, "speedup": 0.5, "status": "completed",
+             "metric_key": "M01_tpot_selected", "metric_source": "profile",
+             "metric_source_id": "a"}
+    second = {**first, "value": 2, "speedup": 1.5}
+    for overrides in ({"status": "failed"}, {"metric_source": "analytic"},
+                      {"metric_source_id": "b"}, {"metric_time_basis": "server_emitted"}):
+        assert find_crossover({"points": [first, {**second, **overrides}]}) is None
+    assert find_crossover({"points": [first, second]}) == 1.5
+
+
+def test_r10f_dt_must_have_capacity_evidence_on_both_ends():
+    scenario = dict(DFLASH_SCENARIO, deployment={"mode": "dt_serial"})
+    checks = _ok_checks()
+    checks["memory_target_r0"] = checks.pop("memory_colocated_r0")
+    assert any("memory_draft_r0" in reason for reason in eligibility_issues(checks, scenario))
+    checks["memory_draft_r0"] = checks["memory_target_r0"]
+    assert eligibility_issues(checks, scenario) == []
+
+
+def test_r10f_candidate_cannot_rank_against_ineligible_baseline():
+    base = _synth_bundle({}, BASELINE_SCENARIO)
+    cand = _synth_bundle(_ok_checks(), DFLASH_SCENARIO)
+    result = compare_runs(base, [cand])
+    assert result["baseline_eligible"] is False
+    row = result["rows"][0]
+    assert row["eligible"] is False and "基线证据未通过" in row["ineligible_reason"]
+    assert row["objectives"]["M01_tpot_analytical"]["delta"] == 0.0

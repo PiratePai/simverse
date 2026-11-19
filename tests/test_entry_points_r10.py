@@ -185,6 +185,19 @@ MALFORMED_CASES = [
                              "allocatable_bytes": "7e10",
                              "allocatable_kind": "hypothesis"}}},
      "$.deployment.budget.allocatable_bytes"),
+    ("负块长", {"block_size": -1}, "$.block_size"),
+    ("未知设备", {"deployment": {"target_device": "missing"}}, "$.deployment.target_device"),
+    ("未知链路", {"deployment": {"link": "missing"}}, "$.deployment.link"),
+    ("上下文越界", {"workload": {"ctx_tokens": 0}}, "$.workload.ctx_tokens"),
+    ("目标 KV 位宽非法", {"quant": {"kv": 3}}, "$.quant.kv"),
+    ("草稿 KV 位宽非法", {"draft_quant": {"kv": 3}}, "$.draft_quant.kv"),
+    ("草稿预算越界", {"deployment": {"draft_budget": {"allocatable_bytes": -1,
+                             "allocatable_kind": "hypothesis"}}},
+     "$.deployment.draft_budget.allocatable_bytes"),
+    ("预算超过标称容量", {"deployment": {"budget": {"allocatable_bytes": 10**12,
+                             "allocatable_kind": "hypothesis"}}},
+     "$.deployment.budget.allocatable_bytes"),
+
 ]
 
 
@@ -196,17 +209,17 @@ def test_r10d_run_rejects_malformed_with_field_path(name, body, path_prefix):
     assert r.status_code == 400, f"{name}: {r.status_code}"
     payload = r.get_json()
     assert payload["error"], name
-    assert payload["field"].startswith(path_prefix), (name, payload["field"])
+    assert payload["field"] == path_prefix, (name, payload["field"])
 
 
-@pytest.mark.parametrize("name,body,path_prefix", MALFORMED_CASES[:8],
-                         ids=[c[0] for c in MALFORMED_CASES[:8]])
+@pytest.mark.parametrize("name,body,path_prefix", MALFORMED_CASES,
+                         ids=[c[0] for c in MALFORMED_CASES])
 def test_r10d_sweep_rejects_malformed_with_field_path(name, body, path_prefix):
     client = app.test_client()
     r = client.post("/api/v2/sweep", json=body)
     assert r.status_code == 400, f"{name}: {r.status_code}"
     payload = r.get_json()
-    assert payload["field"].startswith(path_prefix), (name, payload["field"])
+    assert payload["field"] == path_prefix, (name, payload["field"])
 
 
 def test_r10d_malformed_json_body_returns_structured_400():
@@ -251,22 +264,23 @@ def test_r10d_unsupported_combo_keeps_result_status_not_4xx():
 
 
 def test_r10d_internal_error_keeps_server_error_semantics(monkeypatch):
-    """真正的内部异常（如管线 TypeError）保持 500，不在入口吞掉。"""
+    """入参异常与内部 ValueError/KeyError/TypeError 分开处理。"""
     import simverse.pipeline as pipeline_mod
-    import simverse.webapp as webapp_mod
+    import simverse.experiments.sweep_v2 as sweep_mod
 
-    def _boom(scenario, **kw):
-        raise TypeError("内部缺陷")
+    def fail(error):
+        def broken(*args, **kwargs):
+            raise error("内部缺陷")
+        return broken
 
-    monkeypatch.setattr(pipeline_mod, "run_v2", _boom)
-    app.config.update(PROPAGATE_EXCEPTIONS=False, TESTING=False)
-    try:
-        client = app.test_client()
-        r = client.post("/api/v2/run", json={
-            "model_id": "qwen36_35b_a3b", "method_id": "dflash_v1", "k": 4})
-        assert r.status_code == 500
-    finally:
-        app.config.update(PROPAGATE_EXCEPTIONS=None, TESTING=False)
+    monkeypatch.setitem(app.config, "PROPAGATE_EXCEPTIONS", False)
+    for error in (ValueError, KeyError, TypeError):
+        monkeypatch.setattr(pipeline_mod, "run_v2", fail(error))
+        monkeypatch.setattr(sweep_mod, "run_v2", fail(error))
+        with app.test_client() as client:
+            for url in ("/api/v2/run", "/api/v2/sweep"):
+                r = client.post(url, json={})
+                assert r.status_code == 500, (url, error)
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +311,7 @@ def test_r10b_roadmap_links_resolve_and_status_pages_open():
                "ascend-validation-plan.md"):
         r = client.get(f"/docs/{fn}")
         assert r.status_code == 200, fn
+        assert 'href="../ROADMAP.md"' in r.get_data(as_text=True), fn
     roadmap = client.get("/ROADMAP.md")
     assert roadmap.status_code == 200
     text = roadmap.get_data(as_text=True)
@@ -317,3 +332,5 @@ def test_r10b_workbench_html_has_preset_selector_and_doc_links():
     assert "if (state.preset)" in js
     assert "clearPreset()" in js and "userTouched" in js
     assert "selectPreset('qwen36_dflash_default')" in js
+    assert "$('sel-preset').value = hit.id" in js
+    assert 'href="/docs/FOCUS_STATUS.md"' in html

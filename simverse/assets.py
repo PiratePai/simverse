@@ -18,11 +18,10 @@ WHEEL_DATA_MANIFEST 同时是打包清单（setup.py 消费）与核对基准
   * assets/identity/**——受哈希约束的身份/证据文件，保留原始字节；
   * assets/profiles/*/manifest.json——证据登记哈希所引用的清单文件
     （不含归档模型的校准数据文件：历史回放按用途留在仓库）；
-  * docs/rebuild-20261106/references/**——pinned 证据源码/pin 清单。
+  * 工作台导航所需的计划与状态文档、原型入口和固定证据源码。
 明确不进 wheel：assets/cost_records/**（昇腾归档观测，独立环境条件
 对照，显式选择时才加载，缺失按 ProfileIntegrityError 如实报错）、
-assets/profiles/*/ 数据文件、完整 docs/（工作台文档入口在 wheel 下
-如实 404，不伪造内容）。
+assets/profiles/*/ 数据文件、完整证据报告归档。
 """
 from __future__ import annotations
 
@@ -45,7 +44,15 @@ WHEEL_DATA_MANIFEST: tuple[tuple[str, str], ...] = (
     ("assets/profiles/h200_qwen3_235b_a22b/manifest.json",
      "assets/profiles/h200_qwen3_235b_a22b/manifest.json"),
     ("docs/rebuild-20261106/references", "docs/rebuild-20261106/references"),
-)
+) + tuple((path, path) for path in (
+    "ROADMAP.md", "AGENTS.md", "docs/FOCUS_STATUS.md",
+    "docs/IMPLEMENTATION_STATUS.md", "docs/MERGE_CRITERIA.md",
+    "docs/validation/entry-scan-compare-fixes-20261119.md",
+    "docs/rebuild-20261106/plan.md", "docs/rebuild-20261106/principles.md",
+    "docs/rebuild-20261106/ui-data-contract.md", "docs/rebuild-20261106/review-resolution.md",
+    "docs/rebuild-20261106/prototype/index.html", "docs/rebuild-20261106/prototype/v3-workbench.js",
+    "docs/rebuild-20261106/prototype/teaching.html", "docs/rebuild-20261106/prototype/reference-v3.html",
+))
 
 
 def repo_root() -> Path | None:
@@ -67,7 +74,7 @@ def assets_dir() -> Path:
 
 
 def docs_dir() -> Path:
-    """docs/ 根：wheel 下仅含清单打包的 references 子树。"""
+    """docs/ 根：wheel 下包含清单登记的文档及证据。"""
     root = repo_root()
     return (root / "docs") if root else _packaged_root() / "docs"
 

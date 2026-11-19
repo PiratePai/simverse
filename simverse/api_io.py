@@ -13,9 +13,10 @@ HTML 500；合法但不受支持的组合又与真正的内部异常混在同一
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from math import isfinite
+from typing import Any, Dict
 
-from .scenario import DeploymentSpec, ScenarioV2
+from .scenario import ScenarioInputError, ScenarioV2
 
 # ScenarioV2 / DeploymentSpec / WorkloadHypothesis / BudgetInput 的
 # 结构类型表：字段名 → (允许的 Python 类型, 是否允许 None)
@@ -49,39 +50,6 @@ _BUDGET_FIELDS = {
     "overhead_source": (str, False), "note": (str, False),
 }
 
-# 语义校验（validate 的 ValueError）到字段路径的确定性映射：按序取
-# 消息中第一个被点名的字段；无匹配归 "$"（整个场景）。
-_FIELD_TOKENS = (
-    ("k ∈", "$.k"), ("batch", "$.workload.batch"), ("ctx", "$.workload.ctx_tokens"),
-    ("target_ep", "$.deployment.target_ep"), ("target_tp", "$.deployment.target_tp"),
-    ("draft_tp", "$.deployment.draft_tp"), ("allocatable_bytes", "$.deployment.budget.allocatable_bytes"),
-    ("allocatable_kind", "$.deployment.budget.allocatable_kind"),
-    ("allocatable_source", "$.deployment.budget.allocatable_source"),
-    ("extra_overhead_bytes", "$.deployment.budget.extra_overhead_bytes"),
-    ("draft_budget", "$.deployment.draft_budget"),
-    ("部署模式", "$.deployment.mode"), ("baseline 部署", "$.deployment.mode"),
-    ("schema_version", "$.schema_version"), ("cost_records", "$.cost_records"),
-    ("cost_profile", "$.cost_profile"), ("draft_ctx_kv_path", "$.draft_ctx_kv_path"),
-    ("engram_table_placement", "$.deployment.engram_table_placement"),
-    ("v41_kv_record", "$.deployment.v41_kv_record"),
-    ("dense_w", "$.quant.dense_w"), ("expert_w", "$.quant.expert_w"),
-    ("act", "$.quant.act"), ("state", "$.quant.state"),
-    ("draft_quant", "$.draft_quant"), ("model_id", "$.model_id"),
-    ("method_id", "$.method_id"), ("未知模型", "$.model_id"),
-    ("alpha ∈", "$.acceptance.alpha"), ("alphas ∈", "$.acceptance.alphas"),
-    ("'alpha'", "$.acceptance.alpha"), ("'alphas'", "$.acceptance.alphas"),
-    ("'mean'", "$.acceptance.mean"),
-)
-
-
-class ScenarioInputError(ValueError):
-    """场景输入非法（结构/类型/取值）；field 为可定位路径。"""
-
-    def __init__(self, field: str, message: str):
-        super().__init__(message)
-        self.field = field
-
-
 def _check_types(obj: Any, table: Dict[str, tuple], path: str,
                  what: str, *, allow_unknown: bool) -> None:
     if not isinstance(obj, dict):
@@ -114,7 +82,12 @@ def _check_acceptance(acc: Dict[str, Any]) -> None:
     """接受率假设的字段校验（与 methods.acceptance.law_from_scenario 的
     域一致：越界 kind/alpha 属于字段值非法，入口 4xx，不留给管线 failed）。"""
     def num(value) -> bool:
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:
+            return isfinite(value)
+        except OverflowError:
+            return False
 
     kind = acc.get("kind", "geometric")
     if not isinstance(kind, str):
@@ -145,12 +118,9 @@ def decode_scenario_v2(body: Any) -> ScenarioV2:
     """结构/类型校验（带路径）→ ScenarioV2.from_json 语义校验。
 
     顶层未知键沿用 from_json 的既有行为（不因添加未知键拒绝调用方；
-    嵌套对象键严格登记，防止拼错键静默丢配置）。语义校验的 ValueError
-    尽力映射到字段路径，映射不到的归 "$"。
+    嵌套对象键严格登记）。结构检查与场景契约直接给出失败字段路径。
     """
     _check_types(body, _SCENARIO_FIELDS, "$", "场景顶层", allow_unknown=True)
-    if not isinstance(body, dict):
-        raise ScenarioInputError("$", "顶层必须是 JSON 对象")  # pragma: no cover
     if "deployment" in body and body["deployment"] is not None:
         _check_types(body["deployment"], _DEPLOY_FIELDS, "$.deployment",
                      "deployment", allow_unknown=False)
@@ -173,18 +143,7 @@ def decode_scenario_v2(body: Any) -> ScenarioV2:
                     raise ScenarioInputError(
                         f"$.{qkey}.{sub}",
                         f"{qkey}.{sub} 必须为整数位宽（bit），实际 {type(val).__name__}")
-    try:
-        return ScenarioV2.from_json(body)
-    except ScenarioInputError:
-        raise
-    except (ValueError, TypeError, KeyError) as exc:
-        message = str(exc)
-        field: Optional[str] = None
-        for token, path in _FIELD_TOKENS:
-            if token in message:
-                field = path
-                break
-        raise ScenarioInputError(field or "$", message) from exc
+    return ScenarioV2.from_json(body)
 
 
 def error_payload(exc: ScenarioInputError) -> Dict[str, Any]:

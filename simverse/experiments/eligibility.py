@@ -4,21 +4,7 @@
 清空 ``capability.checks`` 后仍 ``eligible=True``；管线侧只看"存在且非
 supported"的检查项，同样不追缺失。
 
-规则（单一事实源，双方按场景适用域取用）：
-  * 目标端证据：结构完整、config 覆盖、forward 证据、CPU 执行、GPU 实测、
-    部署排名证据、并行配方合法——全部必需，缺失即 unknown 并给出具体
-    检查项（不静默跳过）；
-  * 草稿端证据：仅当场景带草稿（dflash_v1）时必需 draft_forward_evidence
-    与 dflash_serving_integration；mtp 方法对应 mtp_serving_integration
-    与 method_recipe_ready；baseline 只检查其适用项（无草稿/方法检查）；
-  * 方法执行：method_recipe_ready（chain/mtp 内部研究方法）；
-  * 阶段成本：stage_cost_complete——按场景适用域判定（V4.1+cpu_offload
-    Engram host 查表时管线必产生该检查；无场景信息时按存在性检查）；
-  * 容量：至少存在一条 memory_* 检查且全部为 supported——预算 unknown、
-    假设预算（approximated/feasible-conditional）与 OOM（unsupported）
-    均不可获得部署排名资格；
-  * 附加条件（存在即检查）：ascend_device_recipe、acceptance_known、
-    cost_profile_domain、archived_cost_records。
+必需证据按场景的模型、方法和部署方式确定。缺失的检查保持 unknown。
 """
 from __future__ import annotations
 
@@ -58,25 +44,24 @@ def _method_of(scenario: Optional[Mapping]) -> Optional[str]:
     return scenario.get("method_id")
 
 
-def _stage_cost_applies(scenario: Optional[Mapping]) -> Optional[bool]:
-    """stage_cost_complete 的适用域：V4.1 + Engram 表 host 驻留（管线
-    唯一添加该检查的路径）。无场景信息时返回 None（按存在性检查）。"""
-    if not scenario:
-        return None
-    dep = scenario.get("deployment") or {}
-    return (scenario.get("model_id") == "deepseek_v41_flash"
-            and dep.get("engram_table_placement") == "cpu_offload")
+def _stage_cost_applies(scenario: Mapping) -> bool:
+    deployment = scenario.get("deployment") or {}
+    return (scenario.get("method_id") == "dflash_v1"
+            or (scenario.get("model_id") == "deepseek_v41_flash"
+                and deployment.get("engram_table_placement", "cpu_offload") == "cpu_offload"))
 
 
-def required_checks(scenario: Optional[Mapping] = None) -> List[str]:
-    """按场景适用域列出必需检查项（含 memory 存在性占位）。"""
-    checks = list(TARGET_CHECKS)
-    method = _method_of(scenario)
-    if method in METHOD_SCOPED_CHECKS:
-        checks.extend(METHOD_SCOPED_CHECKS[method])
-    if _stage_cost_applies(scenario):
-        checks.append("stage_cost_complete")
-    return checks
+def _memory_checks(scenario: Mapping) -> tuple:
+    mode = (scenario.get("deployment") or {}).get("mode")
+    if mode == "colocated":
+        return ("memory_colocated_r0",)
+    if mode == "baseline":
+        return ("memory_target_r0",)
+    if mode in ("dt_serial", "dt_pipeline_sim"):
+        if scenario.get("draft_id") or scenario.get("method_id") == "dflash_v1":
+            return ("memory_target_r0", "memory_draft_r0")
+        return ("memory_target_r0",)
+    return ()
 
 
 def eligibility_issues(checks: Mapping[str, Any],
@@ -120,33 +105,27 @@ def eligibility_issues(checks: Mapping[str, Any],
             if chk is not None and chk["status"] != "supported":
                 _fail(cid, str(chk.get("reason") or f"{cid}={chk['status']}"))
 
-    # 阶段成本：适用域内必需；域外/未知按存在性
-    stage_applies = _stage_cost_applies(scenario)
     stage = checks.get("stage_cost_complete")
-    if stage is None:
-        if stage_applies:
-            _fail("stage_cost_complete",
-                  "必需证据缺失（unknown）：stage_cost_complete——V4.1 Engram "
-                  "host 查表场景应产生该检查而 run 未提供")
-    elif stage["status"] != "supported":
-        _fail("stage_cost_complete",
-              str(stage.get("reason") or "stage_cost_complete"))
+    if stage is None and _stage_cost_applies(scenario or {}):
+        _fail("stage_cost_complete", "必需证据缺失（unknown）：stage_cost_complete")
+    elif stage is not None and stage["status"] != "supported":
+        _fail("stage_cost_complete", str(stage.get("reason") or "stage_cost_complete"))
 
-    # 容量：memory_* 至少一条且全部 supported（预算 unknown/假设/OOM 均拦截）
-    memory = {cid: chk for cid, chk in checks.items()
-              if cid.startswith(MEMORY_PREFIX)}
-    if not memory:
-        issues.append("必需证据缺失（unknown）：无任何 memory_* 容量检查——"
-                      "可部署性未判定（预算/峰值证据缺失），不得排名")
-    else:
-        for cid, chk in sorted(memory.items()):
-            if chk["status"] != "supported":
-                _fail(cid, str(chk.get("reason") or f"{cid}={chk['status']}"))
+    memory = {cid: chk for cid, chk in checks.items() if cid.startswith(MEMORY_PREFIX)}
+    required_memory = _memory_checks(scenario or {})
+    for cid in required_memory:
+        if cid not in memory:
+            _fail(cid, f"必需容量证据缺失（unknown）：{cid}")
+    if not required_memory and not memory:
+        _fail(MEMORY_PREFIX, "必需证据缺失（unknown）：无 memory_* 容量检查")
+    for cid, chk in sorted(memory.items()):
+        if chk["status"] != "supported":
+            _fail(cid, str(chk.get("reason") or f"{cid}={chk['status']}"))
 
     # 附加条件：存在即检查（管线按条件添加的条件项）
     for cid in PRESENT_ONLY_CHECKS:
         chk = checks.get(cid)
-        if chk is not None and chk["status"] not in ("supported",):
+        if chk is not None and chk["status"] != "supported":
             _fail(cid, str(chk.get("reason") or f"{cid}={chk['status']}"))
 
     return issues

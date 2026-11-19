@@ -30,7 +30,7 @@
   的清单）、`docs/rebuild-20261106/references/**`。**不进 wheel**：
   `assets/cost_records/**`（昇腾归档观测，显式选择才加载，缺失按
   ProfileIntegrityError 如实报错）、profile 数据文件（归档模型校准）、
-  完整 docs/。受哈希约束资产逐字节拷贝（`setup.py` build_py 钩子；清单与
+  完整证据归档。工作台导航用的 Roadmap、状态页和配套文档随包分发。受哈希约束资产逐字节拷贝（`setup.py` build_py 钩子；清单与
   核对共用 `WHEEL_DATA_MANIFEST`）。
 * `.gitattributes` 补 `assets/scenarios/*.json text eol=lf`：场景 JSON 与
   config/identity 同为 digest/哈希敏感资产；不钉时 Windows autocrlf 使
@@ -42,7 +42,7 @@
 模式检查）：git archive 完整快照 → 隔离构建 wheel → 独立 venv 安装 →
 仓库外真实 `simverse run-v2`（exit 0、status=completed、run_id 产生、模块
 来自 site-packages、`repo_root() is None`）→ 工作台 `/` 与
-`/api/v2/catalog` 200 且恰两款主模型 → 清单 219 文件逐字节与仓库一致。
+`/api/v2/catalog` 200 且恰两款主模型 → 检查状态页、Roadmap 及相对文档链接。清单逐文件与构建用 Git 快照核对。
 
 ### R10d 共享默认预设 + run/sweep 输入校验
 
@@ -72,7 +72,7 @@
   指向的 `docs/MERGE_CRITERIA.md`、`docs/FOCUS_STATUS.md`、
   `docs/IMPLEMENTATION_STATUS.md`、`docs/ascend-validation-plan.md`
   逐个 200。白名单外根路径（README.md/pyproject.toml）、不存在文档、
-  穿越路径均 404。wheel 模式无仓库文档 → 如实 404。
+  穿越路径均 404。源码检出和 wheel 均提供状态页与 Roadmap 的相互入口。
 
 ## 2. 批次二：扫描口径、交叉点与部署比较资格
 
@@ -81,11 +81,10 @@
 * 基线配对表 `BASELINE_PAIR`：`M01_tpot_selected↔M01_baseline_selected`、
   `M01_tpot_analytical↔M01_tpot_baseline`——**speedup 分子分母同口径**。
 * `metric_key=None`（默认）= 选用成本；旧结果缺选用指标 → 回退解析口径，
-  点级+扫描级 `fallback_reason` 明示（兼容历史 bundle）；选用基线单独缺
-  失也回退解析基线并明示。显式请求 → 严格该口径；指标缺失保留空值与
-  原因（不静默换口径）；未知指标名拒绝。
+  当选用候选或基线缺失时，成对回退到完整的解析指标，点级和扫描级记录 `fallback_reason`。显式请求保持指定口径，缺项时保留空值及原因。
 * 点级新增/明确：`metric_key`（实际口径）、`baseline_metric_key`、
-  `metric_source`（cost.selection.source：analytic/records/profile）、
+  `metric_source`（解析请求固定为 analytic，选用请求记录有效来源）、
+  `metric_source_id`、`metric_time_basis`、`metric_result_kind`、
   `fallback_reason`、`reason`；`run_id`/`status`/`record_coverage` 保留。
   扫描级：`metric_key`（实际主口径=扫描序首遇）、`requested_metric_key`、
   混用时 `metric_keys_used`、`fallback_reason`。
@@ -98,8 +97,7 @@
 
 按原始扫描顺序处理：第一个 speedup 恰=1 的点直接返回其值（连续=1 取
 首个）；否则第一个**相邻**符号翻转区间线性插值（多交点取扫描序首个）；
-无效点（缺失/失败）或口径不可比（相邻 `metric_key` 不同）截断区间——
-不跨未知区间插值；无交点 None。手算锚点 9 组覆盖：正常翻转、区间外缺失
+缺失或失败的点截断区间。相邻点须使用相同指标对、成本来源及其 ID、时间基准和结果类型。无交点时返回 None。手算锚点 9 组覆盖：正常翻转、区间外缺失
 （相邻有效对仍可插值）、区间中缺失（None）、口径不可比（None）、端点
 恰=1（含首点）、连续=1、多交点、无交点、等值先于后续翻转。
 
@@ -110,9 +108,7 @@
   **缺失即 unknown 并给具体检查名**；草稿端按场景适用域（dflash_v1 →
   draft_forward_evidence + dflash_serving_integration；mtp →
   mtp_serving_integration + method_recipe_ready）；baseline 只查适用项；
-  阶段成本 stage_cost_complete 按适用域（V4.1+Engram host 查表）必需、
-  域外存在性检查；容量 memory_* 至少一条且全部 supported——**预算
-  unknown、假设预算（approximated）、OOM（unsupported）均不可排名**；
+  DFlash 和 V4.1 Engram host 查表须有 `stage_cost_complete`。baseline、同卡、独立草稿部署分别要求对应端的容量证据。预算未知、假设预算和 OOM 均不具备排名资格。
   附加条件（ascend 配方/接受率已知/profile 域/归档记录）存在即检查。
   `engram_host_lookup_latency` 不单列（与 stage_cost_complete 同源，后者
   已拦截；重复计数只会改写冻结的 M02 reason 措辞，不放松判定）。
@@ -125,18 +121,18 @@
   （`{compatible, reason}`）——**只补充核对结论，不改变既有键语义**；
   旧行为在口径不匹配时仍给混口径 delta，正是修复点。新增
   `baseline_ineligible_reason`（baseline 适用项不满足时披露）。声明的
-  same_time_basis/result_kind_compatible 谓词自此实际执行。
+  基线证据缺失或任一比较指标口径不兼容时，候选行也失去排名资格。
 * 保留：既有 JSON 字段、指标别名（M01_record_* 等兼容视图）、原始
   Work/Traffic/Memory、成本组所有权、仿真数值锚点（全量测试 + R27
   replay `--check` + golden fixtures 通过）。
 
 ## 3. 测试与验证记录
 
-* 新增 `tests/test_entry_points_r10.py`（32 项：资产定位双模式、清单
+* 新增 `tests/test_entry_points_r10.py`（50 项：资产定位双模式、清单
   覆盖/排除、预设 digest 对齐与三入口一致、CLI 真实 run-v2、畸形请求
   参数化矩阵 ×run/sweep、内部异常 500 语义、根文档白名单与链接链、
   workbench 预设逻辑静态断言）；`tests/test_scan_compare_r10.py`
-  （32 项：口径矩阵、回退/缺失、交叉点手算锚点、资格矩阵（空 checks/
+  （36 项：口径矩阵、回退/缺失、交叉点手算锚点、资格矩阵（空 checks/
   单项缺失/草稿适用/预算三态/阶段成本适用域）、compare 正例与口径
   五维负例、CLI+API 扫描兼容性）。
 * `tests/test_merge_gate.py::test_g15_forward_gap_alone_blocks_eligibility`
@@ -144,23 +140,22 @@
   supported，保留"仅 forward 缺口独立拦截"的原意图；缺失拦截行为由
   资格矩阵新测试覆盖（准则 §4.3：行为修复驱动的期望更新，在此单列）。
 * 命令与结果（Windows/Python 3.12，worktree 内）：
-  * `py -3.12 -m pytest tests -q` → **644 passed**（收集 644；
+  * `py -3.12 -m pytest tests -q` → **666 passed**（收集 666；
     IMPLEMENTATION_STATUS 已同步，G6 核对通过）
   * `node --check simverse/static/workbench.js` → 通过
-  * `py -3.12 tools/wheel_smoke.py` → 全部通过（清单 219 文件字节一致）
+  * `py -3.12 tools/wheel_smoke.py` → 全部通过（安装入口、目录和文档链路）
   * `py -3.12 -X utf8 tools/replay_cost_integrity_r27.py --check` →
     counts invariant; anchors hold（M01/M02/成本组数值零漂移）
   * `git diff --check` → 通过
 * 数值口径：本轮**不改变任何 Work/Traffic/Memory 计数与解析/选用成本数
-  值**；唯一数值语义变化是比较侧 delta 在口径不相容时置 None（修复点）。
+  值**；扫描与比较在口径缺失或不相容时留空派生数值。
 
 ## 4. 剩余限制与未验证范围
 
-* wheel 冒烟的清单字节核对以本机仓库为准；`git archive` 遵循
+* wheel 冒烟的清单字节核对以构建用 Git 快照为准；`git archive` 遵循
   .gitattributes（scenarios 已补 eol=lf）。未覆盖 Linux/macOS runner
   实跑（CI merge-gate 为 windows-latest，与仓库门禁一致）。
-* 工作台预设模式的浏览器级（真实 DOM）验收走 testhook/静态断言 +
-  Flask test_client；本轮未做截图级 UI 回归（既有 UI 测试全绿）。
+* 工作台验收聚焦真实请求、预设选择与相对文档导航。截图级回归另行验收。
 * compare_runs 的口径核对覆盖默认三目标的 Metric 对象路径；dict 型
   metrics（M06_detail 等）不走 delta，行为与旧版一致。
 * eligibility 的 ascend_device_recipe 等条件项为"存在即检查"：若未来

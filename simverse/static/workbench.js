@@ -179,6 +179,7 @@
     var hit = state.catalog.scenarios.filter(function (s) { return s.id === id; })[0];
     if (!hit) return;
     state.preset = JSON.parse(JSON.stringify(hit.scenario));
+    $('sel-preset').value = hit.id;
     state.userTouched = true;   // 显式载入 = 用户选择；后续目录刷新不覆盖
     applyPresetToControls(state.preset);
     setStatus('已载入共享预设 ' + hit.id + '（digest ' +
@@ -1357,7 +1358,7 @@
   // 预设模式（自由配置；不再按预设原样提交）。预设选择器本身除外。
   ['sel-model', 'sel-method', 'sel-deploy', 'sel-target-dev', 'sel-tp',
     'sel-ep', 'sel-draft-dev', 'inp-ctx', 'inp-batch', 'sel-acc', 'inp-blk',
-    'sel-prec', 'inp-budget', 'inp-draft-budget', 'inp-overhead', 'sel-record-cost'
+    'sel-prec', 'inp-budget', 'inp-draft-budget', 'inp-overhead', 'sel-record-cost', 'sel-profile'
   ].forEach(function (id) {
     $(id).addEventListener('change', function () {
       state.userTouched = true;

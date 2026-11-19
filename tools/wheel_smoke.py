@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -75,15 +76,16 @@ def main() -> None:
     # 6a. wheel 清单文件与仓库原始字节一致（安装前直接对 zip 校）
     sys.path.insert(0, str(REPO))
     from simverse.assets import iter_manifest_files
+    manifest = iter_manifest_files(stage)
     with zipfile.ZipFile(wheel) as zf:
         names = set(zf.namelist())
-        for src, dst in iter_manifest_files(REPO):
+        for src, dst in manifest:
             entry = f"simverse/_data/{dst.as_posix()}"
             if entry not in names:
                 raise SystemExit(f"wheel 缺清单文件：{entry}")
             if zf.read(entry) != src.read_bytes():
                 raise SystemExit(f"wheel 文件字节与仓库不一致：{entry}")
-    print("清单字节核对：通过（%d 个文件）" % len(iter_manifest_files(REPO)))
+    print("清单字节核对：通过（%d 个文件）" % len(manifest))
 
     # 3. 隔离 venv 安装
     venv = work / "venv"
@@ -110,7 +112,10 @@ def main() -> None:
             raise SystemExit(f"模块未来自安装包：{info}")
     print(f"模块来源：{info['module']}")
 
-    out = _run([str(py), "-m", "simverse.cli", "run-v2"], cwd=str(outside))
+    command = py.with_name("simverse.exe" if os.name == "nt" else "simverse")
+    out = _run([str(command), "run-v2", "--out", "run.json"], cwd=str(outside))
+    run = json.loads((outside / "run.json").read_text(encoding="utf-8"))["manifest"]
+    assert run["status"] == "completed" and re.fullmatch(r"sha256:[0-9a-f]{64}", run["run_id"]), run
     run_ok = "run_id=" in out.stdout and "status=completed" in out.stdout
     if not run_ok:
         raise SystemExit("run-v2 输出缺少 status=completed/run_id：\n" + out.stdout)
@@ -118,14 +123,30 @@ def main() -> None:
 
     # 5. 工作台首页 + catalog 200，恰两款主模型
     check = (
+        "import json;"
+        "from pathlib import Path;"
         "from simverse.webapp import app;"
         "c=app.test_client();"
         "r1=c.get('/'); r2=c.get('/api/v2/catalog');"
         "assert r1.status_code==200, r1.status_code;"
         "assert r2.status_code==200, r2.status_code;"
-        "models=set(r2.get_json()['catalog']['models']);"
+        "catalog=r2.get_json();"
+        "models=set(catalog['catalog']['models']);"
         "assert models=={'qwen36_35b_a3b','deepseek_v41_flash'}, models;"
-        "print('workbench/catalog OK')"
+        "preset=next(x for x in catalog['scenarios'] if x['id']=='qwen36_dflash_default');"
+        "response=c.post('/api/v2/run',json=preset['scenario']);"
+        "assert response.status_code==200, response.status_code;"
+        "api=response.get_json();"
+        "cli=json.loads(Path('run.json').read_text(encoding='utf-8'));"
+        "assert api['manifest']['input_digest']==cli['manifest']['input_digest']==preset['scenario_digest'];"
+        "assert api['metrics']['M01_tpot_selected']['value']==cli['metrics']['M01_tpot_selected']['value'];"
+        "status=c.get('/docs/FOCUS_STATUS.md');"
+        "assert status.status_code==200 and b'../ROADMAP.md' in status.data;"
+        "roadmap=c.get('/ROADMAP.md');"
+        "assert roadmap.status_code==200 and b'docs/MERGE_CRITERIA.md' in roadmap.data;"
+        "assert c.get('/docs/MERGE_CRITERIA.md').status_code==200;"
+        "assert c.get('/missing.md').status_code==404;"
+        "print('workbench/catalog/docs OK')"
     )
     _run([str(py), "-c", check], cwd=str(outside))
 

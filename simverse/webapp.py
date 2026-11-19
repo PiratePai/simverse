@@ -13,7 +13,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from .assets import docs_dir, repo_root, scenario_dir
+from .assets import docs_dir, packaged_data_dir, repo_root, scenario_dir
 from .contracts import ScenarioSpec, js_safe
 from .engine import run
 from .formulas import formulas_json
@@ -26,7 +26,7 @@ DOCS_DIR = docs_dir()
 
 # 状态/验证文档指向的根目录文档白名单（R10b）：docs/ 内的相对链接
 # ``[ROADMAP](../ROADMAP.md)`` 会落到站点根；只显式开放这两个被引用的
-# 根文档，未列出的根路径仍 404。wheel 安装无仓库 docs/，如实 404。
+# 根文档，未列出的根路径仍返回 404。
 ROOT_DOC_WHITELIST = ("ROADMAP.md", "AGENTS.md")
 
 
@@ -102,12 +102,12 @@ def root_doc(root_doc):
     ascend-validation-plan 等）用 ``[ROADMAP](../ROADMAP.md)`` 引用仓库根
     文档，浏览器把它们解析到站点根 → 此前 404。只显式开放被引用的两个
     根文档（ROADMAP.md/AGENTS.md，README 未被引用不入白名单）；其余根
-    路径仍 404。wheel 安装无仓库文档，如实 404。
+    路径仍返回 404。wheel 使用随包的文档。
     """
     if root_doc not in ROOT_DOC_WHITELIST:
         return jsonify({"error": f"根路径未开放：{root_doc}"
                                  f"（白名单 {list(ROOT_DOC_WHITELIST)}）"}), 404
-    path = (repo_root() or Path(__file__).resolve().parent) / root_doc
+    path = (repo_root() or packaged_data_dir()) / root_doc
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -181,8 +181,6 @@ def api_v2_run():
         return jsonify(js_safe(bundle.to_json()))
     except ScenarioInputError as exc:
         return jsonify(error_payload(exc)), 400
-    except (ValueError, KeyError) as exc:
-        return jsonify({"error": str(exc), "field": "$"}), 400
 
 
 @app.post("/api/v2/sweep")
@@ -194,11 +192,9 @@ def api_v2_sweep():
         return jsonify({"error": "请求体不是合法 JSON（或为空）", "field": "$"}), 400
     try:
         scenario = decode_scenario_v2(body)
+        return jsonify(js_safe(sweep_suite(scenario)))
     except ScenarioInputError as exc:
         return jsonify(error_payload(exc)), 400
-    except (ValueError, KeyError) as exc:
-        return jsonify({"error": str(exc), "field": "$"}), 400
-    return jsonify(js_safe(sweep_suite(scenario)))
 
 
 @app.get("/api/v2/export/<fmt>")
