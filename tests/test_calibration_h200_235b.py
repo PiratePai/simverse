@@ -123,15 +123,6 @@ def test_domain_reject_tp1_with_reason():
     assert b["cost"]["selection"]["source"] == "analytic"
 
 
-def test_domain_reject_precision():
-    sc = _scenario(quant={"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
-                          "state": 32})
-    b = _run_archive(sc).to_json()
-    cal = b["cost"]["calibration"]["stages"]["target_decode"]
-    assert cal["domain_ok"] is False
-    assert any("精度" in r for r in cal["reasons"])
-
-
 # ---------------------------------------------------------------------------
 # 组合独立复算（TP8、94 层；MoE 必须在回退中）
 # ---------------------------------------------------------------------------

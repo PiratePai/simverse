@@ -102,6 +102,7 @@ def test_all_fallback_is_analytic_and_unknown_runtime_is_null():
     selection = b["cost"]["selection"]
     assert selection["source"] == "analytic" and selection["requested_source"] == "records"
     assert selection["applied"] is False and selection["matched"] == 0
+    assert "execution" not in selection and "pipeline_sim" not in selection
     assert "M01_record_tpot" not in b["metrics"]
     unknown = next(g for g in b["cost"]["groups"] if g["group"] == "unpriced_runtime")
     assert unknown["selected_ms"] is None and unknown["analytic_ms"] is None
@@ -110,6 +111,8 @@ def test_all_fallback_is_analytic_and_unknown_runtime_is_null():
 def test_selected_pipeline_and_serial_boundaries_are_distinct():
     b = run_v2(ascend(mode="dt_pipeline_sim")).to_json()
     selection = b["cost"]["selection"]
+    assert selection["execution"] != b["execution"]
+    simulation = selection.get("pipeline_sim", b["cost"]["pipeline_sim"])
     serial = selection["execution"]["rounds"][0]
     priced = [event["t_ms"] for event in serial["events"] if event["t_ms"] is not None]
     assert sum(priced) == pytest.approx(serial["t_round_ms"])
@@ -122,23 +125,28 @@ def test_selected_pipeline_and_serial_boundaries_are_distinct():
     assert split["t2d"]["start_ms"] is None
     assert split["t2d"]["start_lower_bound_ms"] == pytest.approx(
         sum(split[k]["t_ms"] for k in ("draft_block", "d2t", "verify_block")))
-    assert selection["pipeline_sim"]["timing_complete"] is False
-    assert selection["pipeline_sim"]["excluded_stages"] == ["commit_rewind", "hidden_extract"]
+    assert simulation["timing_complete"] is False
+    assert simulation["excluded_stages"] == ["commit_rewind", "hidden_extract"]
     assert b["metrics"]["M04_round_selected"]["value"] == serial["t_round_ms"]
-    for cohort, period in selection["pipeline_sim"]["cohort_periods_ms"].items():
+    for cohort, period in simulation["cohort_periods_ms"].items():
         metric = b["metrics"]["M18_selected_cohort_period_ms"][cohort]
         assert metric["value"] == period and metric["support"] == "approximated"
-        assert metric["reason"] == selection["pipeline_sim"]["timing_reason"]
-    assert selection["pipeline_sim"]["violations"] == []
+        assert metric["reason"] == simulation["timing_reason"]
+    assert simulation["violations"] == []
     links = [g for g in b["cost"]["groups"] if g["group"] == "point_to_point"]
     assert {g["stage"] for g in links} == {"d2t", "t2d"}
 
 
-def test_cost_group_and_historic_r27_anchors():
-    for script in ("tools/replay_cost_groups.py", "tools/replay_cost_integrity_r27.py"):
-        args = [sys.executable, "-X", "utf8", script] + (["--check"] if "r27" in script else [])
-        result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
-        assert result.returncode == 0, result.stderr
+def test_cost_group_and_historic_anchors():
+    commands = [
+        ("tools/replay_cost_groups.py",),
+        ("tools/replay_qwen36_mtp.py", "--check"),
+        ("tools/replay_cost_integrity_r27.py", "--check"),
+    ]
+    for script in commands:
+        result = subprocess.run([sys.executable, "-X", "utf8", *script], cwd=ROOT,
+                                capture_output=True, text=True, encoding="utf-8", timeout=60)
+        assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_group_csv_api_cli_and_trace_share_one_selection(tmp_path):
@@ -164,3 +172,39 @@ def test_group_csv_api_cli_and_trace_share_one_selection(tmp_path):
                           cwd=ROOT,capture_output=True,text=True,encoding="utf-8",timeout=30)
     assert proc.returncode == 0, proc.stderr
     assert list(csv.DictReader(io.StringIO(out.read_text(encoding="utf-8")))) == exported
+
+
+@pytest.mark.parametrize(("canonical", "legacy", "expected"), [
+    (True, True, 1.0),
+    (False, True, 2.0),
+    (False, False, 3.0),
+])
+def test_export_v2_trace_reads_legacy_record_selection(tmp_path, canonical, legacy, expected):
+    def execution(t_ms):
+        return {"rounds": [{"events": [{"stage": "decode", "t_ms": t_ms}]}]}
+
+    cost = {}
+    if canonical:
+        cost["selection"] = {"execution": execution(1.0)}
+    if legacy:
+        cost["record_cost"] = {"selected_execution": execution(2.0), "matched": 1}
+    result = {"schema_version": "0.2", "cost": cost, "execution": execution(3.0)}
+    path, out = tmp_path / "run.json", tmp_path / "trace.csv"
+    path.write_text(json.dumps(result), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-m", "simverse.cli", "export-v2", str(path), "--trace", str(out)],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    with out.open(encoding="utf-8") as stream:
+        [event] = list(csv.DictReader(stream))
+    assert float(event["t_ms"]) == expected
+
+
+def test_analytic_pipeline_simulation_has_one_serialized_copy():
+    bundle = run_v2(ScenarioV2(deployment={"mode": "dt_pipeline_sim"})).to_json()
+    cost = bundle["cost"]
+    assert cost["pipeline_sim"]["timing_complete"] is False
+    assert "pipeline_sim" not in cost["selection"]
+    assert "execution" not in cost["selection"]
+    assert float(bundle["metrics"]["M04_round_selected"]["value"]) == (
+        bundle["execution"]["rounds"][0]["t_round_ms"])

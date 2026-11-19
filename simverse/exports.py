@@ -67,7 +67,10 @@ def _ops_csv_v2(bundle: dict) -> str:
 def _trace_csv_v2(bundle: dict) -> str:
     cols = ["event_id", "round_id", "role", "stage", "t_ms", "start_ms",
             "depends_on", "label", "start_lower_bound_ms", "reason"]
-    execution = ((bundle.get("cost") or {}).get("selection") or {}).get("execution") or bundle.get("execution")
+    cost = bundle.get("cost") or {}
+    execution = ((cost.get("selection") or {}).get("execution")
+                 or (cost.get("record_cost") or {}).get("selected_execution")
+                 or bundle.get("execution"))
     events = [e for rnd in (execution or {}).get("rounds") or []
               for e in rnd.get("events") or []]
     return _csv(cols, events)

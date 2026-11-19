@@ -278,14 +278,23 @@ def test_host_warning_survives_pipeline_mode_metric_update():
     assert m01.support.value == "approximated"
     assert m01.formula_ref == "v2.roofline"      # 重建不再丢 formula
     assert "M18_cohort_period_ms" in b.metrics
-
-
-def test_capability_engram_degradation_kept_in_pipeline_mode():
-    """capability 侧 Host 降级检查继续保留（不被模式增补移除）。"""
-    b = _v41_chain_pipeline().to_json()
-    checks = b["capability"]["checks"]
+    checks = b.capability["checks"]
     assert checks["engram_host_lookup_latency"]["status"] == "unknown"
     assert checks["stage_cost_complete"]["status"] == "unknown"
+    serial = b.execution["rounds"][0]
+    assert serial["timing_complete"] is False
+    events = {event["stage"]: event for event in serial["events"]}
+    assert events["verify"]["t_ms"] > 0
+    assert "Engram host" in events["verify"]["reason"]
+    assert events["t2d"]["start_ms"] is None
+    assert events["t2d"]["start_lower_bound_ms"] > 0
+    assert b.cost["pipeline_sim"]["timing_complete"] is False
+    for key in ("M04_round_ms", "M04_round_selected", "M18_per_round_throughput_ms"):
+        assert b.metrics[key].value > 0
+        assert b.metrics[key].support.value == "approximated"
+        assert b.metrics[key].feasibility.value == "unknown"
+        assert "Engram host" in b.metrics[key].reason
+    assert "Engram host" in b.metrics["M04_stage_breakdown_ms"]["verify"].reason
 
 
 # ---------------------------------------------------------------------------

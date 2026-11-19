@@ -300,7 +300,7 @@ class TestPipelineMtp:
         from simverse.scenario import ScenarioV2
         b = run_v2(ScenarioV2(method_id="mtp", k=1)).to_json()
         inv = {a["alloc_id"]: a for a in
-               b["cost"]["memory"]["colocated_r0"]["inventory"]}
+               b["cost"]["memory"]["colocated_ranks"][0]["inventory"]}
         for alloc in ("draft-w-moe-L0", "draft-w-mtp-fc-norms", "draft-kv",
                       "t-mtp-draft-buffers", "t-mtp-last-hidden"):
             assert alloc in inv, alloc
@@ -316,7 +316,7 @@ class TestPipelineMtp:
         moe = inv["draft-w-moe-L0"]["bytes"]
         assert moe == int(2048 * 256 * 1.0) + int(3 * 2048 * 64 * 1.0) + \
             int(2048 * 1.0) + int(256 * 3 * 2048 * 64 * 1.0)
-        # 草稿 KV：1 个 full-attn 层，kvh=2<tp 复制全量
+        # 草稿 KV：1 个 full-attn 层，kvh=2<tp 时每 rank 持 1 个 KV 头
         assert inv["draft-kv"]["bytes"] == 1 * 32768 * 2 * 1 * 256 * 1
 
     def test_draft_expert_precision_matches_count_and_residency(self):
@@ -326,7 +326,7 @@ class TestPipelineMtp:
         b = run_v2(ScenarioV2(method_id="mtp", k=1)).to_json()
         rows = {r["op"]: r for r in b["work"]["draft_step_0"]["rows"]}
         inv = {a["alloc_id"]: a for a in
-               b["cost"]["memory"]["colocated_r0"]["inventory"]}
+               b["cost"]["memory"]["colocated_ranks"][0]["inventory"]}
         routed = 256 * 3 * 2048 * (512 // 8) * (8 // 8)
         assert rows["moe_routed"]["weight_capacity"] == routed
         assert inv["draft-w-moe-L0"]["bytes"] == (
@@ -342,7 +342,7 @@ class TestPipelineMtp:
         varied_rows = {r["op"]: r for r in
                        varied["work"]["draft_step_0"]["rows"]}
         varied_inv = {a["alloc_id"]: a for a in
-                      varied["cost"]["memory"]["colocated_r0"]["inventory"]}
+                      varied["cost"]["memory"]["colocated_ranks"][0]["inventory"]}
         assert varied_rows["mtp_fc"]["weight_read"] == 2 * rows["mtp_fc"]["weight_read"]
         assert varied_rows["draft_lm_head"]["weight_read"] == \
             varied_inv["target-w-lm_head"]["bytes"]
@@ -427,5 +427,5 @@ class TestReplayFrozen:
         assert t0["weight_read_expected"] == FROZEN["step0_weight_read_expected"]
         assert t0["kv_read"] == FROZEN["step0_kv_read"]
         assert t2["kv_read"] == FROZEN["step2_kv_read"]
-        mem = b["cost"]["memory"]["colocated_r0"]
+        mem = b["cost"]["memory"]["colocated_ranks"][0]
         assert mem["steady_bytes"] == FROZEN["steady_bytes"]

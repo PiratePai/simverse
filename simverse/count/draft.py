@@ -366,10 +366,11 @@ def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
         stage, li, layer, B, ctx + step_idx, 1, h, quant, tp,
         replicate_full_kv=plan.replicate_full_kv if plan is not None else False)
     rows += layer_rows
+    from ..lowering.parallel import local_moe_experts
+
     T = B
     rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
-                            local_experts=_mtp_local_experts(layer, plan, ep,
-                                                             rank))
+                            local_experts=local_moe_experts(layer, tp, ep, rank, plan=plan))
     rows += norm_add_rows(stage, li, T, h, quant)
     # 5) final norm（mtp.norm，replicated）
     ops, w, ar, aw = _norm_row(B, h, b_a)
@@ -420,17 +421,7 @@ def _mtp_template_layer(target: ModelIR) -> LayerIR:
         "固定 full_attention 层型，无对应层即结构失配）")
 
 
-def _mtp_local_experts(layer: LayerIR, plan, ep: int, rank: int):
-    """MTP 层 MoE 的本 rank 专家数（与目标同 ParallelPlan 配方；EP 开时
-    余数 rank +1——vLLM 草稿同 TP/EP 组，QwenNextMixtureOfExperts 同构）。"""
-    if plan is not None:
-        return plan.moe_local_experts(layer, rank) or None
-    if layer.moe is None or not layer.moe.experts:
-        return None
-    if ep == 1:
-        return layer.moe.experts
-    base, rem = divmod(layer.moe.experts, ep)
-    return base + (1 if rank < rem else 0)
+
 
 
 def mtp_layer_model(target: ModelIR) -> ModelIR:

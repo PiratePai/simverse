@@ -3,6 +3,7 @@
 这些测试是规范的机械化部分；它们失败 = 合入违反准则，不允许为通过而放宽。
 """
 import json
+import os
 import re
 import subprocess
 import sys
@@ -162,23 +163,29 @@ def test_g5_no_global_multiplier_in_profile_module():
 # G6 状态文档测试数与实际一致
 # ---------------------------------------------------------------------------
 
-def test_g6_status_doc_test_count_matches_reality():
+def test_g6_status_doc_test_count_matches_reality(request):
     text = STATUS_DOC.read_text(encoding="utf-8")
     # 只认“当前收集数”标记；历史段落的 passed 数字不参与核对。
     m = re.search(r"pytest 收集数[：:]\s*(\d+)", text)
     assert m, "IMPLEMENTATION_STATUS.md 必须写明当前 'pytest 收集数：N'"
     claimed = int(m.group(1))
-    out = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests"],
-        capture_output=True, text=True, cwd=str(ROOT), timeout=300)
-    n = None
-    mm = re.search(r"(\d+) tests? collected", out.stdout)
-    if mm:
-        n = int(mm.group(1))
+    config = request.config
+    filters = ("keyword", "markexpr", "ignore", "ignore_glob", "deselect", "lf", "stepwise")
+    full_suite = (len(config.args) == 1
+                  and (config.invocation_params.dir / config.args[0]).resolve() == ROOT / "tests"
+                  and not any(config.getoption(name, default=False) for name in filters))
+    if full_suite:
+        n = request.session.testscollected
     else:
-        lines = [l for l in out.stdout.splitlines() if ":" in l and l.strip()]
-        n = len(lines)
-    assert n is not None and n > 0, f"pytest 收集失败：{out.stderr[-300:]}"
+        out = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "-q", "tests"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=300,
+            env={**os.environ, "PYTEST_ADDOPTS": ""})
+        assert out.returncode == 0, out.stderr or out.stdout
+        collected = re.search(r"(\d+) tests? collected", out.stdout)
+        assert collected, f"pytest 收集失败：{out.stdout[-300:]}"
+        n = int(collected.group(1))
+    assert n > 0
     assert claimed == n, \
         f"状态文档声称收集 {claimed} 项，实际收集 {n} 项——文档与实现不一致（G6）"
 

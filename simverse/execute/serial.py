@@ -35,10 +35,16 @@ class RoundEvent:
 class SerialRound:
     round_id: str
     events: List[RoundEvent]
-    t_round_ms: float
+    t_round_ms: Optional[float]
     e_n: Optional[float]
     tpot_ms: Optional[float]           # None 当 E[N] unknown（动态 K 等缺律）
     reason: Optional[str] = None
+
+    timing_gap: Optional[str] = None
+
+    @property
+    def timing_complete(self) -> bool:
+        return self.t_round_ms is not None and not (self.unpriced_stages or self.timing_gap)
 
     @property
     def unpriced_stages(self) -> list[str]:
@@ -49,16 +55,17 @@ class SerialRound:
                   "events": [e.to_json() for e in self.events],
                   "t_round_ms": self.t_round_ms, "E_N": self.e_n,
                   "tpot_ms": self.tpot_ms, "reason": self.reason}
-        if self.unpriced_stages:
+        if not self.timing_complete:
             result["timing_complete"] = False
         return result
 
 
-def evaluate_execution(plan, stage_costs, e_n, deployment):
+def evaluate_execution(plan, stage_costs, e_n, deployment, *,
+                       acceptance_reason=None, timing_gap=None):
     """One execution policy for analytical and selected costs; no model recount."""
     if e_n is None:
-        return SerialRound("r0", [], 0.0, None, None, "E[N] unknown"), None
-    serial = build_serial_round(plan, stage_costs, e_n)
+        return SerialRound("r0", [], None, None, None, acceptance_reason or "E[N] unknown"), None
+    serial = build_serial_round(plan, stage_costs, e_n, timing_gap=timing_gap)
     simulation = None
     if deployment.mode == "dt_pipeline_sim":
         from .resource_core import dt_pipeline_schedule
@@ -66,15 +73,18 @@ def evaluate_execution(plan, stage_costs, e_n, deployment):
         simulation = dt_pipeline_schedule(draft, stage_costs.get("d2t", 0.0),
             stage_costs.get("verify_block", stage_costs.get("verify", 0.0)), stage_costs.get("t2d", 0.0),
             rounds=deployment.pipeline_rounds, microbatches=deployment.pipeline_microbatches).to_json()
-        if serial.unpriced_stages:
+        if not serial.timing_complete:
             simulation["timing_complete"] = False
-            simulation["excluded_stages"] = serial.unpriced_stages
-            simulation["timing_reason"] = "仅含已计价阶段的理想流水模拟，省略未计价步骤"
+            omitted = serial.unpriced_stages
+            simulation["excluded_stages"] = omitted
+            stage_reason = "仅含已计价阶段的理想流水模拟，省略未计价步骤" if omitted else None
+            simulation["timing_reason"] = "；".join(filter(None, (stage_reason, timing_gap)))
     return serial, simulation
 
 
 def build_serial_round(plan, stage_costs: Dict[str, Optional[float]], e_n: Optional[float],
-                       reason: Optional[str] = None) -> SerialRound:
+                       reason: Optional[str] = None, *,
+                       timing_gap: Optional[str] = None) -> SerialRound:
     """把 MethodPlan 步骤 + 各阶段计价串成一条因果链。
 
     stage_costs: step_id → ms；None 表示时长未知，0 表示已知为零，缺失报错。
@@ -89,24 +99,27 @@ def build_serial_round(plan, stage_costs: Dict[str, Optional[float]], e_n: Optio
             raise ValueError(f"缺少阶段成本：{step.step_id}")
         price = stage_costs[step.step_id]
         t = float(price) if price is not None else None
+        stage_gap = timing_gap if step.role == "target" else None
         ev = RoundEvent(
             event_id=f"r0.{step.step_id}", round_id="r0", role=step.role,
             stage=step.step_id, label=step.desc, t_ms=t,
             depends_on=[prev_id] if prev_id else [],
             start_ms=t_acc if prefix_known else None,
             detail={"tokens": step.tokens},
-            reason="阶段未单独计价，时长未知" if t is None else None,
+            reason="阶段未单独计价，时长未知" if t is None else stage_gap,
             start_lower_bound_ms=t_acc if not prefix_known else None)
         events.append(ev)
-        if t is None:
-            prefix_known = False
-        else:
+        if t is not None:
             t_acc += t
+        if t is None or stage_gap:
+            prefix_known = False
         prev_id = ev.event_id
     tpot = (t_acc / e_n) if (e_n is not None and e_n > 0) else None
     if reason is None:
         if e_n is None:
             reason = "E[N] unknown：见 acceptance reason"
-        elif not prefix_known:
+        elif any(event.t_ms is None for event in events):
             reason = "存在未计价阶段，轮耗时与 TPOT 为已计价阶段下界"
-    return SerialRound("r0", events, t_acc, e_n, tpot, reason)
+    if timing_gap:
+        reason = "；".join(filter(None, (reason, timing_gap)))
+    return SerialRound("r0", events, t_acc, e_n, tpot, reason, timing_gap)

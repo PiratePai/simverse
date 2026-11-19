@@ -61,8 +61,15 @@ def snapshot():
                 else:
                     for k, v in obj.items(): visit(v, path + "/" + k)
         visit(bundle["metrics"])
+        memory = bundle["cost"].get("memory", bundle.get("memory"))
+        ranks = (memory or {}).get("colocated_ranks")
+        if ranks:
+            # The frozen digests included compatibility aliases for per-rank inventories.
+            memory = {**memory, "colocated_r0": ranks[0]}
+            if any(rank["known_peak_bytes"] != ranks[0]["known_peak_bytes"] for rank in ranks):
+                memory.update({f"colocated_r{i}": rank for i, rank in enumerate(ranks)})
         result[name] = {"work": digest(bundle["work"]),
-                        "memory": digest(bundle["cost"].get("memory", bundle.get("memory"))),
+                        "memory": digest(memory),
                         "metrics": metrics}
     return result
 

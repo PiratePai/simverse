@@ -43,7 +43,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from ..model_ir.schema import AttentionIR, DraftIR, LayerIR, LinearAttnIR, ModelIR
+from ..model_ir.schema import AttentionIR, DraftIR, LayerIR, LinearAttnIR, ModelIR, MoeIR
 
 VLLM_PARALLEL_PIN = "vllm@dc74b8cbbbe3dbb9399fe369757d63defd614cc2"
 RECIPE_ID = "vllm-fusedmoe-tp-ep-v1"
@@ -57,6 +57,12 @@ class MoEShardRule:
     local_experts_base: int     # E // ep
     remainder: int              # E % ep：前 remainder 个 rank 各 +1
     inter_per_rank: int         # 每专家 intermediate（EP=inter；TP=inter/tp）
+
+    @classmethod
+    def from_layer(cls, moe: MoeIR, tp: int, ep: int) -> MoEShardRule:
+        base, remainder = divmod(moe.experts, ep)
+        return cls(ep != 1, moe.experts, base, remainder,
+                   moe.intermediate if ep != 1 else moe.intermediate // tp)
 
     def local_experts(self, rank: int) -> int:
         if not self.ep_enabled:
@@ -200,6 +206,16 @@ class ParallelPlan:
         }
 
 
+def local_moe_experts(layer: LayerIR, tp: int, ep: int, rank: int, *,
+                      plan: Optional[ParallelPlan] = None) -> Optional[int]:
+    if layer.moe is None or not layer.moe.experts:
+        return None
+    rule = plan.moe_rule(layer) if plan is not None else None
+    if rule is None:
+        rule = MoEShardRule.from_layer(layer.moe, tp, ep)
+    return rule.local_experts(rank)
+
+
 def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
                       draft: Optional[DraftIR] = None, *,
                       replicate_full_kv: bool = False) -> ParallelPlan:
@@ -255,9 +271,6 @@ def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
             if tp > moe.experts:
                 errors.append(
                     f"TP{tp} > 专家数 {moe.experts}（vLLM qwen3_next L184 拒绝）")
-            base, rem = divmod(moe.experts, ep)
-            moe_rules.append((layer.index, MoEShardRule(
-                True, moe.experts, base, rem, moe.intermediate)))
         else:
             if moe.intermediate % tp:
                 errors.append(
@@ -267,8 +280,7 @@ def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
                 errors.append(
                     f"shared inter {moe.shared_intermediate} 不整除 TP{tp}"
                     "（qwen3_next L127 raise）")
-            moe_rules.append((layer.index, MoEShardRule(
-                False, moe.experts, moe.experts, 0, moe.intermediate // tp)))
+        moe_rules.append((layer.index, MoEShardRule.from_layer(moe, tp, ep if moe_ep else 1)))
     # dense FFN（mlp_only 层）同样 inter/tp
     for layer in model.layers:
         if layer.dense_inter and layer.moe is None and layer.dense_inter % tp:

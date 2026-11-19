@@ -130,11 +130,27 @@ def test_empty_position_alphas_is_rejected_by_pipeline():
     assert "alphas" in b["metrics"]["error"]["reason"]
 
 
-def test_unknown_acceptance_propagates_to_tpot():
-    b = run_v2(_dflash_sc(acceptance={"kind": "dynamic_k"}))
-    assert b.metrics["M03_E_N"].value is None
-    assert b.metrics["M01_tpot_analytical"].value is None
-    assert b.metrics["M01_tpot_analytical"].reason
+@pytest.mark.parametrize(("acceptance", "k"), [
+    ({"kind": "dynamic_k"}, None),
+    ({"kind": "committed_mean", "mean": 2}, 15),
+])
+def test_unknown_acceptance_keeps_known_parts_of_result(acceptance, k):
+    b = run_v2(_dflash_sc(acceptance=acceptance)).to_json()
+    assert b["manifest"]["status"] == "completed"
+    assert b["manifest"]["device_snapshot_digest"].startswith("sha256:")
+    assert b["metrics"]["M03_K"]["value"] == k
+    for key in ("M03_E_N", "M01_tpot_analytical", "M01_tpot_selected",
+                "M04_round_ms", "M04_round_selected"):
+        assert b["metrics"][key]["value"] is None
+        assert b["metrics"][key]["reason"]
+    assert b["execution"]["rounds"][0]["t_round_ms"] is None
+    assert b["execution"]["rounds"][0]["timing_complete"] is False
+    assert b["execution"]["rounds"][0]["reason"]
+    assert "execution" not in b["cost"]["selection"]
+    rank = b["cost"]["memory"]["colocated_ranks"][0]
+    assert rank["inventory"] and rank["peak_complete"] is False
+    assert b["metrics"]["M06_memory_colocated_r0"]["value"] == rank["known_peak_bytes"]
+    assert b["cost"]["row_prices"]
 
 
 def test_v41_structure_gap_blocks_ranking():

@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from simverse.count import build_model_work  # noqa: E402
+from simverse.count.draft import mtp_step_rows  # noqa: E402
 from simverse.count.moe import moe_rows  # noqa: E402
 from simverse.lowering import (LinkLike, model_collectives,  # noqa: E402
                                target_weight_allocations, validate_parallel)
@@ -93,18 +94,33 @@ def test_illegal_vocab_and_kvh_constraints_synthetic():
     assert any("专家数" in e for e in p.errors)
 
 
-def test_ep_remainder_distribution():
-    """E=6, ep=4：base=1 rem=2 → rank0/1 各 2 专家，rank2/3 各 1；Σ=6。"""
+@pytest.mark.parametrize(("experts", "ep", "local_counts"), [
+    (6, 1, [6, 6, 6, 6]),
+    (8, 4, [2, 2, 2, 2]),
+    (6, 4, [2, 2, 1, 1]),
+])
+def test_ep_expert_distribution_agrees_across_count_and_memory(experts, ep, local_counts):
     src = SourceIdentity("synthetic:test", "none", "hand")
     attn = AttentionIR(heads=8, kv_heads=4, head_dim=32, rotary_dim=32)
-    moe = MoeIR(experts=6, top_k=2, intermediate=128)
-    m = ModelIR("t4", "t4", "qwen3_moe", 256, 1000,
-                [LayerIR(0, FULL, attn=attn, moe=moe)], src)
-    p = validate_parallel(m, 4, 4)
-    assert p.valid
-    locals_ = [p.moe_local_experts(m.layers[0], r) for r in range(4)]
-    assert locals_ == [2, 2, 1, 1]
-    assert sum(locals_) == 6
+    moe = MoeIR(experts=experts, top_k=2, intermediate=128)
+    layer = LayerIR(0, FULL, attn=attn, moe=moe)
+    model = ModelIR("t4", "t4", "qwen3_moe", 256, 1000, [layer], src,
+                    extras={"mtp": {"n_layers": 1}})
+    plan = validate_parallel(model, 4, ep)
+    assert plan.valid
+    for rank, expected in enumerate(local_counts):
+        assert plan.moe_local_experts(layer, rank) == expected
+        local_intermediate = 32 if ep == 1 else 128
+        routed_bytes = expected * 3 * 256 * local_intermediate
+        for sharding in (None, plan):
+            kwargs = dict(tp=4, ep=ep, rank=rank, plan=sharding)
+            target = build_model_work(model, "decode", 1, 512, 1, Q8, **kwargs)
+            draft = mtp_step_rows("draft_step_0", model, 0, 512, Q8, **kwargs)
+            for rows in (target, draft):
+                assert next(row for row in rows if row.op == "moe_routed").weight_capacity == routed_bytes
+            allocations = target_weight_allocations(model, Q8, **kwargs)
+            resident = next(a for a in allocations if a.alloc_id == "target-w-moe-L0")
+            assert resident.bytes == routed_bytes + 256 * experts  # replicated router
 
 
 # ---------------------------------------------------------------------------
