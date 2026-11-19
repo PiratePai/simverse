@@ -189,10 +189,16 @@ def test_domain_reject_tp8_all_fallback_with_reason():
     assert chk["status"] == "approximated"
 
 
-def test_domain_reject_precision_mismatch():
-    sc = _scenario(quant={"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
-                          "state": 32})
-    b = _run_archive(sc).to_json()
+@pytest.mark.parametrize(("model_id", "profile", "tp"), [
+    ("qwen3_30b_a3b", SET_ID, 1),
+    ("qwen3_235b_a22b", "h200-qwen3-235b-a22b-op-v1", 8),
+])
+def test_domain_reject_precision_mismatch(model_id, profile, tp):
+    data = _scenario(quant={"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
+                            "state": 32}).to_json()
+    data.update(model_id=model_id, cost_profile=profile)
+    data["deployment"]["target_tp"] = tp
+    b = _run_archive(ScenarioV2.from_json(data)).to_json()
     cal = b["cost"]["calibration"]["stages"]["target_decode"]
     assert cal["domain_ok"] is False
     assert any("精度" in r for r in cal["reasons"])

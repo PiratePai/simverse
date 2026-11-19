@@ -939,14 +939,16 @@
   // ---------- timeline（事件来自 execution.rounds，含依赖） ----------
   function renderTimeline(b) {
     var rc = (b.cost || {}).record_cost;
-    var execution = ((b.cost || {}).selection || {}).execution || b.execution;
+    var execution = ((b.cost || {}).selection || {}).execution
+      || (rc && rc.selected_execution) || b.execution;
     var rounds = (execution && execution.rounds) || [];
     var round = rounds[0] || {};
     var evs = round.events || [];
     var el = $('timeline');
     if (!evs.length) {
-      el.innerHTML = '<div class="unknown-note">无事件（baseline 或接受分布未知：'
-        + (execution && execution.note || '') + '）</div>';
+      $('tl-summary').title = round.reason || '';
+      el.innerHTML = '<div class="unknown-note">无事件：'
+        + esc(round.reason || (execution && execution.note) || '未知') + '</div>';
       $('tl-summary').textContent = '–';
       return;
     }
@@ -986,9 +988,12 @@
     }
     el.innerHTML = html;
     var en = val(b, 'M03_E_N');
-    var basis = unpriced.length ? '已计价阶段下界 ' : '串行轮耗时 ';
-    $('tl-summary').textContent = (rc && rc.matched ? '记录条件对照 · ' : '') +
+    var summary = $('tl-summary');
+    var basis = round.timing_complete === false || unpriced.length
+      ? '已计价阶段下界 ' : '串行轮耗时 ';
+    summary.textContent = (rc && rc.matched ? '记录条件对照 · ' : '') +
       basis + fmt(total, 'ms', 3) + ' · E[N]=' + fmt(en, '', 2);
+    summary.title = round.reason || '';
   }
 
   // ---------- evidence drawer ----------
@@ -1313,14 +1318,21 @@
     a.href = URL.createObjectURL(b); a.download = name; a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
+  function setExportError(message) {
+    var el = $('export-status');
+    el.textContent = message;
+    el.hidden = !message;
+  }
   function exportJson() {
-    if (!state.bundle) { setStatus('先运行一次再导出。', true); return; }
+    if (!state.bundle) { setExportError('先运行一次再导出。'); return; }
+    setExportError('');
     download('simverse-run-' + state.bundle.manifest.run_id.slice(7, 19) + '.json',
       JSON.stringify(state.bundle, null, 1));
   }
   function exportCsv(kind) {
     var bundle = state.bundle;
-    if (!bundle) { setStatus('先运行一次再导出。', true); return; }
+    if (!bundle) { setExportError('先运行一次再导出。'); return; }
+    setExportError('');
     var name = kind === 'groups' ? 'simverse-cost-groups.csv'
       : 'simverse-ops-' + bundle.manifest.run_id.slice(7, 19) + '.csv';
     return fetch('/api/v2/export/' + kind, {
@@ -1332,7 +1344,7 @@
     }).then(function (text) {
       download(name, text, 'text/csv');
     }).catch(function (e) {
-      setStatus('CSV 导出失败：' + esc(e.message), true);
+      setExportError('CSV 导出失败：' + e.message);
     });
   }
 

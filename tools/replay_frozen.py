@@ -1,4 +1,5 @@
 """Check archived evidence against the last revision of its numerical contract."""
+import argparse
 import subprocess
 import sys
 import tarfile
@@ -28,9 +29,14 @@ def replay_frozen(name: str) -> None:
         subprocess.run([sys.executable, "-X", "utf8", *script], cwd=tree, check=True)
 
 
-if __name__ == "__main__":
-    import argparse
+def legacy_entry(name: str) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="核对冻结结果")
+    parser.parse_args()
+    replay_frozen(name)
 
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("evidence", choices=tuple(SCRIPTS))
     replay_frozen(parser.parse_args().evidence)

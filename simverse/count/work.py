@@ -1007,6 +1007,8 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
     decode 的 split-KV 调度器移植需要；缺失时 v41 decode 行显式拒绝
     （未知不得默认）。
     """
+    from ..lowering.parallel import local_moe_experts
+
     h = model.hidden
     S, Q = (0, ctx) if prefill else (ctx, queries)
     rows: List[OpRow] = []
@@ -1027,16 +1029,6 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
         for layer in model.layers:
             if layer.moe is not None and layer.moe.experts:
                 require_divisible_ep(layer.moe.experts, ep)
-
-    def _local_experts(layer):
-        if plan is not None:
-            return plan.moe_local_experts(layer, rank) or None
-        if layer.moe is None or not layer.moe.experts:
-            return None
-        if ep == 1:
-            return layer.moe.experts
-        base, rem = divmod(layer.moe.experts, ep)
-        return base + (1 if rank < rem else 0)
 
     # R25：FlashMLA 注意力核的每步/每层型一次性核归层——SWA 窗口索引每步
     # 一次（全体层共享同 spec 组的元数据构建，记在第 0 层）；调度器元数据
@@ -1070,7 +1062,7 @@ def build_model_work(model: ModelIR, stage: str, B: int, ctx: int, queries: int,
                                    attn_step_first=step_first)
         T = B * Q
         rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
-                                local_experts=_local_experts(layer),
+                                local_experts=local_moe_experts(layer, tp, ep, rank, plan=plan),
                                 route=moe_route, quant_recipe=quant_recipe,
                                 act_recipe=act_recipe)
         if layer.kind == MLA_CSA2 and hc_spec:

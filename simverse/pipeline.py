@@ -277,7 +277,10 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     dep = scenario.deployment
     engram_lookup_host = (bool((model.extras or {}).get("engram"))
                           and dep.engram_table_placement == "cpu_offload")
+    timing_gap = None
     if engram_lookup_host:
+        timing_gap = ("仅 GPU 侧解析耗时下界；Engram host 表查找与预取"
+                      "时延未计，不能作为完整 TPOT")
         cap.add("engram_host_lookup_latency", "unknown",
                 "Engram 表在 host pinned memory：UVA 查表时延与预取重叠未实测；"
                 "仅计算 GPU 侧解析耗时下界，不用 GPU HBM 带宽给 host 读计时",
@@ -387,64 +390,24 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     t_base = stage_total(base_prices)
     # 元数据（compute_dtype/峰值/带宽/cost_basis）直接取自 base_prices 的
     # 同一次计价输出（R27；不另建路由，前端不得自行推导物理参数）
-    roofline_points = _roofline_points(base_rows, base_prices)
     # 通信（R01 按层配方：attn allreduce 恒有；MLP 段 TP allreduce 或 EP all2all）
     col_base = _collectives_cost(model, pplan, B, quant, tp_link,
                                  records=costs, device=target_dev, stage="target_decode")
     t_base += col_base["t_ms"]
     work["target_decode"] = _rows_json(base_rows)
     cost["target_decode"] = {"t_ms": t_base, "collectives": col_base["detail"]}
-    cost["roofline_points"] = roofline_points
-    # 完整逐行计价供透视与 CSV 对账；保留既有 top-40 点以兼容历史证据。
-    cost["row_prices"] = _roofline_points(base_rows, base_prices,
-                                          limit=None, include_zero=True)
+    cost["row_prices"], cost["roofline_points"] = _row_price_views(base_rows, base_prices)
 
     stage_costs: Dict[str, Optional[float]] = {}
+    msg_bytes = {}
+    e_n = 1.0 if scenario.method_id == "baseline" else acc["E_N"]
     if scenario.method_id == "baseline":
         stage_costs["decode"] = t_base
-        e_n = 1.0
-        draft_rows: List = []
-        msg_bytes = {"d2t": 0, "t2d": 0}
+    elif e_n is None:
+        cap.add("acceptance_known", "unsupported",
+                f"E[N] 未知：{acc['reason']}",
+                affected_metrics=["M01 TPOT", "M02 加速比", "M03 E[N]", "M04 轮分解"])
     else:
-        e_n = acc["E_N"]
-        if e_n is None:
-            # 依赖污染按指标传播（plan §4）：保留结构/基线/容量已知部分
-            cap.add("acceptance_known", "unsupported",
-                    f"E[N] 未知：{acc['reason']}",
-                    affected_metrics=["M01 TPOT", "M02 加速比", "M03 E[N]", "M04 轮分解"])
-            memory = _memory_block(
-                model, None, quant, dquant, dep, B, ctx, cap, plan=pplan,
-                mtp_model=(_mtp_mem_model(model)
-                           if scenario.method_id == "mtp"
-                           and (model.extras or {}).get("mtp") else None))
-            from .execute.serial import SerialRound
-            empty = SerialRound("r0", [], 0.0, None, None, acc["reason"])
-            metrics = _build_metrics_null_acceptance(acc, t_base, memory, cap, model)
-            manifest = RunManifest(run_id="", status="completed",
-                                   input_digest=scenario.scenario_digest(),
-                                   model_ir_digest=digest(model.to_json()),
-                                   method_digest=digest(plan.to_json()),
-                                   code_revision=code_revision())
-            manifest.compute_run_id()
-            bundle = ResultBundle(
-                manifest=manifest, scenario_snapshot=scenario.to_json(),
-                model_ref={"id": model.id,
-                           "structure_complete": model.structure_complete,
-                           "config_coverage_complete": model.config_coverage_complete,
-                           "forward_evidence_complete": model.forward_evidence_complete,
-                           "evidence": model.evidence.to_json(),
-                           "gaps": model.gaps,
-                           "source": model.source.to_json()},
-                method_plan=plan.to_json(),
-                work={"target_decode": _rows_json(base_rows)},
-                cost={"target_decode": {"t_ms": t_base}},
-                execution={"rounds": [empty.to_json()], "mode": "serial-analytical"},
-                metrics=metrics, capability=cap.to_json(),
-                evidence_refs=_run_evidence_refs(
-                    model, draft, scenario.method_id, scenario.cost_profile),
-                formula_dict=FR.formulas_json()["formulas"],
-                assumption_dict=_assumptions(scenario, plan))
-            return costs.finish(bundle, plan, {}, None, _roofline_points)
         if scenario.method_id == "dflash_v1":
             # 草稿与 target 同 TP 组（vLLM load_dflash_model pin；dt_serial
             # 独立设备时草稿组 TP1 全量副本——无共享配方，见 memory）
@@ -679,7 +642,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     mtp_mem_model = (_mtp_mem_model(model) if scenario.method_id == "mtp"
                      and (model.extras or {}).get("mtp") else None)
     memory = _memory_block(
-        model, draft if scenario.method_id == "dflash_v1" else None,
+        model, draft if scenario.method_id == "dflash_v1" and e_n is not None else None,
         quant, dquant, dep, B, ctx, cap, plan=pplan,
         block_size=(plan.block_size
                     if scenario.method_id == "dflash_v1" and e_n is not None else 0),
@@ -689,7 +652,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
 
     cost["memory"] = memory       # R02a：per-rank 对象清单与判定入册（导出/UI 共用）
 
-    round_obj, simulation = evaluate_execution(plan, stage_costs, e_n, dep)
+    round_obj, simulation = evaluate_execution(
+        plan, stage_costs, e_n, dep, acceptance_reason=acc["reason"], timing_gap=timing_gap)
     if simulation is not None:
         cost["pipeline_sim"] = simulation
         violations = simulation.get("violations", [])
@@ -700,13 +664,11 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     # ---- 指标 ----
     metrics = _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                              base_rows, memory, cap, model, draft)
-    if engram_lookup_host:
-        for key in ("M01_tpot_analytical", "M01_tpot_baseline"):
-            metric = metrics.get(key)
-            if isinstance(metric, Metric) and metric.value is not None:
-                metric.support = Support.APPROXIMATED
-                metric.reason = ("仅 GPU 侧解析耗时下界；Engram host 表查找与预取"
-                                 "时延未计，不能作为完整 TPOT")
+    if timing_gap:
+        baseline_metric = metrics["M01_tpot_baseline"]
+        baseline_metric.support = Support.APPROXIMATED
+        baseline_metric.feasibility = Feasibility.UNKNOWN
+        baseline_metric.reason = "；".join(filter(None, (baseline_metric.reason, timing_gap)))
     # M18 周期/利用率/流水（dt_pipeline_sim；周期≠单请求 TPOT，分列）
     if cost.get("pipeline_sim"):
         ps = cost["pipeline_sim"]
@@ -785,7 +747,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         cost=cost,
         execution={"rounds": [round_obj.to_json()],
                    "mode": "serial-analytical",
-                   "note": round_obj.reason if round_obj.unpriced_stages else (
+                   "note": round_obj.reason if not round_obj.timing_complete else (
                        "串行解析档：阶段和=轮墙钟（无重叠）；M3 事件核接入后"
                        "本值作同假设对照")},
         metrics=metrics,
@@ -795,7 +757,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         formula_dict=FR.formulas_json()["formulas"],
         assumption_dict=_assumptions(scenario, plan),
     )
-    return costs.finish(bundle, plan, stage_costs, e_n, _roofline_points)
+    return costs.finish(bundle, plan, stage_costs, e_n, _row_price_views, timing_gap=timing_gap)
 
 
 def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,
@@ -835,8 +797,7 @@ def _collectives_cost(model, plan, tokens: int, quant: dict, link: LinkLike,
         "total_t_ms": t}}
 
 
-def _roofline_points(rows, prices, limit: Optional[int] = 40,
-                     include_zero: bool = False):
+def _row_price_views(rows, prices):
     """算子 Roofline 坐标与计价元数据（后端算好；前端只画点）。
 
     R27：compute_dtype/peak_tflops/effective_peak_tflops/bandwidth_tb_s/
@@ -845,14 +806,10 @@ def _roofline_points(rows, prices, limit: Optional[int] = 40,
     TFLOP/s 与十进制 TB/s；peak 为设备规格 dense 口径，effective 为本次
     计价采用的峰值（×mfu_cap）。row_id 稳定（stage:layer:op）。
     """
-    pts = []
+    points = []
     for row, price in zip(rows, prices):
-        if not include_zero and row.flops <= 0:
-            continue
         total_bytes = price.get("bytes_exact", 0) + price.get("bytes_expected", 0)
-        if not include_zero and total_bytes <= 0:
-            continue
-        pts.append({
+        point = {
             "row_id": f"{row.stage}:{row.layer}:{row.op}",
             "layer": row.layer, "op": row.op, "stage": row.stage,
             "ai_flop_per_byte": row.flops / total_bytes if total_bytes else 0.0,
@@ -863,12 +820,13 @@ def _roofline_points(rows, prices, limit: Optional[int] = 40,
             "effective_peak_tflops": price.get("effective_peak_tflops"),
             "bandwidth_tb_s": price.get("bandwidth_tb_s"),
             "cost_basis": price.get("cost_basis"),
-        })
+        }
         for key in ("analytic_ms", "cost_source", "record_refs", "fallback_reason"):
             if key in price:
-                pts[-1][key] = price[key]
-    pts.sort(key=lambda x: -x["t_ms"])
-    return pts[:limit] if limit is not None else pts
+                point[key] = price[key]
+        points.append((point, row.flops > 0 and total_bytes > 0))
+    points.sort(key=lambda pair: -pair[0]["t_ms"])
+    return [point for point, _ in points], [point for point, visible in points if visible][:40]
 
 
 def _rows_json(rows):
@@ -914,11 +872,6 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
             rep["inventory"] = rank_mem.inventory()
             ranks.append(rep)
         blocks["colocated_ranks"] = ranks
-        # M06 键沿用 r0；ranks 非均匀（EP 余数）时逐 rank 单列
-        blocks["colocated_r0"] = dict(ranks[0])
-        if any(x["known_peak_bytes"] != ranks[0]["known_peak_bytes"] for x in ranks):
-            for r, rep in enumerate(ranks):
-                blocks[f"colocated_r{r}"] = dict(rep)
         worst = max(ranks, key=lambda x: x["known_peak_bytes"])
         blocks["colocated_worst"] = {"rank_id": worst["rank_id"],
                                      "known_peak_bytes": worst["known_peak_bytes"]}
@@ -962,9 +915,7 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
             blocks["draft_r0"] = rep
     status_key = {"oom": "unsupported", "unknown": "unknown",
                   "feasible": "supported", "feasible-conditional": "approximated"}
-    for rk, blk in list(blocks.items()):
-        if not isinstance(blk, dict) or "status" not in blk:
-            continue
+    for rk, blk in _memory_reports(blocks):
         st = blk["status"]
         detail = (f"{rk} known_peak={blk.get('known_peak_bytes', blk.get('live_bytes'))}B"
                   f"（steady={blk.get('steady_bytes', '?')}）；"
@@ -972,6 +923,17 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
         cap.add(f"memory_{rk}", status_key.get(st, "unknown"), detail,
                 affected_metrics=["M02 加速比", "M06 显存"])
     return blocks
+
+
+def _memory_reports(memory):
+    ranks = memory.get("colocated_ranks")
+    if ranks:
+        # M06 与能力检查沿用 r0；峰值不均匀时披露各 rank。
+        if all(r["known_peak_bytes"] == ranks[0]["known_peak_bytes"] for r in ranks):
+            ranks = ranks[:1]
+        yield from ((f"colocated_r{i}", report) for i, report in enumerate(ranks))
+    else:
+        yield from memory.items()
 
 
 def _draft_as_model(draft_ir):
@@ -1004,22 +966,21 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
         t_base, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION, scope=sc,
         evidence=(Evidence.COUNTED,), assumptions=["无投机基线同 B/ctx"])
     # M02 加速比（与自身基线同 run 配对；资格检查——统一规则带场景适用域）
-    elig = _eligibility(cap, scenario)
     if round_obj.tpot_ms and t_base:
+        eligibility_issues = _eligibility_issues(cap, scenario)
         m["M02_speedup_vs_baseline"] = metric_from(
             t_base / round_obj.tpot_ms, "ratio", FR.F_ROOFLINE,
             statistic=Statistic.EXPECTATION, scope=sc,
             evidence=(Evidence.COUNTED,),
             assumptions=["同 B/ctx/精度/设备；分子分母同为解析估算"],
-        ) if elig else Metric(
+        ) if not eligibility_issues else Metric(
             value=t_base / round_obj.tpot_ms, unit="ratio", scope=sc,
             statistic=Statistic.EXPECTATION,
             support=Support.APPROXIMATED, feasibility=Feasibility.UNKNOWN,
             evidence_refs=[], formula_ref=FR.F_ROOFLINE,
-            reason="不参与排名：" + "; ".join(
-                _eligibility_issues(cap, scenario)))
+            reason="不参与排名：" + "; ".join(eligibility_issues))
     else:
-        m["M02_speedup_vs_baseline"] = Metric.unknown("ratio", "TPOT 缺失")
+        m["M02_speedup_vs_baseline"] = Metric.unknown("ratio", round_obj.reason or "TPOT 缺失")
     # M03 每轮产出（baseline：恒 1 精确值）
     if plan.method_id == "baseline":
         m["M03_E_N"] = metric_from(1.0, "tokens/round", "internal",
@@ -1033,9 +994,6 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                                    statistic=Statistic.EXPECTATION, scope=sc,
                                    evidence=(Evidence.ASSUMED,),
                                    assumptions=["Q8 hypothesis 接受率输入"])
-        m["M03_K"] = metric_from(plan.k_effective or 0, "tokens", "internal",
-                                 statistic=Statistic.EXACT, scope=sc,
-                                 evidence=(Evidence.CONFIG,))
         if acc["P_full"] is not None:
             m["M03_P_full"] = metric_from(acc["P_full"], "probability",
                                           plan.en_formula,
@@ -1043,31 +1001,44 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                                           evidence=(Evidence.ASSUMED,))
     else:
         m["M03_E_N"] = Metric.unknown("tokens/round", acc["reason"] or "")
+    if plan.method_id != "baseline":
+        if plan.acceptance.kind == "dynamic_k":
+            m["M03_K"] = Metric.unknown("tokens", acc["reason"], scope=sc)
+        else:
+            m["M03_K"] = metric_from(plan.k_effective, "tokens", "internal",
+                                     statistic=Statistic.EXACT, scope=sc,
+                                     evidence=(Evidence.CONFIG,))
     # M04 单轮分解
-    m["M04_round_ms"] = metric_from(round_obj.t_round_ms, "ms", FR.F_ROOFLINE,
-                                    statistic=Statistic.EXPECTATION, scope=sc,
-                                    evidence=(Evidence.COUNTED,))
+    m["M04_round_ms"] = (
+        Metric.unknown("ms", round_obj.reason, scope=sc) if round_obj.t_round_ms is None else
+        metric_from(round_obj.t_round_ms, "ms", FR.F_ROOFLINE,
+                    statistic=Statistic.EXPECTATION, scope=sc, evidence=(Evidence.COUNTED,)))
     m["M04_stage_breakdown_ms"] = {
         e.stage: (Metric.unknown("ms", e.reason, scope=sc)
                   if e.t_ms is None else metric_from(
                       e.t_ms, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION,
                       scope=sc, evidence=(Evidence.COUNTED,)))
         for e in round_obj.events}
-    if round_obj.unpriced_stages:
+    if not round_obj.timing_complete and round_obj.t_round_ms is not None:
         for key in ("M01_tpot_analytical", "M04_round_ms"):
             metric = m[key]
-            metric.support = Support.APPROXIMATED
-            metric.feasibility = Feasibility.UNKNOWN
-            metric.reason = round_obj.reason
+            if metric.value is not None:
+                metric.support = Support.APPROXIMATED
+                metric.feasibility = Feasibility.UNKNOWN
+                metric.reason = round_obj.reason
+        for event in round_obj.events:
+            if event.t_ms is not None and event.reason:
+                metric = m["M04_stage_breakdown_ms"][event.stage]
+                metric.support = Support.APPROXIMATED
+                metric.feasibility = Feasibility.UNKNOWN
+                metric.reason = event.reason
     # M05 MoE 并集（从账本聚合）
     moe_u = _moe_union_summary(base_rows)
     if moe_u:
         m["M05_moe_union"] = moe_u
     # M06 显存：状态传播（oom→OOM；仅标称/峰值不完整→unknown；
     # 假设预算→feasible 但 support=approximated 且不进实际部署排名）
-    for rk, blk in memory.items():
-        if not isinstance(blk, dict) or "status" not in blk:
-            continue
+    for rk, blk in _memory_reports(memory):
         feas = {"oom": Feasibility.OOM, "unknown": Feasibility.UNKNOWN,
                 "feasible": Feasibility.FEASIBLE,
                 "feasible-conditional": Feasibility.FEASIBLE}[blk["status"]]
@@ -1202,22 +1173,3 @@ def _bundle_error(scenario: ScenarioV2, cap: CapabilityReport, status: str,
         capability=cap.to_json(),
         metrics={"error": Metric.unsupported("none", detail)},
         assumption_dict={"error": status})
-
-
-def _build_metrics_null_acceptance(acc, t_base, memory, cap, model) -> Dict[str, Any]:
-    sc = Scope(role="target", phase="steady-decode", time_basis=TimeBasis.COMMITTED.value)
-    reason = acc["reason"] or "接受分布未知"
-    return {
-        "M01_tpot_analytical": Metric.unknown("ms", reason),
-        "M01_tpot_baseline": metric_from(
-            t_base, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION, scope=sc,
-            evidence=(Evidence.COUNTED,)),
-        "M02_speedup_vs_baseline": Metric.unknown("ratio", f"TPOT 未知：{reason}"),
-        "M03_E_N": Metric.unknown("tokens/round", reason),
-        "M03_K": metric_from(0, "tokens", "internal", statistic=Statistic.EXACT,
-                             scope=sc, evidence=(Evidence.COUNTED,)),
-        "M07_support_summary": {
-            "capability_checks": {k: v["status"] for k, v in cap.checks.items()},
-            "structure_complete": model.structure_complete,
-            "result_kind": "analytical-estimate"},
-    }

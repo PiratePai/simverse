@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 from ..model_ir.schema import ModelIR
 from ..model_ir.families import engram_bucket_primes
 from ..count.moe import require_divisible_ep
-from .parallel import attention_shard_rule
+from .parallel import attention_shard_rule, local_moe_experts
 from ..draft_quant import (FUSED_RAW, MXFP8_CONTEXT_PROJ, PER_LAYER_FALLBACK,
                            dtype_bytes, path_unknown_components,
                            require_ctx_kv_path)
@@ -587,8 +587,7 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
                         + shared_scale_b) if moe.shared_intermediate else 0
             gate_b = int(model.hidden * b_dense) if moe.shared_gate else 0
             if ep != 1:
-                base, rem = divmod(moe.experts, ep)
-                e_l = base + (1 if rank < rem else 0)
+                e_l = local_moe_experts(layer, tp, ep, rank, plan=plan)
                 if quant_recipe is not None:
                     from ..count.quant_layout import (
                         marlin_round_up_hidden, marlin_round_up_intermediate,

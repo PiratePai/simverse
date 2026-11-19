@@ -140,7 +140,7 @@ class CostSession:
             group["basis"] = "sum-of-owned-terms; no fusion assumption or per-row measured allocation"
         return list(combined.values())
 
-    def finish(self, bundle, plan, stage_costs, e_n, exporter):
+    def finish(self, bundle, plan, stage_costs, e_n, row_price_views, *, timing_gap=None):
         """Evaluate alternate costs using cached stages and the same execution function."""
         sc = self.scenario
         groups = self._groups()
@@ -202,7 +202,8 @@ class CostSession:
                 chosen_steps[stage] = selected_totals[counted_stage]
         baseline = selected_totals.get("target_decode", bundle.cost["target_decode"]["t_ms"])
         if chosen_steps != stage_costs:
-            selected_round, selected_sim = evaluate_execution(plan, chosen_steps, e_n, sc.deployment)
+            selected_round, selected_sim = evaluate_execution(
+                plan, chosen_steps, e_n, sc.deployment, timing_gap=timing_gap)
             execution = {**bundle.execution, "rounds": [selected_round.to_json()]}
             tpot, round_ms = selected_round.tpot_ms, selected_round.t_round_ms
         else:
@@ -213,8 +214,11 @@ class CostSession:
         selection = dict(source="records" if self.records else "profile" if self.profile else "analytic",
             source_id=sc.cost_records or sc.cost_profile, granularity="cost-group",
             stage_costs_ms=chosen_steps, baseline_ms=baseline,
-            execution=execution, pipeline_sim=selected_sim,
             row_price_semantics="diagnostic analytical terms or independently matched GEMM; not allocated fused timings")
+        if execution != bundle.execution:
+            selection["execution"] = execution
+        if selected_sim != bundle.cost.get("pipeline_sim"):
+            selection["pipeline_sim"] = selected_sim
         bundle.cost["selection"] = selection
         bundle.cost["groups"] = groups
         unknown = [{"id": k, "time_ms": None, "reason": v["reason"]}
@@ -232,9 +236,8 @@ class CostSession:
                 record_report["prerequisites"].append("未计价方法阶段仍为unknown，不在覆盖分母内：先确认Ascend实现，再采接受/回退/hidden提取，不按0ms忽略")
             base_rows = self.rows_by_stage.get("target_decode", [])
             base_prices = self.selected_prices.get("target_decode", [])
-            selection.update(
-                selected_row_prices=exporter(base_rows, base_prices, limit=None, include_zero=True),
-                selected_roofline_points=exporter(base_rows, base_prices))
+            selection["selected_row_prices"], selection["selected_roofline_points"] = (
+                row_price_views(base_rows, base_prices))
             bundle.cost["record_cost"] = record_report
             note = (f"{record_report['label']}：{record_report['matched']}/{record_report['total']} 成本实例命中；"
                     "其余按原解析回退；记录含host/sync且身份不完备，仅作条件对照，不是生产校准或E2E实测")

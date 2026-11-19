@@ -223,8 +223,8 @@ def test_fused_ctx_kv_path_and_k_norm_stack():
     d = _draft()
     a0 = d.layers[0].attn
     h = 2048
-    for tp in (1, 2, 8):
-        kv_rank = a0.kv_heads // tp if a0.kv_heads >= tp else a0.kv_heads
+    for tp in (1, 2, 8, 16):
+        kv_rank = max(1, a0.kv_heads // tp)
         # raw：_fused_kv_weight 新 cat 副本；k_norm 恒有
         raw = draft_extra_allocations(d, {"dense_w": 8}, tp,
                                       ctx_kv_path="fused_raw")
@@ -338,7 +338,8 @@ def test_pipeline_colocated_memory_report():
     b = run_v2(ScenarioV2())
     mem = b.to_json()["cost"]["memory"]
     assert len(mem["colocated_ranks"]) == 8
-    r0 = mem["colocated_r0"]
+    assert set(mem) == {"colocated_ranks", "colocated_worst"}
+    r0 = mem["colocated_ranks"][0]
     assert r0["steady_bytes"] + r0["transient_peak_bytes"] == \
         r0["known_peak_bytes"]
     assert r0["peak_complete"] is False            # workspace/graph 缺口传播
@@ -349,6 +350,27 @@ def test_pipeline_colocated_memory_report():
     assert m06.value == r0["known_peak_bytes"]
     assert m06.feasibility.value if hasattr(m06.feasibility, "value") \
         else m06.feasibility == "unknown"
+
+
+def test_cuda_dflash_tp16_replicates_one_draft_kv_head():
+    from simverse.pipeline import run_v2
+    from simverse.scenario import ScenarioV2
+
+    ctx = 4096
+    b = run_v2(ScenarioV2(draft_quant=Q8, workload={"ctx_tokens": ctx},
+                          deployment={"target_tp": 16})).to_json()
+    assert b["manifest"]["status"] == "completed"
+    projections = [row for row in b["work"]["draft_block"]["rows"]
+                   if row["op"] in ("k_proj", "v_proj")]
+    # Pinned DFlash draft: 6 layers, hidden=2048, 8 KV heads of dimension 128, W8/KV8.
+    assert len(projections) == 6 * 2
+    assert all(row["weight_capacity"] == 2048 * 128 for row in projections)
+    ranks = b["cost"]["memory"]["colocated_ranks"]
+    assert len(ranks) == 16
+    for rank in ranks:
+        inventory = {entry["alloc_id"]: entry["bytes"] for entry in rank["inventory"]}
+        assert inventory["draft-kv"] == 6 * ctx * 2 * 128
+        assert inventory["draft-w-dflash-fused-ctx-kv"] == 6 * 2 * 128 * 2048
 
 
 def test_ep8_ranks_uniform_when_exact_division():
