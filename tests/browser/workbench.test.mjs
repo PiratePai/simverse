@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { after, before } from 'node:test';
 import { chromium } from 'playwright-core';
 
 function deferred() {
@@ -8,12 +8,17 @@ function deferred() {
   return { promise, resolve };
 }
 
+let browser;
+before(async () => {
+  browser = await chromium.launch({ channel: 'chrome', timeout: 60_000 });
+}, { timeout: 65_000 });
+after(async () => { await browser?.close(); });
+
 for (const failOld of [false, true]) {
   test(failOld ? 'ignores a stale HTTP failure' : 'keeps the newer run after a stale success',
     { timeout: 25_000 }, async () => {
-      const browser = await chromium.launch({ channel: 'chrome' });
+      const page = await browser.newPage();
       try {
-        const page = await browser.newPage();
         const requests = [deferred(), deferred()];
         let index = 0;
         await page.route('**/api/v2/run', async route => {
@@ -59,7 +64,7 @@ for (const failOld of [false, true]) {
         const download = await downloadEvent;
         assert.equal(download.suggestedFilename(), 'simverse-run-' + latestId.slice(7, 19) + '.json');
       } finally {
-        await browser.close();
+        await page.close();
       }
     });
 }

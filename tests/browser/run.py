@@ -20,7 +20,7 @@ def main() -> int:
         return subprocess.run(
             ["node", "--test", str(Path(__file__).with_name("workbench.test.mjs"))],
             cwd=ROOT, env={**os.environ, "SIMVERSE_TEST_URL": f"http://127.0.0.1:{server.port}"},
-            timeout=90,
+            timeout=145,
         ).returncode
     finally:
         server.shutdown()
