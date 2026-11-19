@@ -1,10 +1,5 @@
-from simverse.model_ir.catalog import catalog_json
 from simverse.pipeline import run_v2
 from simverse.scenario import ScenarioV2, V41_QUANT
-
-
-def test_product_catalog_only_focus_models():
-    assert set(catalog_json()["models"]) == {"qwen36_35b_a3b", "deepseek_v41_flash"}
 
 
 def test_default_pair_structure_source_checked_but_ranking_still_blocked():

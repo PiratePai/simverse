@@ -8,14 +8,13 @@ docs/validation/workbench-review-fixes.md §验证记录。
 import csv
 import io
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from simverse.contracts import js_restore  # noqa: E402
+from simverse.contracts import js_restore, js_safe  # noqa: E402
 from simverse.pipeline import run_v2  # noqa: E402
 from simverse.scenario import ScenarioV2  # noqa: E402
 
@@ -138,7 +137,7 @@ def test_ops_csv_v2_rfc4180_roundtrip():
 
 def test_csv_escape_poisoned_fields():
     """逗号/双引号/换行/CRLF 混合字段逐字节往返（CLI 与 Python csv 解析器）。"""
-    from simverse.cli import _csv
+    from simverse.exports import _csv
     cols = ["a", "b", "c"]
     records = [
         {"a": "x,y", "b": 'say "hi"', "c": "line1\nline2"},
@@ -168,25 +167,42 @@ def test_trace_csv_v2_escapes_dep_lists():
         assert d["depends_on"] == str(e.get("depends_on", ""))
 
 
-def test_frontend_csv_js_same_semantics():
-    """static/csv.js 与 Python 侧逐样本一致（node 可执行时）。"""
-    node = subprocess.run(["node", "--version"], capture_output=True, text=True)
-    if node.returncode != 0:
-        import pytest
-        pytest.skip("node 不可用（前端转义由浏览器验证覆盖）")
-    script = (
-        "const m = require(" + json.dumps(
-            str(ROOT / "simverse/static/csv.js").replace("\\", "/")) + ");"
-        "const s = [process.argv.slice(1).map(x => m.escapeField(x)).join('|')];"
-        "process.stdout.write(s[0]);"
-    )
-    samples = ["x,y", 'say "hi"', "line1\nline2", "plain", "cr\r\nlf"]
-    out = subprocess.run(["node", "-e", script] + samples,
-                         capture_output=True, text=True, check=True)
-    import simverse.cli as cli
-    # subprocess 文本模式统一换行（\r\n→\n），比较前同口径归一
-    expect = "|".join(cli._csv_field(s) for s in samples).replace("\r\n", "\n")
-    assert out.stdout.strip() == expect
+def test_csv_post_serializes_old_bundle_and_exact_large_integers(monkeypatch):
+    from simverse import pipeline
+    from simverse.exports import _groups_csv_v2, _ops_csv_v2
+
+    def unexpected_run(*args, **kwargs):
+        raise AssertionError("CSV export should use the supplied result")
+
+    monkeypatch.setattr(pipeline, "run_v2", unexpected_run)
+    exact_flops = 2**53 + 1
+    bundle = {
+        "schema_version": "0.2",
+        "work": {"target_decode": {"rows": [
+            {"stage": "target_decode", "layer": 0, "op": "k_proj",
+             "flops": exact_flops, "shape": '报价, "原值"\r\n下一行'},
+        ]}},
+        "cost": {
+            "record_cost": {"matched": 0},
+            "roofline_points": [{"row_id": "target_decode:0:k_proj",
+                                 "t_ms": 0.125, "bound": "memory"}],
+            "groups": [{"stage": "unpriced_runtime", "selected_ms": None}],
+        },
+    }
+    c = _client()
+    body = js_safe(bundle)
+    ops = c.post("/api/v2/export/ops", json=body)
+    assert ops.status_code == 200 and ops.mimetype == "text/csv"
+    assert ops.get_data(as_text=True) == _ops_csv_v2(bundle)
+    row, = csv.DictReader(io.StringIO(ops.get_data(as_text=True)))
+    assert row["flops"] == str(exact_flops)
+    assert row["t_ms"] == "0.125" and row["bound"] == "memory"
+    assert row["shape"] == bundle["work"]["target_decode"]["rows"][0]["shape"]
+    groups = c.post("/api/v2/export/groups", json=body)
+    assert groups.status_code == 200
+    assert groups.get_data(as_text=True) == _groups_csv_v2(bundle)
+    assert c.post("/api/v2/export/ops", json=[]).status_code == 400
+    assert c.post("/api/v2/export/unknown", json=body).status_code == 404
 
 
 # ---------- D. 产品目录边界与后端组合事实（UI 联动的权威来源） ----------

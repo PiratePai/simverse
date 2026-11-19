@@ -114,29 +114,14 @@ def test_r10d_catalog_exposes_preset_and_legacy_index_untouched():
     legacy = client.get("/api/scenarios").get_json()["scenarios"]
     assert "qwen36_dflash_default" not in legacy
     assert "v41_flash_dt_verification" in legacy  # 旧场景读取行为不变
+    assert client.get("/legacy").status_code == 200
+    registry = client.get("/api/registry").get_json()
+    assert registry["schema_version"] == "0.1" and "h100_sxm" in registry["devices"]
 
 
-def test_r10d_same_preset_cli_and_api_same_digest_and_metric():
-    """同一份预设走 CLI 与 API：场景 digest 与关键指标一致。"""
-    from simverse.pipeline import run_v2
+def test_r10d_default_preset_cli_and_api_agree(tmp_path):
     from simverse.presets import default_preset
-    from simverse.scenario import ScenarioV2
-    client = app.test_client()
-    r = client.post("/api/v2/run", json=default_preset())
-    assert r.status_code == 200
-    bundle = r.get_json()
-    assert bundle["manifest"]["status"] == "completed"
-    assert bundle["scenario_snapshot"]
-    api_bundle = run_v2(ScenarioV2.from_json(default_preset())).to_json()
-    assert bundle["manifest"]["input_digest"] == \
-        api_bundle["manifest"]["input_digest"]
-    assert bundle["manifest"]["run_id"] == api_bundle["manifest"]["run_id"]
-    for key in ("M01_tpot_analytical", "M02_speedup_vs_baseline"):
-        assert bundle["metrics"][key]["value"] == \
-            pytest.approx(api_bundle["metrics"][key]["value"])
 
-
-def test_r10d_cli_default_run_v2_executes_with_run_id(tmp_path):
     out = tmp_path / "run.json"
     proc = subprocess.run(
         [sys.executable, "-m", "simverse.cli", "run-v2", "-o", str(out)],
@@ -149,6 +134,15 @@ def test_r10d_cli_default_run_v2_executes_with_run_id(tmp_path):
     assert bundle["replay"]["scenario_file"] == "preset:qwen36_dflash_default"
     assert bundle["manifest"]["run_id"].startswith("sha256:")
     assert bundle["metrics"]["M01_tpot_analytical"]["value"] > 0
+    response = app.test_client().post("/api/v2/run", json=default_preset())
+    assert response.status_code == 200
+    api = response.get_json()
+    assert api["manifest"]["status"] == "completed"
+    for key in ("input_digest", "run_id"):
+        assert bundle["manifest"][key] == api["manifest"][key]
+    for key in ("M01_tpot_analytical", "M02_speedup_vs_baseline"):
+        assert bundle["metrics"][key] == api["metrics"][key]
+
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +166,8 @@ MALFORMED_CASES = [
     ("alpha 越界", {"model_id": "qwen36_35b_a3b", "method_id": "dflash_v1",
                     "acceptance": {"kind": "geometric", "alpha": 1.5}},
      "$.acceptance.alpha"),
+    ("逐位接受率为空", {"acceptance": {"kind": "position_alphas", "alphas": []}},
+     "$.acceptance.alphas"),
     ("acceptance kind 未知", {"model_id": "qwen36_35b_a3b",
                               "method_id": "dflash_v1",
                               "acceptance": {"kind": "weird"}},

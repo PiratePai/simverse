@@ -399,14 +399,37 @@ def test_g11_v41_oa_group_flops_absolute_tp1_2_4_8():
 
 
 def test_g12_qwen36_shared_gate_row_every_moe_layer():
+    """F5：Qwen3.6 每 MoE 层都有 shared_expert_gate 行 + h 权重容量。
+
+    HF pin：modeling_qwen3_5_moe.py:889-899 无条件构造/应用 gate；
+    config 无 shared_expert_gate 键，不能用缺失键推断 False。
+    """
     from simverse.count import build_model_work
+    from simverse.lowering.memory import target_weight_allocations
     from simverse.model_ir import build_catalog
-    m = build_catalog()["models"]["qwen36_35b_a3b"]
-    Q8 = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8, "state": 32}
-    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, 1, device_sms=132)
+
+    Q8 = dict(dense_w=8, expert_w=8, act=8, kv=8, state=32)
+    cat = build_catalog()
+    m = cat["models"]["qwen36_35b_a3b"]
+    assert all(l.moe is not None and l.moe.shared_gate for l in m.layers)
+    rows = build_model_work(m, "decode", 1, 1024, 1, Q8, tp=1, device_sms=132)
     gate = [r for r in rows if r.op == "shared_gate"]
     assert len(gate) == 40
-    assert all(r.weight_capacity == 2048 for r in gate)
+    for r in gate:
+        assert r.flops == 2 * 1 * 2048
+        assert r.weight_read == 2048 * 1 and r.weight_capacity == 2048 * 1
+    # 容量：每层 MoE allocation 必须包含 gate 的 h 字节
+    for tp in (1, 8):
+        allocs = {a.alloc_id.split("-L")[-1]: a.bytes
+                  for a in target_weight_allocations(m, Q8, tp)
+                  if "-w-moe-L" in a.alloc_id}
+        inter = 512 // tp
+        router = 2048 * 256 * 1
+        shared = 3 * 2048 * inter * 1
+        gate_b = 2048 * 1
+        experts = 256 * 3 * 2048 * inter * 1
+        assert len(allocs) == 40
+        assert all(v == router + shared + gate_b + experts for v in allocs.values())
 
 
 # ---------------------------------------------------------------------------

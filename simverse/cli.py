@@ -1,4 +1,4 @@
-"""CLI：与 Web 完全同入口（engine.run / sweep），可重放验收的基础。
+"""CLI：生产命令与工作台复用 v0.2 管线，旧命令用于归档重放。
 
 命令：
   simverse run [场景.json] [-o run.json] [--csv ops.csv]   单场景计算与导出
@@ -20,11 +20,10 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .assets import default_output_dir, scenario_dir
-from .contracts import ScenarioSpec, canonical_json
-from .engine import run
-
-DEFAULT_SCENARIO = scenario_dir() / "v41_flash_dt_verification.json"
+from .assets import default_output_dir
+from .contracts import js_restore
+from .exports import _groups_csv_v2, _ops_csv_v2, _trace_csv_v2, dump_json as _dump
+from .legacy.cli import register_commands as register_legacy_commands
 
 
 def _configure_stdio():
@@ -42,141 +41,6 @@ def _configure_stdio():
             pass
 
 
-def _dump(obj, path: Path | None):
-    text = json.dumps(obj, ensure_ascii=False, indent=1)
-    if path:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        print(f"已写 {path}")
-    else:
-        print(text)
-
-
-def _csv_field(v) -> str:
-    """RFC 4180 字段转义：含逗号/引号/换行时引号包裹、内部引号翻倍。
-
-    与前端 static/csv.js 同语义；不做字符替换，保留原始字段内容
-    （2026-11-17 工作台审查：旧实现把逗号替换成分号、丢换行，改变字段）。
-    """
-    s = "" if v is None else str(v)
-    if any(ch in s for ch in ',"\r\n'):
-        return '"' + s.replace('"', '""') + '"'
-    return s
-
-
-def _csv(cols, records) -> str:
-    lines = [",".join(cols)]
-    for rec in records:
-        lines.append(",".join(_csv_field(rec.get(c)) for c in cols))
-    return chr(10).join(lines)
-
-
-def _ops_csv(result: dict) -> str:
-    cols = ["stage", "layer", "op", "exec_count", "flops", "weight_read", "act_read",
-            "act_write", "kv_read", "kv_write", "scope", "formula_id", "t_ms", "bound",
-            "shape_note"]
-    return _csv(cols, result["ops"])
-
-
-def _events_csv(result: dict) -> str:
-    cols = ["id", "stage", "lane", "label", "start_ms", "end_ms", "depends_on"]
-    return _csv(cols, result["timeline"])
-
-
-def _summary(result: dict):
-    print(f"status={result['status']} digests={result['digests']}")
-    if result["status"].startswith("unsupported"):
-        print(result["status_detail"])
-        return
-    m = result["metrics"]
-    print(f"E[n]={m['E_committed_len']:.3f}  alpha={m['alpha']}  P_full={m['P_full']:.4f}"
-          f"  E[M_draft,0]={m['E_draft_step0_tokens']:.4f}")
-    for c in result["comparisons"]:
-        detail = c.get("detail") or {}
-        print(f"  {c['deployment']:>18}  TPOT {c['tpot_ms']:8.4f} ms   speedup "
-              f"{c['speedup']:6.3f}   {detail.get('note', '')}")
-    be = m["breakeven_alpha"]
-    print("  breakeven α*:", {k: (round(v, 4) if v == v else "none") for k, v in be.items()})
-
-
-def _require_active_v01(scenario):
-    from .model_ir.catalog import PRODUCT_MODELS
-    if scenario.model_id not in PRODUCT_MODELS:
-        raise SystemExit(
-            f"历史/合成模型 {scenario.model_id} 不在活跃 CLI 目录；tiny 仅作测试 "
-            "fixture，请使用 run-v2 的两款主模型")
-
-
-def cmd_run(args):
-    src = Path(args.scenario) if args.scenario else DEFAULT_SCENARIO
-    scenario = ScenarioSpec.from_json(json.loads(src.read_text(encoding="utf-8")))
-    _require_active_v01(scenario)
-    result = run(scenario).to_json()
-    result["replay"] = {"scenario_file": str(src)}
-    _summary(result)
-    if args.out:
-        _dump(result, Path(args.out))
-    if args.csv:
-        p = Path(args.csv)
-        p.write_text(_ops_csv(result), encoding="utf-8")
-        print(f"已写 {p}")
-
-
-def cmd_sweep(args):
-    from .sweep import sweep_suite
-    from .chartpng import line_chart
-    src = Path(args.scenario) if args.scenario else DEFAULT_SCENARIO
-    scenario = ScenarioSpec.from_json(json.loads(src.read_text(encoding="utf-8")))
-    _require_active_v01(scenario)
-    data = sweep_suite(scenario)
-    print("boundaries:", json.dumps(data["boundaries"], ensure_ascii=False))
-    out = Path(args.out) if args.out else default_output_dir() / "sweep.json"
-    _dump(data, out)
-    charts = Path(args.charts) if args.charts else out.parent
-    charts.mkdir(parents=True, exist_ok=True)
-
-    def series_of(scan, key="speedup", only=()) -> dict:
-        s = {}
-        for p in scan["points"]:
-            for dep, d in p["deployments"].items():
-                if only and dep not in only:
-                    continue
-                s.setdefault(dep, []).append((float(p["value"]), d[key]))
-        return s
-
-    (charts / "boundary_alpha.png").write_bytes(
-        line_chart(series_of(data["alpha"]), "Speedup vs acceptance alpha",
-                   "alpha", "speedup", hline=1.0))
-    (charts / "boundary_k.png").write_bytes(
-        line_chart(series_of(data["k"]), "Speedup vs draft tokens K", "K", "speedup",
-                   hline=1.0))
-    (charts / "boundary_ctx.png").write_bytes(
-        line_chart(series_of(data["ctx"]), "Speedup vs context length", "ctx tokens",
-                   "speedup", hline=1.0, log_x=True))
-    (charts / "boundary_batch.png").write_bytes(
-        line_chart(series_of(data["batch"]), "Speedup vs batch B", "batch", "speedup",
-                   hline=1.0, log_x=True))
-    (charts / "boundary_link.png").write_bytes(
-        line_chart(series_of(data["link_bw"]), "Speedup vs D/T link bandwidth",
-                   "link GB/s", "speedup", hline=1.0, log_x=True))
-    (charts / "boundary_draftbw.png").write_bytes(
-        line_chart(series_of(data["draft_bw"]), "Speedup vs draft device bandwidth",
-                   "draft TB/s", "speedup", hline=1.0, log_x=True))
-    print(f"图表已写 {charts}/boundary_*.png")
-
-
-def cmd_export(args):
-    result = json.loads(Path(args.run).read_text(encoding="utf-8"))
-    if args.csv:
-        p = Path(args.csv)
-        p.write_text(_ops_csv(result), encoding="utf-8")
-        print(f"已写 {p}")
-    if args.events:
-        p = Path(args.events)
-        p.write_text(_events_csv(result), encoding="utf-8")
-        print(f"已写 {p}")
-
-
 def _v2_scenario(path):
     """v0.2 场景解析：显式文件按文件；缺省读共享默认预设（R10d）。
 
@@ -189,51 +53,6 @@ def _v2_scenario(path):
     data = (_json.loads(Path(path).read_text(encoding="utf-8")) if path
             else default_preset())
     return decode_scenario_v2(data)
-
-
-def _ops_csv_v2(bundle: dict) -> str:
-    """v0.2 算子 CSV：与前端导出同列；t_ms/bound 从 cost.roofline_points
-    按 row_id（stage:layer:op）关联，无计价行留空（不伪造）。"""
-    cols = ["stage", "layer", "op", "flops", "weight_read", "weight_read_expected",
-            "act_read", "act_write", "kv_read", "kv_write", "state_read",
-            "state_write", "weight_capacity", "statistic", "formula", "t_ms",
-            "bound", "shape"]
-    rows = ((bundle.get("work") or {}).get("target_decode") or {}).get("rows") or []
-    cost = bundle.get("cost") or {}
-    record_cost = cost.get("record_cost") or {}
-    use_records = bool(record_cost)
-    if use_records:
-        cols += ["analytic_t_ms", "record_t_ms", "cost_source", "record_refs", "fallback_reason"]
-    pts = {p["row_id"]: p for p in
-           ((record_cost.get("selected_row_prices") if use_records else None)
-            or cost.get("row_prices") or cost.get("roofline_points") or [])}
-    records = []
-    for o in rows:
-        p = pts.get(f"{o.get('stage')}:{o.get('layer')}:{o.get('op')}") or {}
-        rec = {c: o.get(c) for c in cols}
-        rec["t_ms"] = p.get("t_ms", "")
-        rec["bound"] = p.get("bound", "")
-        if use_records:
-            rec.update(analytic_t_ms=p.get("analytic_ms", ""), record_t_ms=p.get("t_ms", ""),
-                       cost_source=p.get("cost_source", ""),
-                       record_refs=";".join(p.get("record_refs") or []),
-                       fallback_reason=p.get("fallback_reason") or "")
-        records.append(rec)
-    return _csv(cols, records)
-
-
-def _trace_csv_v2(bundle: dict) -> str:
-    cols = ["event_id", "round_id", "role", "stage", "t_ms", "start_ms",
-            "depends_on", "label"]
-    execution = ((bundle.get("cost") or {}).get("selection") or {}).get("execution") or bundle.get("execution")
-    events = [e for rnd in (execution or {}).get("rounds") or []
-              for e in rnd.get("events") or []]
-    return _csv(cols, events)
-
-
-def _groups_csv_v2(bundle: dict) -> str:
-    cols = ["stage", "role", "group", "primitive", "analytic_ms", "selected_ms", "source", "timing_boundary", "basis"]
-    return _csv(cols, (bundle.get("cost") or {}).get("groups") or [])
 
 
 def _report_html_v2(bundle: dict) -> str:
@@ -285,6 +104,21 @@ def _report_html_v2(bundle: dict) -> str:
     return html
 
 
+def _write_v2_exports(bundle, args):
+    if args.csv:
+        Path(args.csv).write_text(_ops_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.csv}")
+    if args.groups_csv:
+        Path(args.groups_csv).write_text(_groups_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.groups_csv}")
+    if args.trace:
+        Path(args.trace).write_text(_trace_csv_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.trace}")
+    if args.html:
+        Path(args.html).write_text(_report_html_v2(bundle), encoding="utf-8")
+        print(f"已写 {args.html}")
+
+
 def cmd_run_v2(args):
     from .pipeline import run_v2
     scenario = _v2_scenario(args.scenario)
@@ -300,18 +134,7 @@ def cmd_run_v2(args):
     _summary_v2(bundle)
     if args.out:
         _dump(bundle, Path(args.out))
-    if args.csv:
-        Path(args.csv).write_text(_ops_csv_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.csv}")
-    if args.groups_csv:
-        Path(args.groups_csv).write_text(_groups_csv_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.groups_csv}")
-    if args.trace:
-        Path(args.trace).write_text(_trace_csv_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.trace}")
-    if args.html:
-        Path(args.html).write_text(_report_html_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.html}")
+    _write_v2_exports(bundle, args)
 
 
 def _summary_v2(bundle: dict):
@@ -354,20 +177,8 @@ def cmd_sweep_v2(args):
 
 
 def cmd_export_v2(args):
-    import json as _json
-    bundle = _json.loads(Path(args.run).read_text(encoding="utf-8"))
-    if args.csv:
-        Path(args.csv).write_text(_ops_csv_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.csv}")
-    if args.groups_csv:
-        Path(args.groups_csv).write_text(_groups_csv_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.groups_csv}")
-    if args.trace:
-        Path(args.trace).write_text(_trace_csv_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.trace}")
-    if args.html:
-        Path(args.html).write_text(_report_html_v2(bundle), encoding="utf-8")
-        print(f"已写 {args.html}")
+    bundle = js_restore(json.loads(Path(args.run).read_text(encoding="utf-8")))
+    _write_v2_exports(bundle, args)
 
 
 def cmd_list(args):
@@ -395,21 +206,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="simverse")
     ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p_run = sub.add_parser("run", help="单场景计算（默认=固定验证场景）")
-    p_run.add_argument("scenario", nargs="?", default=None)
-    p_run.add_argument("-o", "--out", default=None)
-    p_run.add_argument("--csv", default=None)
-    p_run.set_defaults(fn=cmd_run)
-    p_sw = sub.add_parser("sweep", help="扫描与边界")
-    p_sw.add_argument("scenario", nargs="?", default=None)
-    p_sw.add_argument("-o", "--out", default=None)
-    p_sw.add_argument("--charts", default=None)
-    p_sw.set_defaults(fn=cmd_sweep)
-    p_ex = sub.add_parser("export", help="从 RunResult 导出 CSV")
-    p_ex.add_argument("run")
-    p_ex.add_argument("--csv", default=None)
-    p_ex.add_argument("--events", default=None)
-    p_ex.set_defaults(fn=cmd_export)
+    register_legacy_commands(sub)
     p_ls = sub.add_parser("list", help="注册表")
     p_ls.add_argument("what", nargs="?", default="models")
     p_ls.set_defaults(fn=cmd_list)

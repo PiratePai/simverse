@@ -222,6 +222,9 @@ def test_api_cli_json_csv_trace_and_coverage_are_consistent(tmp_path):
     assert actual["cost"]["record_cost"] == expected["cost"]["record_cost"]
     text = csv_file.read_text(encoding="utf-8")
     rows = list(csv.DictReader(io.StringIO(text)))
+    web_csv = client.post("/api/v2/export/ops", json=response.get_json())
+    assert web_csv.status_code == 200
+    assert list(csv.DictReader(io.StringIO(web_csv.get_data(as_text=True)))) == rows
     hit = next(row for row in rows if row["op"] == "in_proj_qkv")
     assert float(hit["record_t_ms"]) == pytest.approx(.01874302513897419)
     assert float(hit["t_ms"]) == float(hit["record_t_ms"])

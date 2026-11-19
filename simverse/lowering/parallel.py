@@ -123,7 +123,8 @@ def _gdn_rule(g: LinearAttnIR, tp: int) -> GDNShardRule:
         conv_dim=g.qkv_out // tp)
 
 
-def _attn_rule(a: AttentionIR, tp: int) -> AttnShardRule:
+def attention_shard_rule(a: AttentionIR, tp: int) -> AttnShardRule:
+    """Resolve per-rank attention geometry for an engine tensor-parallel group."""
     if a.heads % tp:
         raise ValueError(f"TP{tp} 不整除 Q 头数 {a.heads}")
     if a.kv_heads >= tp:
@@ -132,6 +133,8 @@ def _attn_rule(a: AttentionIR, tp: int) -> AttnShardRule:
         return AttnShardRule(a.heads // tp, a.kv_heads // tp, False)
     if tp % a.kv_heads:
         raise ValueError(f"TP{tp} 不整除 KV 头组 {a.kv_heads}（复制约束）")
+    # 保留现有账本的全量头口径。固定 vLLM 的 QKVParallelLinear
+    # 按单头跨 rank 复制，差异见 docs/IMPLEMENTATION_STATUS.md。
     return AttnShardRule(a.heads // tp, a.kv_heads, True)
 
 
@@ -160,7 +163,7 @@ class ParallelPlan:
     def attn_rule(self, layer: LayerIR) -> Optional[AttnShardRule]:
         if layer.attn is None:
             return None
-        return _attn_rule(layer.attn, self.tp)
+        return attention_shard_rule(layer.attn, self.tp)
 
     def gdn_rule(self, layer: LayerIR) -> Optional[GDNShardRule]:
         if layer.linear is None:
@@ -217,7 +220,7 @@ def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
     for layer in model.layers:
         if layer.attn is not None:
             try:
-                _attn_rule(layer.attn, tp)
+                attention_shard_rule(layer.attn, tp)
             except ValueError as e:
                 errors.append(f"{e}（layer {layer.index}）")
         if layer.linear is not None:
@@ -285,7 +288,7 @@ def validate_parallel(model: ModelIR, tp: int, ep: int = 1,
         for layer in draft.layers:
             if layer.attn is not None:
                 try:
-                    _attn_rule(layer.attn, tp)
+                    attention_shard_rule(layer.attn, tp)
                 except ValueError as e:
                     errors.append(f"草稿 {e}（layer {layer.index}）")
             if layer.dense_inter and layer.dense_inter % tp:

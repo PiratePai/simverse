@@ -1,7 +1,7 @@
 """参数扫描 v0.2（E20 修复 + R10e 指标口径修复）：不可变设备/链路快照
 注入，不触碰全局注册表。
 
-每个扫描点 = 独立 ScenarioV2 → 独立 run_v2 → 独立 run_id；谱系（base digest +
+每个扫描点保留 ScenarioV2 对应的 run_id；重复的场景在本次扫描内共享求值结果。谱系（base digest +
 覆盖字段）随行输出。扫描值域显式登记（Q8 假设，来源标注演示默认）。
 
 R10e 指标口径规则（修复前：显式请求 ``M01_tpot_analytical`` 仍被换成
@@ -54,6 +54,11 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
     metric_key：None=默认（选用成本，缺则回退解析并明示）；显式传指标名
     则严格按该口径计算候选/基线/speedup。
     """
+    return _sweep_1d(base, field_path, values, metric_key, {})
+
+
+def _sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
+              metric_key: Optional[str], point_cache: dict) -> Dict[str, Any]:
     if metric_key is not None and metric_key not in BASELINE_PAIR:
         raise ValueError(
             f"未知/无基线配对的扫描指标 {metric_key}；可用：{sorted(BASELINE_PAIR)}")
@@ -75,62 +80,15 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
             sc = variant(base, block_size=int(v))
         else:
             raise ValueError(f"未知扫描维度 {field_path}")
-        bundle = run_v2(sc)
-        record = bundle.cost.get("record_cost") or {}
-        selection = bundle.cost.get("selection") or {}
-        metrics = bundle.metrics
-        chosen_key = metric_key or DEFAULT_METRIC
-        fallback_reason = None
-        if metric_key is None:
-            missing = [key for key in (DEFAULT_METRIC, BASELINE_PAIR[DEFAULT_METRIC])
-                       if metrics.get(key) is None]
-            if missing and all(metrics.get(key) is not None for key in
-                               (FALLBACK_METRIC, BASELINE_PAIR[FALLBACK_METRIC])):
-                chosen_key = FALLBACK_METRIC
-                fallback_reason = f"缺选用指标 {', '.join(missing)}，整对回退解析口径"
-                sweep_fallback = fallback_reason
-        met = metrics.get(chosen_key)
-        baseline_key = BASELINE_PAIR[chosen_key]
-        baseline = metrics.get(baseline_key)
-        source = ("analytic" if chosen_key == FALLBACK_METRIC
-                  else selection.get("source", "unknown"))
-        source_id = selection.get("source_id") if source != "analytic" else None
-        value = met.value if met is not None else None
-        base_value = baseline.value if baseline is not None else None
-        reason = met.reason if met is not None else f"指标缺失：{chosen_key}"
-        speedup = None
-        if baseline is None:
-            reason = reason or f"指标缺失：{baseline_key}"
-        elif base_value is None:
-            reason = reason or baseline.reason
-        elif value is not None:
-            compatible = metric_compatibility(baseline, met)
-            if not compatible["compatible"]:
-                reason = compatible["reason"]
-            elif value > 0 and base_value > 0 and bundle.manifest.status == "completed":
-                speedup = base_value / value
-            else:
-                reason = reason or "扫描点未完成或耗时不为正"
-        if chosen_key not in used_keys:
-            used_keys.append(chosen_key)
-        points.append({
-            "value": v,
-            "run_id": bundle.manifest.run_id,
-            "status": bundle.manifest.status,
-            "tpot_ms": value,
-            "reason": reason,
-            "metric_key": chosen_key,
-            "baseline_metric_key": baseline_key,
-            "metric_source": source,
-            "metric_source_id": source_id,
-            "metric_time_basis": met.scope.time_basis if met is not None else None,
-            "metric_result_kind": met.result_kind.value if met is not None else None,
-            "record_coverage": {"matched": record.get("matched", 0),
-                                "total": record.get("total", 0)},
-            "baseline_tpot_ms": base_value,
-            "speedup": speedup,
-            "fallback_reason": fallback_reason,
-        })
+        digest = sc.scenario_digest()
+        if digest not in point_cache:
+            point_cache[digest] = _evaluate_point(sc, metric_key)
+        point = point_cache[digest]
+        if point["metric_key"] not in used_keys:
+            used_keys.append(point["metric_key"])
+        if point["fallback_reason"]:
+            sweep_fallback = point["fallback_reason"]
+        points.append({"value": v, **point, "record_coverage": dict(point["record_coverage"])})
     # 扫描级元数据反映实际使用口径（主口径=扫描序首个出现；混用时另列全表）
     primary = used_keys[0] if used_keys else (metric_key or DEFAULT_METRIC)
     out: Dict[str, Any] = {
@@ -145,6 +103,61 @@ def sweep_1d(base: ScenarioV2, field_path: str, values: List[Any],
     if sweep_fallback:
         out["fallback_reason"] = sweep_fallback
     return out
+
+
+def _evaluate_point(sc: ScenarioV2, metric_key: Optional[str]) -> dict:
+    bundle = run_v2(sc)
+    record = bundle.cost.get("record_cost") or {}
+    selection = bundle.cost.get("selection") or {}
+    metrics = bundle.metrics
+    chosen_key = metric_key or DEFAULT_METRIC
+    fallback_reason = None
+    if metric_key is None:
+        missing = [key for key in (DEFAULT_METRIC, BASELINE_PAIR[DEFAULT_METRIC])
+                   if metrics.get(key) is None]
+        if missing and all(metrics.get(key) is not None for key in
+                           (FALLBACK_METRIC, BASELINE_PAIR[FALLBACK_METRIC])):
+            chosen_key = FALLBACK_METRIC
+            fallback_reason = f"缺选用指标 {', '.join(missing)}，整对回退解析口径"
+    met = metrics.get(chosen_key)
+    baseline_key = BASELINE_PAIR[chosen_key]
+    baseline = metrics.get(baseline_key)
+    source = ("analytic" if chosen_key == FALLBACK_METRIC
+              else selection.get("source", "unknown"))
+    source_id = selection.get("source_id") if source != "analytic" else None
+    value = met.value if met is not None else None
+    base_value = baseline.value if baseline is not None else None
+    reason = met.reason if met is not None else f"指标缺失：{chosen_key}"
+    speedup = None
+    if baseline is None:
+        reason = reason or f"指标缺失：{baseline_key}"
+    elif base_value is None:
+        reason = reason or baseline.reason
+    elif value is not None:
+        compatible = metric_compatibility(baseline, met)
+        if not compatible["compatible"]:
+            reason = compatible["reason"]
+        elif value > 0 and base_value > 0 and bundle.manifest.status == "completed":
+            speedup = base_value / value
+        else:
+            reason = reason or "扫描点未完成或耗时不为正"
+    return {
+        "run_id": bundle.manifest.run_id,
+        "status": bundle.manifest.status,
+        "tpot_ms": value,
+        "reason": reason,
+        "metric_key": chosen_key,
+        "baseline_metric_key": baseline_key,
+        "metric_source": source,
+        "metric_source_id": source_id,
+        "metric_time_basis": met.scope.time_basis if met is not None else None,
+        "metric_result_kind": met.result_kind.value if met is not None else None,
+        "record_coverage": {"matched": record.get("matched", 0),
+                            "total": record.get("total", 0)},
+        "baseline_tpot_ms": base_value,
+        "speedup": speedup,
+        "fallback_reason": fallback_reason,
+    }
 
 
 def find_crossover(scan: dict) -> Optional[float]:
@@ -184,8 +197,9 @@ def sweep_suite(base: ScenarioV2) -> Dict[str, Any]:
     out: Dict[str, Any] = {"schema_version": "0.2",
                            "base_digest": base.scenario_digest(),
                            "assumption": "扫描值域为演示默认（Q8 hypothesis）；"
-                                         "每点独立 run_id"}
+                                         "每点记录对应场景的 run_id"}
+    point_cache = {}
     for field, values in DEFAULT_SWEEP_RANGES.items():
-        out[field] = sweep_1d(base, field, values)
+        out[field] = _sweep_1d(base, field, values, None, point_cache)
     out["breakevens"] = {f: find_crossover(out[f]) for f in DEFAULT_SWEEP_RANGES}
     return out

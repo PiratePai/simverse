@@ -7,19 +7,16 @@
 from __future__ import annotations
 
 import html
-import json
 import re
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
-from .assets import docs_dir, packaged_data_dir, repo_root, scenario_dir
-from .contracts import ScenarioSpec, js_safe
-from .engine import run
-from .formulas import formulas_json
-from .models import registry_json
+from .assets import docs_dir, packaged_data_dir, repo_root
+from .contracts import js_restore, js_safe
+from .exports import _groups_csv_v2, _ops_csv_v2
+from .legacy.web import legacy
 
-SCENARIO_DIR = scenario_dir()
 # 工作台顶栏文档链接的只读根（send_from_directory 自带穿越/绝对路径拒绝，
 # 只开放仓库 docs/ 一层，不提供任意本地文件访问）
 DOCS_DIR = docs_dir()
@@ -45,33 +42,12 @@ def _linked_markdown(text: str) -> str:
 
 app = Flask(__name__, static_folder=str(Path(__file__).parent / "static"),
             static_url_path="/static")
-
-
-def _scenarios_index():
-    """只列活跃 v0.1 场景；历史模型/标记 archived 的场景保留文件但不进
-    选择。v0.2 预设（如 qwen36_dflash_default）走 /api/v2/catalog 的
-    scenarios 段（R10d），不混入 legacy 目录（ScenarioSpec 读不了 v0.2）。"""
-    from .model_ir.catalog import PRODUCT_MODELS
-    out = {}
-    for p in sorted(SCENARIO_DIR.glob("*.json")):
-        data = json.loads(p.read_text(encoding="utf-8"))
-        if data.get("schema_version", "0.1") != "0.1":
-            continue
-        if data.get("archived") or data.get("model_id") not in PRODUCT_MODELS:
-            continue
-        out[p.stem] = {"name": data.get("name", p.stem), "notes": data.get("notes", ""),
-                       "scenario": data}
-    return out
+app.register_blueprint(legacy)
 
 
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "workbench.html")
-
-
-@app.get("/legacy")
-def legacy_index():
-    return send_from_directory(app.static_folder, "index.html")
 
 
 @app.get("/docs/<path:fn>")
@@ -198,74 +174,23 @@ def api_v2_sweep():
 
 
 @app.get("/api/v2/export/<fmt>")
+def api_v2_export_deprecated(fmt):
+    """Retain the 410 from the former GET endpoint."""
+    return jsonify({"error": "GET 导出端点已弃用。工作台通过 POST 提交已有结果，"
+                             "CLI 可用 export-v2 从文件导出。"}), 410
+
+
+@app.post("/api/v2/export/<fmt>")
 def api_v2_export(fmt):
-    """已移除（2026-11-17 工作台审查）：该端点从未有调用方且恒返 400，
-    旧注释“前端导出前在此登记 manifest”与实际行为不符。导出统一从
-    POST /api/v2/run 返回的同一 ResultBundle 派生（前端按钮 / CLI
-    export-v2），服务端不维护“最近一次运行”会话状态。保留 410 明示弃用。
-    """
-    return jsonify({"error": "该端点已弃用（无调用方、恒不可用）。请 POST "
-                             "/api/v2/run 并从返回的 bundle 导出（前端按钮或 "
-                             "CLI export-v2）；服务端无状态导出。"}), 410
-
-
-# ---------------------------------------------------------------------------
-# v0.1 legacy API（保留，供旧 UI 与测试）
-# ---------------------------------------------------------------------------
-
-
-@app.get("/api/registry")
-def api_registry():
-    from .devices import DEVICES, LINKS
-    from .model_ir.catalog import PRODUCT_MODELS
-    reg = registry_json()
-    reg["models"] = {k: v for k, v in reg["models"].items()
-                     if k in PRODUCT_MODELS}
-    reg["drafts"] = {k: v for k, v in reg["drafts"].items()
-                     if k in PRODUCT_MODELS or k == "dspark"}
-    return jsonify({
-        "schema_version": "0.1",
-        "registry": reg,
-        "devices": {k: d.to_json() for k, v in DEVICES.items()},
-        "links": {k: dict(v.__dict__) for k, v in LINKS.items()},
-        "formulas": formulas_json()["formulas"],
-    })
-
-
-@app.get("/api/scenarios")
-def api_scenarios():
-    return jsonify({"schema_version": "0.1", "scenarios": _scenarios_index()})
-
-
-@app.post("/api/run")
-def api_run():
-    body = request.get_json(force=True)
+    """Serialize the supplied result without re-running or storing it."""
+    render = {"ops": _ops_csv_v2, "groups": _groups_csv_v2}.get(fmt)
+    if render is None:
+        return jsonify({"error": "未知 CSV 导出类型"}), 404
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or body.get("schema_version") != "0.2":
+        return jsonify({"error": "需要 v0.2 ResultBundle"}), 400
     try:
-        if "scenario_file" in body:
-            path = SCENARIO_DIR / (body["scenario_file"] + ".json")
-            scenario = ScenarioSpec.from_json(json.loads(path.read_text(encoding="utf-8")))
-        else:
-            scenario = ScenarioSpec.from_json(body)
-        from .model_ir.catalog import PRODUCT_MODELS
-        if scenario.model_id not in PRODUCT_MODELS:
-            return jsonify({"error": f"历史/合成模型 {scenario.model_id} 不在"
-                                     "活跃 API 目录；仅作离线归档"}), 400
-        result = run(scenario).to_json()
-        return jsonify(result)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-
-@app.post("/api/sweep")
-def api_sweep():
-    from .sweep import sweep_suite
-    body = request.get_json(force=True)
-    try:
-        scenario = ScenarioSpec.from_json(body)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    from .model_ir.catalog import PRODUCT_MODELS
-    if scenario.model_id not in PRODUCT_MODELS:
-        return jsonify({"error": f"历史/合成模型 {scenario.model_id} 不在"
-                                 "活跃 API 目录；仅作离线归档"}), 400
-    return jsonify(sweep_suite(scenario))
+        csv_text = render(js_restore(body))
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return jsonify({"error": "结果中的 CSV 数据格式无效"}), 400
+    return Response(csv_text, mimetype="text/csv")

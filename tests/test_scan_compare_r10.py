@@ -562,3 +562,37 @@ def test_r10f_candidate_cannot_rank_against_ineligible_baseline():
     row = result["rows"][0]
     assert row["eligible"] is False and "基线证据未通过" in row["ineligible_reason"]
     assert row["objectives"]["M01_tpot_analytical"]["delta"] == 0.0
+
+
+def test_sweep_suite_evaluates_identical_scenarios_once_per_request(monkeypatch):
+    from simverse.experiments import sweep_v2
+    from simverse.presets import default_preset
+
+    base = ScenarioV2.from_json(default_preset())
+    calls = []
+
+    def evaluate(sc):
+        digest = sc.scenario_digest()
+        calls.append(digest)
+        b = _fake_bundle({
+            "M01_tpot_analytical": _m(67.0), "M01_tpot_baseline": _m(112.0),
+        })
+        b.manifest.run_id = digest
+        return b
+
+    monkeypatch.setattr(sweep_v2, "run_v2", evaluate)
+    scan = sweep_v2.sweep_suite(base)
+    assert sum(len(scan[field]["points"]) for field in sweep_v2.DEFAULT_SWEEP_RANGES) == 27
+    assert len(calls) == len(set(calls)) == 25
+    assert scan["base_digest"] == base.scenario_digest()
+    for field, values in sweep_v2.DEFAULT_SWEEP_RANGES.items():
+        assert [p["value"] for p in scan[field]["points"]] == values
+        assert all(p["fallback_reason"] and p["speedup"] == pytest.approx(112.0 / 67.0)
+                   for p in scan[field]["points"])
+        assert scan["breakevens"][field] is None
+    assert [p["value"] for field in sweep_v2.DEFAULT_SWEEP_RANGES
+            for p in scan[field]["points"] if p["run_id"] == scan["base_digest"]] == [1, 32768, 16]
+
+    calls.clear()
+    assert sweep_v2.sweep_suite(base) == scan
+    assert len(calls) == 25

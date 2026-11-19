@@ -19,7 +19,7 @@ from ..model_ir.schema import ModelIR
 
 import math
 
-from .parallel import (ParallelPlan, VLLM_PARALLEL_PIN, plan_collective_recipe,
+from .parallel import (ParallelPlan, attention_shard_rule, VLLM_PARALLEL_PIN, plan_collective_recipe,
                        validate_parallel)
 
 
@@ -56,11 +56,11 @@ def kv_shard_note(model: ModelIR, tp: int) -> Dict[str, str]:
     per_layer = []
     for layer in model.layers:
         if layer.attn is not None:
-            kvh = layer.attn.kv_heads
-            if tp <= kvh and kvh % tp == 0:
-                per_layer.append(f"Hkv/tp={kvh // tp}")
+            shard = attention_shard_rule(layer.attn, tp)
+            if shard.kv_replicated:
+                per_layer.append(f"replicated(Hkv={layer.attn.kv_heads}<tp)")
             else:
-                per_layer.append(f"replicated(Hkv={kvh}<tp)")
+                per_layer.append(f"Hkv/tp={shard.kv_heads_per_rank}")
     return {"strategy": "mixed" if len(set(per_layer)) > 1
             else ("sharded" if per_layer and per_layer[0].startswith("Hkv")
                   else "replicated"),

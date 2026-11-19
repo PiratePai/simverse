@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import List, Optional, Tuple
 
 
@@ -33,19 +34,56 @@ class AcceptanceLaw:
     source_ref: str = ""                             # trace/数据集引用（后续）
 
 
-def law_from_scenario(acc: dict, k: int) -> AcceptanceLaw:
+class AcceptanceInputError(ValueError):
+    def __init__(self, field: str, message: str):
+        self.field = field
+        super().__init__(message)
+
+
+def _finite_number(value) -> bool:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return isfinite(value)
+    except OverflowError:
+        return False
+
+
+def validate_acceptance(acc: dict) -> str:
+    """Validate the scenario's acceptance input and return its kind."""
+    if not isinstance(acc, dict):
+        raise AcceptanceInputError("", "接受率输入必须是对象")
     kind = acc.get("kind", "geometric")
+    if not isinstance(kind, str):
+        raise AcceptanceInputError("kind", f"kind 必须为 str，实际 {type(kind).__name__}")
+    if kind == "geometric":
+        alpha = acc.get("alpha")
+        if not _finite_number(alpha) or not 0.0 <= alpha <= 1.0:
+            raise AcceptanceInputError("alpha", f"alpha ∈ [0,1]，实际 {alpha!r}")
+    elif kind == "position_alphas":
+        alphas = acc.get("alphas")
+        if not isinstance(alphas, (list, tuple)) or not alphas or not all(
+            _finite_number(a) and 0.0 <= a <= 1.0 for a in alphas
+        ):
+            raise AcceptanceInputError("alphas", "alphas 必须为 [0,1] 内非空数值数组")
+    elif kind == "committed_mean":
+        mean = acc.get("mean")
+        if not _finite_number(mean) or mean <= 0:
+            raise AcceptanceInputError("mean", f"mean 必须为正数，实际 {mean!r}")
+    elif kind not in ("dynamic_k", "empirical_hist"):
+        raise AcceptanceInputError("kind", f"未知接受输入 kind={kind}")
+    return kind
+
+
+def law_from_scenario(acc: dict, k: int) -> AcceptanceLaw:
+    kind = validate_acceptance(acc)
     if kind == "geometric":
         alpha = float(acc["alpha"])
-        if not 0.0 <= alpha <= 1.0:
-            raise ValueError("alpha ∈ [0,1]")
         return AcceptanceLaw(kind="position_alphas",
                               position_alphas=(alpha,) * k, k_limit=k,
                               source=acc.get("source", "hypothesis"))
     if kind == "position_alphas":
         alphas = tuple(float(a) for a in acc["alphas"])
-        if any(not 0.0 <= a <= 1.0 for a in alphas):
-            raise ValueError("alphas ∈ [0,1]")
         return AcceptanceLaw(kind="position_alphas", position_alphas=alphas,
                               k_limit=len(alphas),
                               source=acc.get("source", "hypothesis"))
@@ -57,10 +95,8 @@ def law_from_scenario(acc: dict, k: int) -> AcceptanceLaw:
         return AcceptanceLaw(kind="dynamic_k", k_limit=k,
                              joint_law=acc.get("joint_law"),
                              source=acc.get("source", "hypothesis"))
-    if kind == "empirical_hist":
-        return AcceptanceLaw(kind="empirical_hist", k_limit=k,
-                              source_ref=acc.get("source_ref", ""))
-    raise ValueError(f"未知接受输入 kind={kind}")
+    return AcceptanceLaw(kind="empirical_hist", k_limit=k,
+                         source_ref=acc.get("source_ref", ""))
 
 
 def expected_committed(law: AcceptanceLaw) -> Tuple[Optional[float], Optional[str]]:

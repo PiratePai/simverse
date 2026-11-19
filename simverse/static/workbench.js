@@ -12,12 +12,11 @@
  *  - Roofline 优先消费后端峰值/带宽元数据（有则画规格上界与有效成本上界），
  *    无则明确“计算上界元数据未提供”，不硬编码 FP8/坐标范围；
  *  - M06 显存逐端（target/draft/各 rank）展示，四态区分，detail 非 Metric；
- *  - CSV 走 RFC 4180 标准转义（static/csv.js），与 CLI 同语义。*/
+ *  - CSV 由服务端复用 CLI 序列化函数，从已有结果导出。*/
 (function () {
   'use strict';
   var state = {
-    catalog: null, bundle: null, selectedRowKey: null,
-    matrixRuns: {}, scenarioOf: null, matrixRunning: false
+    catalog: null, bundle: null, matrixRunning: false
   };
   var $ = function (id) { return document.getElementById(id); };
   // 精度档（后端 scenario.validate 契约：dense_w/expert_w/act/kv ∈ {4,8,16}，state=32）
@@ -446,7 +445,7 @@
     }).then(function (r) {
       return r.json().then(function (j) {
         if (!r.ok) throw new Error(j && j.error ? j.error : ('HTTP ' + r.status));
-        return restoreBig(j);
+        return j;
       }, function () {
         throw new Error('HTTP ' + r.status + '（响应非 JSON）');
       });
@@ -455,7 +454,6 @@
 
   function doRun() {
     var sc = currentScenario();
-    state.scenarioOf = sc;
     $('btn-run').disabled = true;
     setStatus('运行中… ' + sc.model_id + ' × ' + sc.method_id);
     runScenario(sc).then(function (b) {
@@ -481,7 +479,7 @@
   function reason(b, id) { var m = metric(b, id); return m && m.reason ? m.reason : null; }
 
   function renderBundle() {
-    var b = state.bundle;
+    var b = restoreBig(state.bundle);  // 仅展示使用 Number，导出沿用服务端的精确整数。
     var tpot = val(b, 'M01_tpot_analytical');
     var tpotReason = reason(b, 'M01_tpot_analytical');
     $('kpi-tpot').textContent = tpot !== null ? fmt(tpot, 'ms', 4) : '未知';
@@ -694,7 +692,6 @@
         '<span class="dag-badge ' + (a.kv_read + a.state_read > 0 ? 'mem' : 'cmp') +
         '">' + (a.flops / 1e6).toFixed(1) + ' MF</span></div>';
       var activate = function () {
-        state.selectedRowKey = a.op;
         $('row-detail-panel').open = true;
         renderInspector(a);
         list.querySelectorAll('.dag-node').forEach(function (n2) {
@@ -709,11 +706,9 @@
       list.appendChild(node);
     });
     if (aggs.length) {
-      state.selectedRowKey = aggs[0].op;
       renderInspector(aggs[0]);
       list.firstChild.classList.add('active');
     } else {
-      state.selectedRowKey = null;
       $('inspector').innerHTML = '<p>无账本行。</p>';
       $('roofline-coord').textContent = '–';
     }
@@ -1008,13 +1003,6 @@
     $('cost-groups-body').innerHTML = html + '</table></div>';
   }
 
-  function exportGroups() {
-    if (!state.bundle) return;
-    var cols = ['stage','role','group','primitive','analytic_ms','selected_ms','source','timing_boundary','basis'];
-    var rows = ((state.bundle.cost || {}).groups || []);
-    download('simverse-cost-groups.csv', window.simverseCsv.toCsv(cols, rows), 'text/csv');
-  }
-
   function renderRecordCosts(b) {
     var rc = (b.cost || {}).record_cost, panel = $('cost-records-panel');
     if (!panel) return;
@@ -1204,13 +1192,11 @@
     return runScenario(cellScenario(deploy, method)).then(function (b) {
       var err = bundleError(b);
       if (err) {
-        state.matrixRuns[deploy + '-' + method] = b;
         td.className = 'mx-cell bad';
         td.textContent = '不支持/失败';
         td.title = '后端拒绝：' + err;
         return;
       }
-      state.matrixRuns[deploy + '-' + method] = b;
       var tpot = val(b, 'M01_tpot_selected');
       if (tpot === null) tpot = val(b, 'M01_tpot_analytical');
       var sp = metric(b, 'M02_speedup_selected') || metric(b, 'M02_speedup_vs_baseline');
@@ -1319,38 +1305,22 @@
     download('simverse-run-' + state.bundle.manifest.run_id.slice(7, 19) + '.json',
       JSON.stringify(state.bundle, null, 1));
   }
-  function exportCsv() {
-    if (!state.bundle) { setStatus('先运行一次再导出。', true); return; }
-    var rows = targetRows(state.bundle);
-    var cols = ['stage', 'layer', 'op', 'flops', 'weight_read',
-      'weight_read_expected', 'act_read', 'act_write', 'kv_read', 'kv_write',
-      'state_read', 'state_write', 'weight_capacity', 'statistic', 'formula',
-      't_ms', 'bound', 'shape'];
-    // t_ms/bound 从完整逐行计价按 row_id 关联；旧结果兼容 top-40。
-    var ptIdx = rooflineIndex(state.bundle);
-    var recordCosts = (state.bundle.cost || {}).record_cost;
-    var useRecords = !!recordCosts;
-    if (useRecords) {
-      ptIdx = {};
-      (recordCosts.selected_row_prices || []).forEach(function (p) { ptIdx[p.row_id] = p; });
-    }
-    if (useRecords) cols = cols.concat(['analytic_t_ms', 'record_t_ms', 'cost_source', 'record_refs', 'fallback_reason']);
-    var records = rows.map(function (r) {
-      var p = ptIdx[rowKey(r)] || {};
-      var o = {}; cols.forEach(function (c) { o[c] = r[c]; });
-      o.t_ms = p.t_ms !== undefined ? p.t_ms : '';
-      o.bound = p.bound !== undefined ? p.bound : '';
-      if (useRecords) {
-        o.analytic_t_ms = p.analytic_ms !== undefined ? p.analytic_ms : '';
-        o.record_t_ms = p.t_ms !== undefined ? p.t_ms : '';
-        o.cost_source = p.cost_source || '';
-        o.record_refs = (p.record_refs || []).join(';');
-        o.fallback_reason = p.fallback_reason || '';
-      }
-      return o;
+  function exportCsv(kind) {
+    var bundle = state.bundle;
+    if (!bundle) { setStatus('先运行一次再导出。', true); return; }
+    var name = kind === 'groups' ? 'simverse-cost-groups.csv'
+      : 'simverse-ops-' + bundle.manifest.run_id.slice(7, 19) + '.csv';
+    return fetch('/api/v2/export/' + kind, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bundle)
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (text) {
+      download(name, text, 'text/csv');
+    }).catch(function (e) {
+      setStatus('CSV 导出失败：' + esc(e.message), true);
     });
-    download('simverse-ops-' + state.bundle.manifest.run_id.slice(7, 19) + '.csv',
-      window.simverseCsv.toCsv(cols, records), 'text/csv');
   }
 
   // ---------- wire ----------
@@ -1374,8 +1344,8 @@
   $('btn-matrix').addEventListener('click', runMatrix);
   $('btn-sweep').addEventListener('click', runSweep);
   $('btn-export-json').addEventListener('click', exportJson);
-  $('btn-export-csv').addEventListener('click', exportCsv);
-  $('btn-export-groups').addEventListener('click', exportGroups);
+  $('btn-export-csv').addEventListener('click', function () { exportCsv('ops'); });
+  $('btn-export-groups').addEventListener('click', function () { exportCsv('groups'); });
   loadCatalog();
 
   // 浏览器验收钩子（仅 ?testhook=1 时暴露；不影响正常运行）

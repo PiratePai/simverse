@@ -13,9 +13,9 @@ HTML 500；合法但不受支持的组合又与真正的内部异常混在同一
 """
 from __future__ import annotations
 
-from math import isfinite
 from typing import Any, Dict
 
+from .methods.acceptance import AcceptanceInputError, validate_acceptance
 from .scenario import ScenarioInputError, ScenarioV2
 
 # ScenarioV2 / DeploymentSpec / WorkloadHypothesis / BudgetInput 的
@@ -78,42 +78,6 @@ def _check_types(obj: Any, table: Dict[str, tuple], path: str,
                 f"实际 {type(value).__name__}")
 
 
-def _check_acceptance(acc: Dict[str, Any]) -> None:
-    """接受率假设的字段校验（与 methods.acceptance.law_from_scenario 的
-    域一致：越界 kind/alpha 属于字段值非法，入口 4xx，不留给管线 failed）。"""
-    def num(value) -> bool:
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
-            return False
-        try:
-            return isfinite(value)
-        except OverflowError:
-            return False
-
-    kind = acc.get("kind", "geometric")
-    if not isinstance(kind, str):
-        raise ScenarioInputError("$.acceptance.kind",
-                                 f"kind 必须为 str，实际 {type(kind).__name__}")
-    if kind not in ("geometric", "position_alphas", "committed_mean",
-                    "dynamic_k", "empirical_hist"):
-        raise ScenarioInputError("$.acceptance.kind", f"未知接受输入 kind={kind}")
-    if kind == "geometric":
-        alpha = acc.get("alpha")
-        if not num(alpha) or not 0.0 <= float(alpha) <= 1.0:
-            raise ScenarioInputError("$.acceptance.alpha",
-                                     f"alpha ∈ [0,1]，实际 {alpha!r}")
-    elif kind == "position_alphas":
-        alphas = acc.get("alphas")
-        if not isinstance(alphas, list) or not alphas or \
-                not all(num(a) and 0.0 <= float(a) <= 1.0 for a in alphas):
-            raise ScenarioInputError("$.acceptance.alphas",
-                                     "alphas 必须为 [0,1] 内非空数值数组")
-    elif kind == "committed_mean":
-        mean = acc.get("mean")
-        if not num(mean) or float(mean) <= 0:
-            raise ScenarioInputError("$.acceptance.mean",
-                                     f"mean 必须为正数，实际 {mean!r}")
-
-
 def decode_scenario_v2(body: Any) -> ScenarioV2:
     """结构/类型校验（带路径）→ ScenarioV2.from_json 语义校验。
 
@@ -132,8 +96,11 @@ def decode_scenario_v2(body: Any) -> ScenarioV2:
     if "workload" in body and body["workload"] is not None:
         _check_types(body["workload"], _WORKLOAD_FIELDS, "$.workload",
                      "workload", allow_unknown=False)
-    if isinstance(body.get("acceptance"), dict):
-        _check_acceptance(body["acceptance"])
+    if "acceptance" in body:
+        try:
+            validate_acceptance(body["acceptance"])
+        except AcceptanceInputError as exc:
+            raise ScenarioInputError(f"$.acceptance.{exc.field}", str(exc)) from exc
     for qkey in ("quant", "draft_quant"):
         qval = body.get(qkey)
         if isinstance(qval, dict):
