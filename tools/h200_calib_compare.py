@@ -14,6 +14,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
+from simverse.model_ir import build_catalog  # noqa: E402
 from simverse.pipeline import run_v2  # noqa: E402
 from simverse.scenario import ScenarioV2  # noqa: E402
 
@@ -43,8 +44,11 @@ def main() -> int:
                                          / "h200_calib_compare.json"))
     args = ap.parse_args()
     points = []
+    archive = build_catalog(include_internal=True)
     for batch, ctx in GRID:
-        b = run_v2(scenario(batch, ctx)).to_json()
+        b = run_v2(scenario(batch, ctx), catalog=archive).to_json()
+        if b["cost"]["selection"]["source"] != "profile":
+            raise ValueError(f"H200 profile 未应用于 B={batch}, ctx={ctx}")
         cal = b["cost"]["calibration"]["stages"]["target_decode"]
         analytic = b["metrics"]["M01_tpot_analytical"]["value"]
         selected = b["metrics"]["M01_tpot_selected"]["value"]
