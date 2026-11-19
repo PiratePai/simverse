@@ -25,7 +25,7 @@ from .methods import build_method_plan, acceptance_summary
 from .methods.plans import UNSUPPORTED
 from .model_ir import build_catalog
 from .validation import code_revision
-from .scenario import ScenarioV2
+from .scenario import ScenarioInputError, ScenarioV2
 
 _PROFILE_EVIDENCE = {
     "h200-qwen3-30b-a3b-tiny-op-v1": "ev-h200-tiny-distill",
@@ -105,7 +105,8 @@ def _device_snapshot(dep) -> dict:
     }
 
 
-def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
+def _device_budget(device_id: str, budget_input=None, *,
+                   path: str = "$.deployment.budget") -> DeviceBudget:
     """设备预算：标称容量 + 场景预算输入（R03a；缺省 unknown 不套标称）。"""
     d = DEVICES[device_id]
     b = DeviceBudget(device_id, int(d.mem_capacity), None,
@@ -118,7 +119,8 @@ def _device_budget(device_id: str, budget_input=None) -> DeviceBudget:
         b.extra_overhead_bytes = budget_input.extra_overhead_bytes
         b.overhead_source = budget_input.overhead_source
         if b.allocatable_bytes is not None and b.allocatable_bytes > b.nominal_bytes:
-            raise ValueError(
+            raise ScenarioInputError(
+                f"{path}.allocatable_bytes",
                 f"allocatable_bytes {b.allocatable_bytes} > 标称容量 "
                 f"{b.nominal_bytes}（{device_id}）：非法输入")
     return b
@@ -163,7 +165,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     # ---- 模型解析 + 能力检查 ----
     model = cat["models"].get(scenario.model_id)
     if model is None:
-        raise ValueError(f"未知模型 {scenario.model_id}")
+        raise ScenarioInputError("$.model_id", f"未知模型 {scenario.model_id}")
     cap.add("model_registered", "supported", model.id)
     if not model.structure_complete:
         cap.add("model_structure_complete", "unsupported",
@@ -941,7 +943,8 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
         if draft_ir is not None and dep.mode in ("dt_serial", "dt_pipeline_sim"):
             # 草稿独立设备 TP1：无共享对象配方（vLLM 配方为同组共享，
             # 独立组需全量 embed/lm_head 副本——服务栈未见证据，如实登记）
-            db = _device_budget(dep.draft_device, dep.draft_budget)
+            db = _device_budget(dep.draft_device, dep.draft_budget,
+                                path="$.deployment.draft_budget")
             drm = RM("draft-r0", dep.draft_device, db)
             from .lowering.memory import _as_model, draft_extra_allocations
             dm = _as_model(draft_ir)
@@ -1008,8 +1011,8 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
     m["M01_tpot_baseline"] = metric_from(
         t_base, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION, scope=sc,
         evidence=(Evidence.COUNTED,), assumptions=["无投机基线同 B/ctx"])
-    # M02 加速比（与自身基线同 run 配对；资格检查）
-    elig = _eligibility(cap)
+    # M02 加速比（与自身基线同 run 配对；资格检查——统一规则带场景适用域）
+    elig = _eligibility(cap, scenario)
     if round_obj.tpot_ms and t_base:
         m["M02_speedup_vs_baseline"] = metric_from(
             t_base / round_obj.tpot_ms, "ratio", FR.F_ROOFLINE,
@@ -1021,7 +1024,8 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
             statistic=Statistic.EXPECTATION,
             support=Support.APPROXIMATED, feasibility=Feasibility.UNKNOWN,
             evidence_refs=[], formula_ref=FR.F_ROOFLINE,
-            reason="不参与排名：" + "; ".join(_eligibility_issues(cap)))
+            reason="不参与排名：" + "; ".join(
+                _eligibility_issues(cap, scenario)))
     else:
         m["M02_speedup_vs_baseline"] = Metric.unknown("ratio", "TPOT 缺失")
     # M03 每轮产出（baseline：恒 1 精确值）
@@ -1129,26 +1133,18 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
     return m
 
 
-def _eligibility(cap: CapabilityReport) -> bool:
-    """比较资格：结构完整 + 无 OOM + 容量非 unknown/条件（§7.2；R03b：
-    假设预算（approximated/feasible-conditional）不进实际部署排名）。"""
-    return not _eligibility_issues(cap)
+def _eligibility(cap: CapabilityReport, scenario=None) -> bool:
+    """比较资格：统一走 experiments.eligibility（R10e/R10f；与 compare_runs
+    同一套按场景适用域的规则）。结构完整 + 无 OOM + 容量非 unknown/条件
+    （§7.2；R03b：假设预算（approximated/feasible-conditional）不进实际
+    部署排名）；必需证据缺失保留 unknown 与具体原因。"""
+    return not _eligibility_issues(cap, scenario)
 
 
-def _eligibility_issues(cap: CapabilityReport) -> list[str]:
-    issues = []
-    for cid, chk in cap.checks.items():
-        if cid in ("model_structure_complete", "model_config_coverage",
-                   "model_forward_evidence", "draft_forward_evidence",
-                   "method_recipe_ready", "stage_cost_complete",
-                   "model_cpu_forward", "model_gpu_measurement",
-                   "deployment_ranking_evidence", "ascend_device_recipe") \
-                and chk["status"] != "supported":
-            issues.append(str(chk["reason"]))
-        elif cid.startswith("memory_") and chk["status"] in (
-                "unsupported", "unknown", "approximated"):
-            issues.append(str(chk["reason"]))
-    return issues
+def _eligibility_issues(cap: CapabilityReport, scenario=None) -> list[str]:
+    from .experiments.eligibility import eligibility_issues
+    snapshot = scenario.to_json() if scenario is not None else None
+    return eligibility_issues(cap.checks, snapshot)
 
 
 def _moe_union_summary(rows) -> Optional[Dict[str, Any]]:

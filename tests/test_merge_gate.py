@@ -522,13 +522,26 @@ def test_g15_deployment_ranking_blocked_without_forward_and_gpu_evidence():
 
 
 def test_g15_forward_gap_alone_blocks_eligibility():
-    """容量等其他条件都放行时，partial forward 仍必须单独拦住排名。"""
+    """容量等其他条件都放行时，partial forward 仍必须单独拦住排名。
+
+    R10e/R10f 起 _eligibility_issues 走统一规则（experiments.eligibility）：
+    必需检查缺失 = unknown 也拦截。因此本测试把除 forward 外的必需检查
+    补齐为 supported，验证"仅 forward 缺口"独立拦截；缺失拦截行为由
+    tests/test_scan_compare_r10.py 的资格矩阵覆盖。
+    """
     from simverse.contracts.evidence import CapabilityReport
     from simverse.pipeline import _eligibility, _eligibility_issues
 
     cap = CapabilityReport()
+    cap.add("model_structure_complete", "supported", "完备")
+    cap.add("model_config_coverage", "supported", "完备")
     cap.add("model_forward_evidence", "approximated",
             "MTP forward 未核")
+    cap.add("model_cpu_forward", "supported", "cpu-executed")
+    cap.add("model_gpu_measurement", "supported", "model-measured")
+    cap.add("deployment_ranking_evidence", "supported", "齐全")
+    cap.add("parallel_valid", "supported", "TP8/EP1")
+    cap.add("memory_r0", "supported", "feasible；预算 measured")
     assert _eligibility(cap) is False
     assert _eligibility_issues(cap) == ["MTP forward 未核"]
 

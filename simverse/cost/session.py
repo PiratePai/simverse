@@ -48,9 +48,16 @@ class CostSession:
         if scenario.cost_profile:
             from .calibrated import CalibratedPricer
             from .profile_store import load_profile_set, profile_model_id
+            from ..scenario import ScenarioInputError
+            try:
+                bound_model = profile_model_id(scenario.cost_profile)
+            except ValueError as exc:
+                raise ScenarioInputError("$.cost_profile", str(exc)) from exc
+            if bound_model != model.id:
+                raise ScenarioInputError(
+                    "$.cost_profile",
+                    f"profile {scenario.cost_profile} 绑定历史模型 {bound_model}，禁止用于 {model.id}（跨模型误用）")
             pset = load_profile_set(scenario.cost_profile)
-            if profile_model_id(pset.set_id) != model.id:
-                raise ValueError(f"profile {pset.set_id} 绑定历史模型 {profile_model_id(pset.set_id)}，禁止用于 {model.id}（跨模型误用）")
             self.profile = CalibratedPricer(pset, model, scenario)
 
     def checks(self, cap):

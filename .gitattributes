@@ -4,6 +4,7 @@
 docs/rebuild-20261106/references/** text eol=lf
 assets/identity/** text eol=lf
 assets/config/*.json text eol=lf
+assets/scenarios/*.json text eol=lf
 assets/identity/hf_transformers/*.py text eol=lf
 tests/fixtures/qwen36_r06_numeric_oracle.json text eol=lf
 

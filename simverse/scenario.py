@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional
 
 from .contracts import RngScheme, digest
-from .devices import DEVICES, V41_DEVICE_FAMILY
+from .devices import DEVICES, LINKS, V41_DEVICE_FAMILY
 from .draft_quant import FUSED_RAW, UNKNOWN, normalize_ctx_kv_path
 from .lowering.memory import ENGRAM_TABLE_PLACEMENTS
 
@@ -65,6 +65,14 @@ _DEFAULT_DRAFT_QUANT = {"dense_w": 8, "expert_w": 8, "act": 8, "kv": 8,
 V41_RING_CAPACITY = 8
 
 
+class ScenarioInputError(ValueError):
+    """非法场景输入及其 JSON 字段路径。"""
+
+    def __init__(self, field: str, message: str):
+        super().__init__(message)
+        self.field = field
+
+
 @dataclass
 class WorkloadHypothesis:
     batch: int = 1
@@ -92,33 +100,43 @@ class BudgetInput:
     overhead_source: str = ""
     note: str = ""
 
-    def validate(self) -> "BudgetInput":
+    def validate(self, path: str = "$.deployment.budget") -> "BudgetInput":
         if self.allocatable_kind not in BUDGET_KINDS:
-            raise ValueError(
+            raise ScenarioInputError(
+                f"{path}.allocatable_kind",
                 f"allocatable_kind 必须 ∈ {BUDGET_KINDS}，非 {self.allocatable_kind}")
         if self.allocatable_bytes is not None:
             if not isinstance(self.allocatable_bytes, int) \
                     or isinstance(self.allocatable_bytes, bool) \
                     or self.allocatable_bytes <= 0:
-                raise ValueError(
+                raise ScenarioInputError(
+                    f"{path}.allocatable_bytes",
                     f"allocatable_bytes 必须为正整数（B），非 {self.allocatable_bytes}")
             if self.allocatable_kind == "unknown":
-                raise ValueError(
+                raise ScenarioInputError(
+                    f"{path}.allocatable_kind",
                     "提供了 allocatable_bytes 必须声明 kind（measured 需来源；"
                     "假设输入用 hypothesis）")
             if self.allocatable_kind == "measured" and not self.allocatable_source:
-                raise ValueError(
+                raise ScenarioInputError(
+                    f"{path}.allocatable_source",
                     "measured 预算必须带 allocatable_source（采集方法/环境；"
                     "准则 §3.2 同型）")
         if self.allocatable_kind != "unknown" and self.allocatable_bytes is None:
-            raise ValueError(f"kind={self.allocatable_kind} 但无 allocatable_bytes")
+            raise ScenarioInputError(
+                f"{path}.allocatable_bytes",
+                f"kind={self.allocatable_kind} 但无 allocatable_bytes")
         if not isinstance(self.extra_overhead_bytes, int) \
                 or isinstance(self.extra_overhead_bytes, bool) \
                 or self.extra_overhead_bytes < 0:
-            raise ValueError(f"extra_overhead_bytes 必须为非负整数（B），非 "
-                             f"{self.extra_overhead_bytes}")
+            raise ScenarioInputError(
+                f"{path}.extra_overhead_bytes",
+                f"extra_overhead_bytes 必须为非负整数（B），非 "
+                f"{self.extra_overhead_bytes}")
         if self.extra_overhead_bytes > 0 and not self.overhead_source:
-            raise ValueError("extra_overhead_bytes>0 必须带 overhead_source")
+            raise ScenarioInputError(
+                f"{path}.overhead_source",
+                "extra_overhead_bytes>0 必须带 overhead_source")
         return self
 
     def to_json(self) -> dict:
@@ -190,7 +208,7 @@ class ScenarioV2:
         for field_name, defaults in (("quant", _DEFAULT_QUANT),
                                      ("draft_quant", _DEFAULT_DRAFT_QUANT)):
             given = getattr(self, field_name)
-            if given and len(given) < len(defaults):
+            if defaults.keys() - given.keys():
                 merged = dict(defaults)
                 merged.update(given)
                 setattr(self, field_name, merged)
@@ -199,20 +217,42 @@ class ScenarioV2:
         if self.cost_records is not None:
             from .cost.records import SETS
             if not isinstance(self.cost_records, str) or self.cost_records not in SETS:
-                raise ValueError("未知成本记录档；一次只能选择一个独立环境的记录档")
+                raise ScenarioInputError(
+                    "$.cost_records",
+                    "未知成本记录档；一次只能选择一个独立环境的记录档")
             if self.cost_profile:
-                raise ValueError("成本记录对照不能与实测 profile 混用；计时边界/栈域不同")
+                raise ScenarioInputError(
+                    "$.cost_records",
+                    "成本记录对照不能与实测 profile 混用；计时边界/栈域不同")
         if self.deployment.mode not in DEPLOY_MODES:
-            raise ValueError(f"未知部署模式 {self.deployment.mode}")
+            raise ScenarioInputError(
+                "$.deployment.mode",
+                f"未知部署模式 {self.deployment.mode}")
         if self.method_id == "baseline" and self.deployment.mode != "baseline":
-            raise ValueError("baseline 方法必须配 baseline 部署")
+            raise ScenarioInputError(
+                "$.deployment.mode",
+                "baseline 方法必须配 baseline 部署")
         if self.method_id != "baseline" and self.deployment.mode == "baseline":
-            raise ValueError("非 baseline 方法不能用 baseline 部署（对照组请显式建 run）")
+            raise ScenarioInputError(
+                "$.deployment.mode",
+                "非 baseline 方法不能用 baseline 部署（对照组请显式建 run）")
         if not (1 <= self.k <= 32):
-            raise ValueError("k ∈ [1,32]")
-        if self.workload.batch < 1 or self.workload.ctx_tokens < 1:
-            raise ValueError("batch/ctx 必须为正")
+            raise ScenarioInputError(
+                "$.k",
+                "k ∈ [1,32]")
+        if self.block_size is not None and self.block_size < 2:
+            raise ScenarioInputError("$.block_size", "block_size 必须大于或等于 2")
+        if self.workload.batch < 1:
+            raise ScenarioInputError("$.workload.batch", "batch 必须为正")
+        if self.workload.ctx_tokens < 1:
+            raise ScenarioInputError("$.workload.ctx_tokens", "ctx 必须为正")
+        if self.workload.osl_tokens is not None and self.workload.osl_tokens < 1:
+            raise ScenarioInputError("$.workload.osl_tokens", "osl_tokens 必须为正")
         dep = self.deployment
+        if dep.mode == "dt_pipeline_sim":
+            for name in ("pipeline_rounds", "pipeline_microbatches"):
+                if getattr(dep, name) < 1:
+                    raise ScenarioInputError(f"$.deployment.{name}", f"{name} 必须为正")
         active_roles = [("target", dep.target_device, self.quant)]
         if self.method_id != "baseline":
             active_roles.append(("draft", dep.target_device if dep.mode == "colocated"
@@ -221,35 +261,48 @@ class ScenarioV2:
             device = DEVICES.get(device_id)
             if device is not None and device.backend == "ascend":
                 if self.model_id == "deepseek_v41_flash":
-                    raise ValueError("910B3 尚无 V4.1 Ascend KV/量化/注意力配方；不能套用 CUDA FlashMLA")
+                    raise ScenarioInputError(
+                        "$.deployment.target_device",
+                        "910B3 尚无 V4.1 Ascend KV/量化/注意力配方；不能套用 CUDA FlashMLA")
                 if any(quant.get(key) != 16 for key in ("dense_w", "expert_w", "act", "kv")):
-                    raise ValueError(f"{role} 910B3 旧仓解析档仅支持 BF16/FP16（权重/激活/KV 均 16bit）；不支持 FP8/量化档")
-        if dep.target_tp < 1 or dep.target_ep < 1 or dep.draft_tp < 1:
-            raise ValueError("tp/ep 必须为正整数")
+                    raise ScenarioInputError(
+                        "$.quant" if role == "target" else "$.draft_quant",
+                        f"{role} 910B3 旧仓解析档仅支持 BF16/FP16（权重/激活/KV 均 16bit）；不支持 FP8/量化档")
+        for field_name in ("target_tp", "target_ep", "draft_tp"):
+            if getattr(dep, field_name) < 1:
+                raise ScenarioInputError(f"$.deployment.{field_name}", "tp/ep 必须为正整数")
         if dep.target_ep not in (1, dep.target_tp):
-            raise ValueError(
+            raise ScenarioInputError(
+                "$.deployment.target_ep",
                 f"target_ep={dep.target_ep} 无实现配方：单引擎副本内只能取 1 或 "
                 f"等于 target_tp={dep.target_tp}（vLLM FusedMoEParallelConfig pin）")
         if dep.mode == "colocated" and dep.draft_tp != 1 and not dep.draft_on_target_group:
-            raise ValueError("colocated 草稿与 target 同 TP 组（vLLM 配方）；"
-                             "draft_tp 仅在 dt_serial 独立组语义下有效")
+            raise ScenarioInputError(
+                "$.deployment.draft_tp",
+                "colocated 草稿与 target 同 TP 组（vLLM 配方）；"
+                "draft_tp 仅在 dt_serial 独立组语义下有效")
         if dep.budget is not None:
             dep.budget.validate()
         if dep.draft_budget is not None:
-            dep.draft_budget.validate()
-        for key, bits in {**self.quant, **self.draft_quant}.items():
-            if key != "state" and bits not in (4, 8, 16):
-                raise ValueError(f"精度 {key}={bits} 不在 4/8/16")
+            dep.draft_budget.validate("$.deployment.draft_budget")
+        for field_name in ("quant", "draft_quant"):
+            for key, bits in getattr(self, field_name).items():
+                if key != "state" and bits not in (4, 8, 16):
+                    raise ScenarioInputError(
+                        f"$.{field_name}.{key}",
+                        f"精度 {key}={bits} 不在 4/8/16")
         path = normalize_ctx_kv_path(self.draft_ctx_kv_path)
         if path == UNKNOWN:
-            raise ValueError(
+            raise ScenarioInputError(
+                "$.draft_ctx_kv_path",
                 "draft_ctx_kv_path=unknown：ctx-KV 实现路径必须有证据，"
                 "不能由 dense_w 推断；请显式指定 fused_raw/"
                 "mxfp8_context_proj/per_layer_fallback")
         # R04：Engram 表位置是显式配方输入（镜像 ctx_kv_path 的拒绝模式；
         # 默认 cpu_offload 是研究假设，不是从位宽/层数推出来的执行分支）
         if dep.engram_table_placement not in ENGRAM_TABLE_PLACEMENTS:
-            raise ValueError(
+            raise ScenarioInputError(
+                "$.deployment.engram_table_placement",
                 f"engram_table_placement={dep.engram_table_placement!r} 非法："
                 f"必须 ∈ {ENGRAM_TABLE_PLACEMENTS}（默认 cpu_offload 为研究"
                 "假设配方；gpu 驻留 101.4 GiB/层需显式选择）")
@@ -257,7 +310,8 @@ class ScenarioV2:
         # 拒绝模式；默认 sm90 来自注册设备 H100/H200 的 capability family，
         #不是从场景 kv 位宽推出来的）
         if dep.v41_kv_record not in V41_KV_RECORDS:
-            raise ValueError(
+            raise ScenarioInputError(
+                "$.deployment.v41_kv_record",
                 f"v41_kv_record={dep.v41_kv_record!r} 非法：必须 ∈ "
                 f"{sorted(V41_KV_RECORDS)}（pinned attention.py L583-589；"
                 "记录宽度不随场景 kv 位宽缩放）")
@@ -269,7 +323,8 @@ class ScenarioV2:
             dev_fam = V41_DEVICE_FAMILY.get(dep.target_device)
             rec_fam = V41_KV_RECORDS[dep.v41_kv_record]["family"]
             if dev_fam != rec_fam:
-                raise ValueError(
+                raise ScenarioInputError(
+                    "$.deployment.v41_kv_record",
                     f"v41_kv_record={dep.v41_kv_record!r} 需要 {rec_fam} 设备，"
                     f"target_device={dep.target_device!r} 是 "
                     f"{dev_fam or '未登记 family'}；注册设备 H100/H200=SM90、"
@@ -282,7 +337,8 @@ class ScenarioV2:
             for key, want in V41_QUANT.items():
                 got = self.quant.get(key)
                 if got != want:
-                    raise ValueError(
+                    raise ScenarioInputError(
+                        f"$.quant.{key}",
                         f"V4.1 场景 quant.{key}={got} 与冻结配方冲突："
                         f"checkpoint 量化 + 注册设备（≤SM90）执行域要求 "
                         f"{key}={want}（R22 quant-pin.json：MXFP8 线性/"
@@ -291,12 +347,19 @@ class ScenarioV2:
         # 一致性护栏（不是用位宽选分支）：raw 融合副本要求未量化权重；
         # 4bit 计价档与 fused_raw 矛盾，必须显式改为 per_layer_fallback。
         if path == FUSED_RAW and (self.draft_quant or {}).get("dense_w", 16) < 8:
-            raise ValueError(
+            raise ScenarioInputError(
+                "$.draft_quant.dense_w",
                 f"draft_ctx_kv_path=fused_raw 与 draft_quant.dense_w="
                 f"{(self.draft_quant or {}).get('dense_w')} 矛盾：raw 路径要求 "
                 "UnquantizedLinearMethod；量化回退请显式设置 "
                 "draft_ctx_kv_path=per_layer_fallback（或 MXFP8 用 "
                 "mxfp8_context_proj）")
+        for field_name in ("target_device", "draft_device"):
+            device_id = getattr(dep, field_name)
+            if device_id not in DEVICES:
+                raise ScenarioInputError(f"$.deployment.{field_name}", f"未知设备 {device_id}")
+        if dep.link not in LINKS:
+            raise ScenarioInputError("$.deployment.link", f"未知链路 {dep.link}")
         self.draft_ctx_kv_path = path
         return self
 
@@ -318,7 +381,9 @@ class ScenarioV2:
     @staticmethod
     def from_json(data: dict) -> "ScenarioV2":
         if data.get("schema_version") not in (None, "0.2"):
-            raise ValueError(f"不支持 schema_version {data.get('schema_version')}")
+            raise ScenarioInputError(
+                "$.schema_version",
+                f"不支持 schema_version {data.get('schema_version')}")
         known = {f: data[f] for f in ScenarioV2.__dataclass_fields__ if f in data}
         if "deployment" in known:
             known["deployment"] = (known["deployment"] if not isinstance(
@@ -333,5 +398,5 @@ def _deploy_from(d: dict) -> DeploymentSpec:
     if "budget" in d and isinstance(d["budget"], dict):
         d = {**d, "budget": BudgetInput(**d["budget"]).validate()}
     if "draft_budget" in d and isinstance(d["draft_budget"], dict):
-        d = {**d, "draft_budget": BudgetInput(**d["draft_budget"]).validate()}
+        d = {**d, "draft_budget": BudgetInput(**d["draft_budget"]).validate("$.deployment.draft_budget")}
     return DeploymentSpec(**d)

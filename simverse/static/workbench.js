@@ -151,7 +151,81 @@
       renderCatalogDrawer();
       renderMatrixHead();
       syncControls();
+      // R10d 共享预设：目录自带的 v0.2 预设（与 CLI/目录 API 同源）填入
+      // 选择器；用户尚未改动过控件时默认载入共享默认预设。异步目录加载
+      // 完成时不得覆盖用户已明确选择或已载入的场景。
+      var ps = $('sel-preset');
+      if (ps) {
+        ps.innerHTML = '<option value="">（自由配置 · 不用预设）</option>';
+        (cat.scenarios || []).forEach(function (item) {
+          var o = document.createElement('option');
+          o.value = item.id;
+          o.textContent = item.name + '（' + item.id + '）';
+          ps.appendChild(o);
+        });
+        if (!state.userTouched && !state.preset) {
+          var hasDefault = (cat.scenarios || []).some(function (s) {
+            return s.id === 'qwen36_dflash_default';
+          });
+          if (hasDefault) selectPreset('qwen36_dflash_default');
+        }
+      }
     }).catch(function (e) { setStatus('能力目录加载失败：' + e, true); });
+  }
+
+  // ---------- 共享预设（R10d）：与 CLI/目录 API 同一份默认输入 ----------
+  function selectPreset(id) {
+    if (!state.catalog || !state.catalog.scenarios) return;
+    var hit = state.catalog.scenarios.filter(function (s) { return s.id === id; })[0];
+    if (!hit) return;
+    state.preset = JSON.parse(JSON.stringify(hit.scenario));
+    $('sel-preset').value = hit.id;
+    state.userTouched = true;   // 显式载入 = 用户选择；后续目录刷新不覆盖
+    applyPresetToControls(state.preset);
+    setStatus('已载入共享预设 ' + hit.id + '（digest ' +
+      String(hit.scenario_digest).slice(0, 19) + '…）；运行按预设原样提交', false);
+  }
+
+  function applyPresetToControls(sc) {
+    function setSel(id, val) {
+      var el = $(id);
+      if (el === null || val === undefined || val === null) return;
+      el.value = String(val);
+      if (el.value !== String(val) && el.options.length) {
+        // 值不在选项内（如非标准 ctx）→ 保底加一项，不静默换成别的值
+        var o = document.createElement('option');
+        o.value = String(val); o.textContent = String(val);
+        el.appendChild(o); el.value = String(val);
+      }
+    }
+    setSel('sel-model', sc.model_id);
+    setSel('sel-method', sc.method_id);
+    setSel('sel-deploy', sc.deployment.mode);
+    setSel('sel-target-dev', sc.deployment.target_device);
+    setSel('sel-tp', sc.deployment.target_tp);
+    setSel('sel-ep', (sc.deployment.target_ep === sc.deployment.target_tp
+      && sc.deployment.target_tp > 1) ? 'tp' : '1');
+    setSel('sel-draft-dev', sc.deployment.draft_device);
+    setSel('inp-ctx', sc.workload.ctx_tokens);
+    setSel('inp-batch', sc.workload.batch);
+    setSel('inp-blk', sc.block_size);
+    if (sc.acceptance && sc.acceptance.kind === 'geometric') {
+      setSel('sel-acc', sc.acceptance.alpha);
+    } else if (sc.acceptance && sc.acceptance.kind === 'committed_mean') {
+      setSel('sel-acc', 'mean2');
+    } else if (sc.acceptance && sc.acceptance.kind === 'dynamic_k') {
+      setSel('sel-acc', 'dynk');
+    }
+    syncControls();
+  }
+
+  function clearPreset() {
+    // 用户改动任一控件 → 脱离预设模式：此后按控件自由组场景（digest 不
+    // 再与预设对齐，name 回到 workbench-* 命名）。
+    if (!state.preset) return;
+    state.preset = null;
+    var ps = $('sel-preset');
+    if (ps) ps.value = '';
   }
 
   // ---------- 控件联动（镜像后端硬事实；不臆测无法提前判定的组合） ----------
@@ -251,6 +325,20 @@
   }
 
   function currentScenario(over) {
+    // 预设模式（R10d）：目录载入的 v0.2 预设原样为底——字段不重拼，
+    // 场景 digest 与 CLI/目录 API 提交完全一致；仅显式覆盖（矩阵/扫描
+    // 变体）在预设之上做同 backend variant 的 dict 合并。
+    if (state.preset) {
+      var p = JSON.parse(JSON.stringify(state.preset));
+      if (over) {
+        Object.keys(over).forEach(function (k) {
+          if (over[k] && typeof over[k] === 'object' && p[k] &&
+              typeof p[k] === 'object') Object.assign(p[k], over[k]);
+          else p[k] = over[k];
+        });
+      }
+      return p;
+    }
     var accSel = $('sel-acc').value;
     var acceptance;
     if (accSel === 'mean2') acceptance = { kind: 'committed_mean', mean: 2.0 };
@@ -1266,11 +1354,21 @@
   }
 
   // ---------- wire ----------
+  // 控件改动 = 用户明确选择：置 userTouched（异步目录加载不覆盖）并脱离
+  // 预设模式（自由配置；不再按预设原样提交）。预设选择器本身除外。
   ['sel-model', 'sel-method', 'sel-deploy', 'sel-target-dev', 'sel-tp',
     'sel-ep', 'sel-draft-dev', 'inp-ctx', 'inp-batch', 'sel-acc', 'inp-blk',
-    'sel-prec', 'inp-budget', 'inp-draft-budget', 'inp-overhead', 'sel-record-cost'
+    'sel-prec', 'inp-budget', 'inp-draft-budget', 'inp-overhead', 'sel-record-cost', 'sel-profile'
   ].forEach(function (id) {
-    $(id).addEventListener('change', syncControls);
+    $(id).addEventListener('change', function () {
+      state.userTouched = true;
+      clearPreset();
+      syncControls();
+    });
+  });
+  $('sel-preset').addEventListener('change', function () {
+    if (this.value) selectPreset(this.value);
+    else { state.preset = null; syncControls(); }
   });
   $('btn-run').addEventListener('click', doRun);
   $('btn-matrix').addEventListener('click', runMatrix);
@@ -1287,7 +1385,8 @@
       runCell: runCell, runMatrix: runMatrix, runSweep: runSweep,
       renderBundle: renderBundle, renderInspector: renderInspector,
       renderMemory: renderMemory, drawRoofline: drawRoofline,
-      classifyMem: classifyMem, aggOp: aggOp, bundleError: bundleError
+      classifyMem: classifyMem, aggOp: aggOp, bundleError: bundleError,
+      selectPreset: selectPreset, applyPresetToControls: applyPresetToControls
     };
   }
 })();

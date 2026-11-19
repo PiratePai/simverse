@@ -15,7 +15,18 @@ from pathlib import Path
 
 from .profile_store import ProfileIntegrityError
 
-ROOT = Path(__file__).resolve().parents[2]
+
+def _data_root() -> Path:
+    """源码检出→仓库根；wheel→包内 _data（cost_records 不在 wheel 清单，
+    缺失时按 ProfileIntegrityError 如实报错，不静默降级）。"""
+    from ..assets import repo_root
+    root = repo_root()
+    if root is not None:
+        return root
+    return Path(__file__).resolve().parent.parent / "_data"
+
+
+ROOT = _data_root()
 SETS = {"ascend-r29-hccl": "ascend_r29_hccl.json",
         "ascend-r28-gemm": "ascend_r28_gemm.json"}
 

@@ -20,11 +20,11 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .assets import default_output_dir, scenario_dir
 from .contracts import ScenarioSpec, canonical_json
 from .engine import run
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SCENARIO = ROOT / "assets" / "scenarios" / "v41_flash_dt_verification.json"
+DEFAULT_SCENARIO = scenario_dir() / "v41_flash_dt_verification.json"
 
 
 def _configure_stdio():
@@ -130,7 +130,7 @@ def cmd_sweep(args):
     _require_active_v01(scenario)
     data = sweep_suite(scenario)
     print("boundaries:", json.dumps(data["boundaries"], ensure_ascii=False))
-    out = Path(args.out) if args.out else ROOT / "outputs" / "sweep.json"
+    out = Path(args.out) if args.out else default_output_dir() / "sweep.json"
     _dump(data, out)
     charts = Path(args.charts) if args.charts else out.parent
     charts.mkdir(parents=True, exist_ok=True)
@@ -177,27 +177,18 @@ def cmd_export(args):
         print(f"已写 {p}")
 
 
-V2_DEFAULT_SCENARIO = {
-    "schema_version": "0.2", "name": "cli-default",
-    "model_id": "qwen36_35b_a3b", "draft_id": "dflash_qwen36_35b_a3b",
-    "method_id": "dflash_v1", "k": 15, "block_size": 16,
-    # ctx-KV 执行路径是显式配方：活跃草稿 config 无 quantization_config +
-    # GPU UnquantizedLinearMethod（pinned qwen3_dflash.py L108-113）。
-    # dense_w=8 只是计价位宽，不能据此推断该路径。
-    "draft_ctx_kv_path": "fused_raw",
-    "deployment": {"mode": "colocated", "target_device": "h100_sxm",
-                   "target_tp": 8, "draft_device": "l40", "draft_tp": 1},
-    "workload": {"batch": 1, "ctx_tokens": 32768},
-    "acceptance": {"kind": "geometric", "alpha": 0.72},
-}
-
-
 def _v2_scenario(path):
+    """v0.2 场景解析：显式文件按文件；缺省读共享默认预设（R10d）。
+
+    预设源 = assets/scenarios/qwen36_dflash_default.json（原 CLI 硬编码
+    V2_DEFAULT_SCENARIO 的逐键固化副本），与场景目录 API、工作台同源。
+    """
     import json as _json
-    from .scenario import ScenarioV2
+    from .api_io import decode_scenario_v2
+    from .presets import default_preset
     data = (_json.loads(Path(path).read_text(encoding="utf-8")) if path
-            else dict(V2_DEFAULT_SCENARIO))
-    return ScenarioV2.from_json(data)
+            else default_preset())
+    return decode_scenario_v2(data)
 
 
 def _ops_csv_v2(bundle: dict) -> str:
@@ -305,7 +296,7 @@ def cmd_run_v2(args):
         print(f"错误：{exc}", file=sys.stderr)
         raise SystemExit(2)
     bundle["replay"] = {"scenario_file": str(args.scenario) if args.scenario
-                        else "builtin:cli-default"}
+                        else "preset:qwen36_dflash_default"}
     _summary_v2(bundle)
     if args.out:
         _dump(bundle, Path(args.out))
@@ -356,7 +347,7 @@ def cmd_sweep_v2(args):
     from .experiments import sweep_suite
     scenario = _v2_scenario(args.scenario)
     data = sweep_suite(scenario)
-    out = Path(args.out) if args.out else ROOT / "outputs" / "sweep_v2.json"
+    out = Path(args.out) if args.out else default_output_dir() / "sweep_v2.json"
     _dump(data, out)
     import json as _json
     print("breakevens:", _json.dumps(data["breakevens"], ensure_ascii=False))

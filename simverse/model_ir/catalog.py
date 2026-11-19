@@ -19,13 +19,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict
 
+from ..assets import assets_dir
 from .families import (parse_deepseek_v3, parse_dflash_draft, parse_gqa,
                        parse_qwen3_5_moe, parse_qwen3_moe, parse_qwen3_next,
                        parse_v41_csa2)
 from .schema import (FULL, LINEAR, AttentionIR, DraftIR, LayerIR, LinearAttnIR,
                      MlaIR, ModelEvidence, ModelIR, MoeIR, SourceIdentity)
 
-ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
+ASSETS = assets_dir()
 _VERSION = "0.3.0"
 
 _QWEN36_EVIDENCE = ModelEvidence(

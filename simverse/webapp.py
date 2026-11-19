@@ -13,16 +13,21 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
+from .assets import docs_dir, packaged_data_dir, repo_root, scenario_dir
 from .contracts import ScenarioSpec, js_safe
 from .engine import run
 from .formulas import formulas_json
 from .models import registry_json
 
-ROOT = Path(__file__).resolve().parent.parent
-SCENARIO_DIR = ROOT / "assets" / "scenarios"
+SCENARIO_DIR = scenario_dir()
 # 工作台顶栏文档链接的只读根（send_from_directory 自带穿越/绝对路径拒绝，
 # 只开放仓库 docs/ 一层，不提供任意本地文件访问）
-DOCS_DIR = ROOT / "docs"
+DOCS_DIR = docs_dir()
+
+# 状态/验证文档指向的根目录文档白名单（R10b）：docs/ 内的相对链接
+# ``[ROADMAP](../ROADMAP.md)`` 会落到站点根；只显式开放这两个被引用的
+# 根文档，未列出的根路径仍返回 404。
+ROOT_DOC_WHITELIST = ("ROADMAP.md", "AGENTS.md")
 
 
 def _linked_markdown(text: str) -> str:
@@ -43,11 +48,15 @@ app = Flask(__name__, static_folder=str(Path(__file__).parent / "static"),
 
 
 def _scenarios_index():
-    """只列活跃场景；历史模型/标记 archived 的场景保留文件但不进选择。"""
+    """只列活跃 v0.1 场景；历史模型/标记 archived 的场景保留文件但不进
+    选择。v0.2 预设（如 qwen36_dflash_default）走 /api/v2/catalog 的
+    scenarios 段（R10d），不混入 legacy 目录（ScenarioSpec 读不了 v0.2）。"""
     from .model_ir.catalog import PRODUCT_MODELS
     out = {}
     for p in sorted(SCENARIO_DIR.glob("*.json")):
         data = json.loads(p.read_text(encoding="utf-8"))
+        if data.get("schema_version", "0.1") != "0.1":
+            continue
         if data.get("archived") or data.get("model_id") not in PRODUCT_MODELS:
             continue
         out[p.stem] = {"name": data.get("name", p.stem), "notes": data.get("notes", ""),
@@ -70,7 +79,8 @@ def docs_static(fn):
     """docs/ 只读静态路由（顶栏四个文档链接 + 原型存档的相对资源）。
 
     只开放仓库 docs/ 目录；Markdown 用最小 <pre> 包装（无渲染依赖、无 JS），
-    其余文件按原样发送。不注册任何 docs 之外的文件入口。
+    其余文件按原样发送。docs/ 内文档的 ``../ROADMAP.md`` 等根文档相对
+    链接由 root_doc 路由的白名单承接（R10b）。
     """
     path = (DOCS_DIR / fn).resolve()
     if not path.is_relative_to(DOCS_DIR.resolve()):
@@ -80,14 +90,40 @@ def docs_static(fn):
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             return jsonify({"error": f"文档不存在或不可读：{fn}"}), 404
-        return (
-            "<!DOCTYPE html><html lang=zh><head><meta charset=utf-8>"
-            "<title>simverse docs · " + html.escape(fn) + "</title>"
-            "<body style=font-family:Consolas,monospace;margin:24px;"
-            "white-space:pre-wrap;word-break:break-word;line-height:1.55>"
-            + _linked_markdown(text) + "</body></html>"
-        ), 200, {"Content-Type": "text/html; charset=utf-8"}
+        return _markdown_page(fn, text)
     return send_from_directory(DOCS_DIR, fn)
+
+
+@app.route("/<root_doc>")
+def root_doc(root_doc):
+    """根目录文档白名单（R10b）。
+
+    状态/验证文档（FOCUS_STATUS、IMPLEMENTATION_STATUS、
+    ascend-validation-plan 等）用 ``[ROADMAP](../ROADMAP.md)`` 引用仓库根
+    文档，浏览器把它们解析到站点根 → 此前 404。只显式开放被引用的两个
+    根文档（ROADMAP.md/AGENTS.md，README 未被引用不入白名单）；其余根
+    路径仍返回 404。wheel 使用随包的文档。
+    """
+    if root_doc not in ROOT_DOC_WHITELIST:
+        return jsonify({"error": f"根路径未开放：{root_doc}"
+                                 f"（白名单 {list(ROOT_DOC_WHITELIST)}）"}), 404
+    path = (repo_root() or packaged_data_dir()) / root_doc
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return jsonify({"error": f"文档不存在或不可读：{root_doc}"}), 404
+    return _markdown_page(root_doc, text)
+
+
+def _markdown_page(title: str, text: str):
+    """Markdown 只读页（与 docs_static 同一渲染方式，根文档复用）。"""
+    return (
+        "<!DOCTYPE html><html lang=zh><head><meta charset=utf-8>"
+        "<title>simverse docs · " + html.escape(title) + "</title>"
+        "<body style=font-family:Consolas,monospace;margin=24px;"
+        "white-space:pre-wrap;word-break:break-word;line-height:1.55>"
+        + _linked_markdown(text) + "</body></html>"
+    ), 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +141,7 @@ def api_v2_catalog():
     from .importers import source_map_json
     from .cost.profile_store import (PRODUCT_PROFILE_SETS, archived_profiles_json,
                                      profile_model_id)
+    from .presets import list_presets
     return jsonify(js_safe({
         "schema_version": "0.2",
         "catalog": catalog_json(),
@@ -118,6 +155,7 @@ def api_v2_catalog():
         "archived_profiles": archived_profiles_json(),
         "profile_bindings": {sid: profile_model_id(sid)
                              for sid in sorted(PRODUCT_PROFILE_SETS)},
+        "scenarios": list_presets(),
         "evidence": registry_json(),
         "source_map": source_map_json(),
     }))
@@ -125,27 +163,38 @@ def api_v2_catalog():
 
 @app.post("/api/v2/run")
 def api_v2_run():
+    """v0.2 单场景运行。
+
+    输入校验与 /api/v2/sweep 共用 api_io.decode_scenario_v2（R10d）：
+    结构/类型/取值非法 → 结构化 400（带字段路径）；合法但不受支持的
+    场景照常进管线（bundle.status=unsupported_*，200）；未预期异常保持
+    服务端 500 语义，不在入口吞掉。
+    """
+    from .api_io import ScenarioInputError, decode_scenario_v2, error_payload
     from .pipeline import run_v2
-    from .scenario import ScenarioV2
-    body = request.get_json(force=True)
+    body = request.get_json(force=True, silent=True)
+    if body is None:
+        return jsonify({"error": "请求体不是合法 JSON（或为空）", "field": "$"}), 400
     try:
-        scenario = ScenarioV2.from_json(body)
+        scenario = decode_scenario_v2(body)
         bundle = run_v2(scenario)
         return jsonify(js_safe(bundle.to_json()))
-    except (ValueError, KeyError) as exc:
-        return jsonify({"error": str(exc)}), 400
+    except ScenarioInputError as exc:
+        return jsonify(error_payload(exc)), 400
 
 
 @app.post("/api/v2/sweep")
 def api_v2_sweep():
+    from .api_io import ScenarioInputError, decode_scenario_v2, error_payload
     from .experiments import sweep_suite
-    from .scenario import ScenarioV2
-    body = request.get_json(force=True)
+    body = request.get_json(force=True, silent=True)
+    if body is None:
+        return jsonify({"error": "请求体不是合法 JSON（或为空）", "field": "$"}), 400
     try:
-        scenario = ScenarioV2.from_json(body)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(js_safe(sweep_suite(scenario)))
+        scenario = decode_scenario_v2(body)
+        return jsonify(js_safe(sweep_suite(scenario)))
+    except ScenarioInputError as exc:
+        return jsonify(error_payload(exc)), 400
 
 
 @app.get("/api/v2/export/<fmt>")
