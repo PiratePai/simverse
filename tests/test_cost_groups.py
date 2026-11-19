@@ -63,8 +63,12 @@ def test_groups_partition_rows_and_preserve_stage_totals(method):
         if group["selected_ms"] is not None: totals[group["stage"]] += group["selected_ms"]
     for stage, value in bundle["cost"]["selection"]["stage_costs_ms"].items():
         counted = "target_decode" if stage == "decode" else stage
-        assert totals[counted] == pytest.approx(value, abs=1e-10)
-    assert bundle["metrics"]["M01_tpot_selected"]["value"] == bundle["metrics"]["M01_record_tpot"]["value"]
+        if value is None:
+            assert counted not in totals
+        else:
+            assert totals[counted] == pytest.approx(value, abs=1e-10)
+    assert "M01_record_tpot" not in bundle["metrics"]
+    assert bundle["metrics"]["M01_tpot_selected"]["value"] > 0
 
 
 def test_analytical_group_does_not_imply_fusion_or_new_roofline():
@@ -107,16 +111,30 @@ def test_selected_pipeline_and_serial_boundaries_are_distinct():
     b = run_v2(ascend(mode="dt_pipeline_sim")).to_json()
     selection = b["cost"]["selection"]
     serial = selection["execution"]["rounds"][0]
-    assert sum(event["t_ms"] for event in serial["events"]) == pytest.approx(serial["t_round_ms"])
+    priced = [event["t_ms"] for event in serial["events"] if event["t_ms"] is not None]
+    assert sum(priced) == pytest.approx(serial["t_round_ms"])
+    assert serial["timing_complete"] is False
+    split = {event["stage"]: event for event in serial["events"]}
+    assert split["d2t"]["t_ms"] > 0 and split["d2t"]["start_ms"] is not None
+    assert split["commit_rewind"]["t_ms"] is None and split["commit_rewind"]["reason"]
+    assert split["hidden_extract"]["t_ms"] is None and split["hidden_extract"]["reason"]
+    assert split["t2d"]["t_ms"] == b["cost"]["link"]["t_t2d_ms"] > 0
+    assert split["t2d"]["start_ms"] is None
+    assert split["t2d"]["start_lower_bound_ms"] == pytest.approx(
+        sum(split[k]["t_ms"] for k in ("draft_block", "d2t", "verify_block")))
+    assert selection["pipeline_sim"]["timing_complete"] is False
+    assert selection["pipeline_sim"]["excluded_stages"] == ["commit_rewind", "hidden_extract"]
     assert b["metrics"]["M04_round_selected"]["value"] == serial["t_round_ms"]
     for cohort, period in selection["pipeline_sim"]["cohort_periods_ms"].items():
-        assert b["metrics"]["M18_selected_cohort_period_ms"][cohort]["value"] == period
+        metric = b["metrics"]["M18_selected_cohort_period_ms"][cohort]
+        assert metric["value"] == period and metric["support"] == "approximated"
+        assert metric["reason"] == selection["pipeline_sim"]["timing_reason"]
     assert selection["pipeline_sim"]["violations"] == []
     links = [g for g in b["cost"]["groups"] if g["group"] == "point_to_point"]
     assert {g["stage"] for g in links} == {"d2t", "t2d"}
 
 
-def test_original_fifteen_scenario_anchors():
+def test_cost_group_and_historic_r27_anchors():
     for script in ("tools/replay_cost_groups.py", "tools/replay_cost_integrity_r27.py"):
         args = [sys.executable, "-X", "utf8", script] + (["--check"] if "r27" in script else [])
         result = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
@@ -135,7 +153,11 @@ def test_group_csv_api_cli_and_trace_share_one_selection(tmp_path):
         assert row["group"] == group["group"]
         assert (float(row["selected_ms"]) if row["selected_ms"] else None) == group["selected_ms"]
     trace = list(csv.DictReader(io.StringIO(_trace_csv_v2(bundle))))
-    assert sum(float(row["t_ms"]) for row in trace) == pytest.approx(bundle["metrics"]["M04_round_selected"]["value"])
+    assert sum(float(row["t_ms"]) for row in trace if row["t_ms"]) == pytest.approx(
+        bundle["metrics"]["M04_round_selected"]["value"])
+    assert {r["stage"] for r in trace if not r["t_ms"] and r["reason"]} == {
+        "commit_rewind", "hidden_extract"}
+    assert next(r for r in trace if r["stage"] == "t2d")["t_ms"] == "0.0"
     path, out = tmp_path / "scenario.json", tmp_path / "groups.csv"
     path.write_text(json.dumps(sc.to_json()), encoding="utf-8")
     proc = subprocess.run([sys.executable,"-m","simverse.cli","run-v2",str(path),"--groups-csv",str(out)],

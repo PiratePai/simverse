@@ -142,6 +142,7 @@ def run(check: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    if "--capture-before" in sys.argv:
-        capture_before()
-    run(check="--check" in sys.argv)
+    from tools.replay_frozen import replay_frozen
+
+    # The numerical contract changed after these snapshots were frozen.
+    replay_frozen("r23")

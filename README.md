@@ -26,11 +26,10 @@ v0.1 首切片（投机解码/DT 分离可追溯验证）报告保留于
 py -3.12 -m pytest tests -q                  # 全量验收（外层 Codex 唯一 owner）
 py -3.12 -m simverse.cli run-v2              # v0.2 管线（Qwen3.6-35B-A3B + DFlash，默认场景）
 py -3.12 -m simverse.cli run-v2 --csv ops.csv --trace events.csv --html report.html
-py -3.12 -m simverse.cli serve --port 8765   # Web 工作台（/ 生产 v0.2；/legacy 为历史存档）
+py -3.12 -m simverse.cli serve --port 8765   # Web 工作台
 ```
 
-v0.1 `run/sweep` 与 `/legacy` 仅保留为历史存档，不属于活跃产品入口；v0.2 的
-CLI/API/工作台只列两款主模型与 DFlash。
+v0.1 场景通过 `simverse archive run` 或 `simverse archive sweep` 离线重放。已有 `RunResult` 使用 `simverse archive export` 导出。Web 工作台与 HTTP API 使用 v0.2。
 
 
 ## 结构（v0.2 管线）

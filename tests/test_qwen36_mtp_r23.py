@@ -317,7 +317,7 @@ class TestPipelineMtp:
         assert moe == int(2048 * 256 * 1.0) + int(3 * 2048 * 64 * 1.0) + \
             int(2048 * 1.0) + int(256 * 3 * 2048 * 64 * 1.0)
         # 草稿 KV：1 个 full-attn 层，kvh=2<tp 复制全量
-        assert inv["draft-kv"]["bytes"] == 1 * 32768 * 2 * 2 * 256 * 1
+        assert inv["draft-kv"]["bytes"] == 1 * 32768 * 2 * 1 * 256 * 1
 
     def test_draft_expert_precision_matches_count_and_residency(self):
         """目标 FP4、草稿 W8：草稿 MoE 的 count 与 memory 必须同档。"""
@@ -400,18 +400,20 @@ class TestPipelineMtp:
 FROZEN = {
     "scenario_digest": "sha256:ee932075d9c338f394d709066a14a7ca444d3e22"
                        "e1954cea0fa3461b61ddf1fe",
-    "step0_flops": 215_342_492,
-    "step0_weight_read": 70_802_432,
+    # R23 档案值按 CUDA 单头修正推导：目标 10 层、MTP 草稿 1 层，
+    # 每层移除一个 K/V 头的投影权重与缓存，路由期望保持不变。
+    "step0_flops": 215_342_492 - 2 * 2 * 2048 * 256 - (4 * 256 + 2),
+    "step0_weight_read": 70_802_432 - 2 * 2048 * 256,
     "step0_weight_read_expected": 3_145_728.0,
-    "step0_kv_read": 33_554_432,
-    "step2_kv_read": 33_556_480,
-    "steady_bytes": 2_841_004_480,
+    "step0_kv_read": 33_554_432 // 2,
+    "step2_kv_read": 33_556_480 // 2,
+    "steady_bytes": 2_841_004_480 - 11 * 2 * 256 * (2048 + 32768),
 }
 
 
 class TestReplayFrozen:
     def test_fixed_scenario_replay_stable(self):
-        """冻结重放：R23 改动后的 MTP 场景计数逐字段可复现（校准开/关
+        """同输入重放：R23 的 MTP 场景按当前 CUDA 单头口径核对（校准开/关
         守恒由 G7 通用测试覆盖；此处冻结 MTP 专属行）。"""
         from simverse.pipeline import run_v2
         from simverse.scenario import ScenarioV2

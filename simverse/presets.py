@@ -7,8 +7,8 @@ notes 等非默认键不入文件，保证场景 digest 与历史默认 run 可�
 
 * v0.2 预设目录 = assets/scenarios/ 下 schema_version 为 "0.2" 且模型在
   活跃目录（PRODUCT_MODELS + 绑定 DFlash）的 JSON 文件；
-* v0.1 旧场景文件（tiny/h200_calib/v41_flash_dt_verification）读取行为
-  不变，仍走 legacy /api/scenarios 与 ScenarioSpec；
+* v0.1 的 V4.1 固定验证场景经 archive run 与 ScenarioSpec 重放，历史
+  v0.2 成本场景由离线工具显式注入归档目录；
 * 解码/校验统一走 decode_scenario_v2（本包 api_io 模块），run 与 sweep
   共用，非法输入携带可定位字段路径。
 """
@@ -37,7 +37,7 @@ def load_preset(preset_id: str) -> Dict[str, Any]:
     data = _load_json(path)
     if data.get("schema_version") != "0.2":
         raise ValueError(f"{preset_id} 不是 v0.2 预设（schema_version="
-                         f"{data.get('schema_version')!r}）；legacy 场景走 v0.1 入口")
+                         f"{data.get('schema_version')!r}）；v0.1 场景请使用 archive run")
     return data
 
 

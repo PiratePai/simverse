@@ -1,7 +1,7 @@
-"""Flask Web 工作台（v0.2 生产 + v0.1 legacy 双入口）。
+"""Flask 生产工作台（v0.2）。
 
 铁律：前端零物理计算——所有数字来自 /api/v2/run 的 ResultBundle；本文件只做
-入口转发。生产工作台 /（static/workbench.html）；v0.1 简表 /legacy；
+入口转发。生产工作台 /（static/workbench.html）。
 原型演示仍在 docs/rebuild-20261106/prototype/（不进生产路径，经 /docs/ 只读）。
 """
 from __future__ import annotations
@@ -15,7 +15,6 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from .assets import docs_dir, packaged_data_dir, repo_root
 from .contracts import js_restore, js_safe
 from .exports import _groups_csv_v2, _ops_csv_v2
-from .legacy.web import legacy
 
 # 工作台顶栏文档链接的只读根（send_from_directory 自带穿越/绝对路径拒绝，
 # 只开放仓库 docs/ 一层，不提供任意本地文件访问）
@@ -42,7 +41,6 @@ def _linked_markdown(text: str) -> str:
 
 app = Flask(__name__, static_folder=str(Path(__file__).parent / "static"),
             static_url_path="/static")
-app.register_blueprint(legacy)
 
 
 @app.get("/")

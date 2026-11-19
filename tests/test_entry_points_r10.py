@@ -105,18 +105,15 @@ def test_r10d_preset_matches_historical_cli_default_digest():
     assert entry["scenario_digest"] == d_preset
 
 
-def test_r10d_catalog_exposes_preset_and_legacy_index_untouched():
+def test_catalog_exposes_preset_and_v01_web_routes_are_retired():
     client = app.test_client()
     cat = client.get("/api/v2/catalog").get_json()
     ids = {s["id"] for s in cat["scenarios"]}
     assert "qwen36_dflash_default" in ids
-    # legacy v0.1 目录行为保留：v0.2 预设不混入（ScenarioSpec 读不了 0.2）
-    legacy = client.get("/api/scenarios").get_json()["scenarios"]
-    assert "qwen36_dflash_default" not in legacy
-    assert "v41_flash_dt_verification" in legacy  # 旧场景读取行为不变
-    assert client.get("/legacy").status_code == 200
-    registry = client.get("/api/registry").get_json()
-    assert registry["schema_version"] == "0.1" and "h100_sxm" in registry["devices"]
+    for url in ("/legacy", "/static/index.html", "/api/registry", "/api/scenarios"):
+        assert client.get(url).status_code == 404
+    for url in ("/api/run", "/api/sweep"):
+        assert client.post(url, json={}).status_code == 404
 
 
 def test_r10d_default_preset_cli_and_api_agree(tmp_path):

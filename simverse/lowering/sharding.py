@@ -47,7 +47,7 @@ def validate_tp(model: ModelIR, tp: int, ep: int = 1, draft=None) -> ParallelPla
     return validate_parallel(model, tp, ep, draft)
 
 
-def kv_shard_note(model: ModelIR, tp: int) -> Dict[str, str]:
+def kv_shard_note(model: ModelIR, tp: int, *, replicate_full_kv: bool = False) -> Dict[str, str]:
     """KV 分片策略登记：per_family（plan 同规则，消息口径供 UI/manifest）。"""
     fam = model.family
     if fam in ("deepseek_v3", "v41_csa2"):
@@ -56,9 +56,9 @@ def kv_shard_note(model: ModelIR, tp: int) -> Dict[str, str]:
     per_layer = []
     for layer in model.layers:
         if layer.attn is not None:
-            shard = attention_shard_rule(layer.attn, tp)
+            shard = attention_shard_rule(layer.attn, tp, replicate_full_kv=replicate_full_kv)
             if shard.kv_replicated:
-                per_layer.append(f"replicated(Hkv={layer.attn.kv_heads}<tp)")
+                per_layer.append(f"replicated(Hkv_rank={shard.kv_heads_per_rank})")
             else:
                 per_layer.append(f"Hkv/tp={shard.kv_heads_per_rank}")
     return {"strategy": "mixed" if len(set(per_layer)) > 1

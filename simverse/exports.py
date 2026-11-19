@@ -45,8 +45,9 @@ def _ops_csv_v2(bundle: dict) -> str:
     use_records = bool(record_cost)
     if use_records:
         cols += ["analytic_t_ms", "record_t_ms", "cost_source", "record_refs", "fallback_reason"]
+    selection = cost.get("selection") or {}
     pts = {p["row_id"]: p for p in
-           ((record_cost.get("selected_row_prices") if use_records else None)
+           (selection.get("selected_row_prices") or record_cost.get("selected_row_prices")
             or cost.get("row_prices") or cost.get("roofline_points") or [])}
     records = []
     for o in rows:
@@ -65,7 +66,7 @@ def _ops_csv_v2(bundle: dict) -> str:
 
 def _trace_csv_v2(bundle: dict) -> str:
     cols = ["event_id", "round_id", "role", "stage", "t_ms", "start_ms",
-            "depends_on", "label"]
+            "depends_on", "label", "start_lower_bound_ms", "reason"]
     execution = ((bundle.get("cost") or {}).get("selection") or {}).get("execution") or bundle.get("execution")
     events = [e for rnd in (execution or {}).get("rounds") or []
               for e in rnd.get("events") or []]

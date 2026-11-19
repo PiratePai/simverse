@@ -282,9 +282,9 @@ class TestFixtureNumeric:
 # ---------------------------------------------------------------------------
 
 class TestReplayAndConsistency:
-    def test_replay_zero_ledger_drift_and_evidence_flip(self, capsys):
-        from tools.replay_qwen36_mrope import run as replay_run
-        replay_run(check=True)      # 不写盘；断言失败即抛
+    def test_replay_zero_ledger_drift_and_evidence_flip(self, capfd):
+        from tools.replay_frozen import replay_frozen
+        replay_frozen("r26")      # 不写盘；断言失败即抛
 
     def test_run_v2_consistent_with_catalog(self):
         from simverse.model_ir.catalog import catalog_json

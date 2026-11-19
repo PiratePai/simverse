@@ -64,7 +64,7 @@ class CostSession:
         if self.profile:
             cap.add("cost_profile_domain", "supported" if self.profile.applicable else "approximated",
                     f"{self.scenario.cost_profile}：" + ("设备/精度/TP/形状域匹配" if self.profile.applicable
-                    else "域不匹配：" + "；".join(self.profile.domain_reasons)), affected_metrics=["M01_tpot_profile_calibrated"])
+                    else "域不匹配：" + "；".join(self.profile.domain_reasons)), affected_metrics=["M01_tpot_selected"])
 
     def rows(self, rows, prices, device, quant):
         chosen = self.records.rows(rows, prices, device, quant) if self.records else prices
@@ -210,9 +210,6 @@ class CostSession:
             old_tpot, old_round = bundle.metrics.get("M01_tpot_analytical"), bundle.metrics.get("M04_round_ms")
             tpot = old_tpot.value if isinstance(old_tpot, Metric) else None
             round_ms = old_round.value if isinstance(old_round, Metric) else None
-        base_rows = self.rows_by_stage.get("target_decode", [])
-        selected_rows = (exporter(base_rows, self.selected_prices.get("target_decode", []), limit=None, include_zero=True)
-                         if self.records else bundle.cost.get("row_prices", []))
         selection = dict(source="records" if self.records else "profile" if self.profile else "analytic",
             source_id=sc.cost_records or sc.cost_profile, granularity="cost-group",
             stage_costs_ms=chosen_steps, baseline_ms=baseline,
@@ -233,26 +230,26 @@ class CostSession:
             record_report["unpriced_components"] = unknown
             if unknown:
                 record_report["prerequisites"].append("未计价方法阶段仍为unknown，不在覆盖分母内：先确认Ascend实现，再采接受/回退/hidden提取，不按0ms忽略")
-            record_report.update(selected_row_prices=selected_rows,
-                selected_roofline_points=exporter(base_rows, self.selected_prices.get("target_decode", [])),
-                selected_execution=execution)
-            if selected_sim:
-                record_report["selected_pipeline_sim"] = selected_sim
-            bundle.cost["record_cost"] = record_report  # compatibility projection, not another evaluation
+            base_rows = self.rows_by_stage.get("target_decode", [])
+            base_prices = self.selected_prices.get("target_decode", [])
+            selection.update(
+                selected_row_prices=exporter(base_rows, base_prices, limit=None, include_zero=True),
+                selected_roofline_points=exporter(base_rows, base_prices))
+            bundle.cost["record_cost"] = record_report
             note = (f"{record_report['label']}：{record_report['matched']}/{record_report['total']} 成本实例命中；"
                     "其余按原解析回退；记录含host/sync且身份不完备，仅作条件对照，不是生产校准或E2E实测")
             if unknown:
                 note += "；仅包含已计价阶段，方法运行时阶段尚缺时长"
             bundle.capability["checks"]["archived_cost_records"] = dict(
                 status="approximated" if record_report["matched"] else "unknown", reason=note,
-                affected_metrics=["M01_record_tpot", "M02_record_speedup", "M04_record_round_ms"])
+                affected_metrics=["M01_tpot_selected", "M02_speedup_selected", "M04_round_selected"])
             bundle.assumption_dict["archived_cost_records"] = note
             bundle.formula_dict["record-cost:" + sc.cost_records] = dict(
                 expr="selected = matching archived latency + unchanged analytical fallback; same execution plan",
                 source="sha256:" + self.records.content_digest, applies="conditional archived cost experiment", version="1")
             bundle.manifest.cost_digest = digest({"base": bundle.manifest.cost_digest, "cost_records": self.records.content_digest})
             bundle.manifest.compute_run_id()
-        # Canonical chosen metrics. Old names below are compatibility views of these values.
+        # Chosen metrics use the same names for every provider.
         values = {"M01_tpot_selected": ("M01_tpot_analytical", tpot),
                   "M01_baseline_selected": ("M01_tpot_baseline", baseline),
                   "M02_speedup_selected": ("M02_speedup_vs_baseline", baseline / tpot if tpot else None),
@@ -287,19 +284,17 @@ class CostSession:
                     met.assumption_refs = ["组级实测 median 与解析回退组合，非整步实测；不向逻辑行分摊实测",
                                            "间隙仅计原采样区间边界，覆盖/留出见 cost.calibration"]
             bundle.metrics[key] = met
-        if record_report and record_report["matched"]:
-            for old, new in {"M01_record_tpot":"M01_tpot_selected", "M01_record_baseline":"M01_baseline_selected",
-                             "M02_record_speedup":"M02_speedup_selected", "M04_record_round_ms":"M04_round_selected"}.items():
-                if new in bundle.metrics: bundle.metrics[old] = bundle.metrics[new]
-        if calibration and active:
-            for old, new in {"M01_tpot_profile_calibrated":"M01_tpot_selected", "M01_tpot_baseline_calibrated":"M01_baseline_selected"}.items():
-                if new in bundle.metrics: bundle.metrics[old] = bundle.metrics[new]
         if selected_sim:
             from ..contracts import Scope, Statistic, metric_from
             bundle.metrics["M18_selected_cohort_period_ms"] = {
                 k: metric_from(v, "ms", "internal", statistic=Statistic.SAMPLE,
                     scope=Scope(role="system"), evidence=(Evidence.COUNTED,))
                 for k,v in selected_sim["cohort_periods_ms"].items()}
+            if selected_sim.get("timing_complete") is False:
+                for metric in bundle.metrics["M18_selected_cohort_period_ms"].values():
+                    metric.support = Support.APPROXIMATED
+                    metric.feasibility = Feasibility.UNKNOWN
+                    metric.reason = selected_sim["timing_reason"]
         summary = bundle.metrics.get("M07_support_summary")
         if summary:
             summary["capability_checks"] = {k:v["status"] for k,v in bundle.capability["checks"].items()}

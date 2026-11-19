@@ -47,7 +47,7 @@ def main() -> int:
         b = run_v2(scenario(batch, ctx)).to_json()
         cal = b["cost"]["calibration"]["stages"]["target_decode"]
         analytic = b["metrics"]["M01_tpot_analytical"]["value"]
-        selected = b["metrics"]["M01_tpot_profile_calibrated"]["value"]
+        selected = b["metrics"]["M01_tpot_selected"]["value"]
         points.append({
             "B": batch, "ctx": ctx,
             "analytic_ms": analytic, "selected_ms": selected,

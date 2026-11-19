@@ -24,6 +24,7 @@ from .lowering import (DeviceBudget, LinkLike, colocated_rank_memory,
 from .methods import build_method_plan, acceptance_summary
 from .methods.plans import UNSUPPORTED
 from .model_ir import build_catalog
+from .model_ir.catalog import PRODUCT_MODELS
 from .validation import code_revision
 from .scenario import ScenarioInputError, ScenarioV2
 
@@ -284,11 +285,16 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         cap.add("stage_cost_complete", "unknown",
                 "Engram host 查表与预取时延未知；阶段耗时仅为 GPU 侧解析下界",
                 affected_metrics=["M01 TPOT", "M02 加速比", "M04 轮分解"])
+    target_dev = DEVICES[dep.target_device]
+    draft_dev = DEVICES[dep.draft_device]
+    # 仓内 vLLM 源码锚定 CUDA 生产模型。昇腾条件档和历史模型
+    # 保留各自的全量头假设，避免把新 CUDA 几何套到旧计价记录。
+    replicate_full_kv = target_dev.backend != "cuda" or model.id not in PRODUCT_MODELS
     pplan = validate_parallel(model, dep.target_tp, dep.target_ep,
                               draft if (draft is not None
                                         and scenario.method_id == "dflash_v1"
                                         and dep.mode == "colocated")
-                              else None)
+                              else None, replicate_full_kv=replicate_full_kv)
     if scenario.method_id == "mtp" and dep.mode in ("dt_serial",
                                                     "dt_pipeline_sim"):
         return _bundle_error(
@@ -303,10 +309,12 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         return _bundle_error(scenario, cap, "unsupported_combo",
                              f"TP{dep.target_tp}/EP{dep.target_ep} 非法："
                              f"{pplan.errors[0]}")
+    kv_note = kv_shard_note(model, dep.target_tp, replicate_full_kv=replicate_full_kv)
     cap.add("parallel_valid", "supported",
             f"TP{dep.target_tp}/EP{dep.target_ep}（{pplan.implementation_id}，"
             f"pin {pplan.source_pin[:22]}…）；KV 分片："
-            f"{kv_shard_note(model, dep.target_tp)['strategy']}"
+            f"{kv_note['strategy']}"
+            + (f"（{kv_note['detail']}）" if kv_note.get("detail") and not replicate_full_kv else "")
             + ("；EP 开：routed 整专家按 rank 分置" if pplan.moe_ep_enabled
                else "；EP 关：routed inter/tp 切分"))
     if scenario.method_id == "dflash_v1":
@@ -365,8 +373,6 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     gemm_dt, ew_dt = dtype_route(quant, quant_recipe)
     gemm_basis = gemm_cost_basis(quant_recipe)
     ew_basis = ew_cost_basis()
-    target_dev = DEVICES[dep.target_device]
-    draft_dev = DEVICES[dep.draft_device]
     B, ctx = scenario.workload.batch, scenario.workload.ctx_tokens
     work: Dict[str, Any] = {}
     cost: Dict[str, Any] = {}
@@ -393,7 +399,7 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
     cost["row_prices"] = _roofline_points(base_rows, base_prices,
                                           limit=None, include_zero=True)
 
-    stage_costs: Dict[str, float] = {}
+    stage_costs: Dict[str, Optional[float]] = {}
     if scenario.method_id == "baseline":
         stage_costs["decode"] = t_base
         e_n = 1.0
@@ -443,23 +449,25 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             # 草稿与 target 同 TP 组（vLLM load_dflash_model pin；dt_serial
             # 独立设备时草稿组 TP1 全量副本——无共享配方，见 memory）
             draft_tp = dep.target_tp if dep.mode == "colocated" else dep.draft_tp
+            d_dev = target_dev if dep.mode == "colocated" else draft_dev
+            draft_full_kv = replicate_full_kv if dep.mode == "colocated" else d_dev.backend != "cuda"
+            draft_model = _draft_as_model(draft)
+            draft_plan = validate_parallel(draft_model, draft_tp, 1,
+                                           replicate_full_kv=draft_full_kv)
+            if not draft_plan.valid:
+                return _bundle_error(scenario, cap, "unsupported_combo",
+                                     "; ".join(draft_plan.errors))
             draft_rows = dflash_round_rows(
                 "draft_block", draft, model.vocab, e_n, ctx, dquant,
                 quant["act"] / 8, tp=draft_tp, batch=B,
-                ctx_kv_path=scenario.draft_ctx_kv_path,
-                block_size=plan.block_size)  # R07a：与 verify/msg 同块（防 16≠5 双口径）
+                ctx_kv_path=scenario.draft_ctx_kv_path, block_size=plan.block_size,
+                replicate_full_kv=draft_plan.replicate_full_kv)
             d_gemm, d_ew = dtype_route(dquant)
-            d_dev = target_dev if dep.mode == "colocated" else draft_dev
             # 草稿无 extras.quant 执行配方（DFlash 为场景计价档）→ 启发档
             d_prices = priced_rows(draft_rows, d_dev, d_gemm, d_ew,
                                   gemm_basis=gemm_cost_basis(None),
                                   ew_basis=ew_cost_basis())
             t_draft = stage_total(d_prices)
-            draft_model = _draft_as_model(draft)
-            draft_plan = validate_parallel(draft_model, draft_tp, 1)
-            if not draft_plan.valid:
-                return _bundle_error(scenario, cap, "unsupported_combo",
-                                     "; ".join(draft_plan.errors))
             col_d = _collectives_cost(draft_model, draft_plan,
                                       B * plan.block_size, dquant, tp_link,
                                       lm_head_tokens=B * (plan.block_size - 1),
@@ -492,10 +500,10 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                              * draft.hidden * (quant["act"] / 8)),
             }
             stage_costs = {"draft_block": t_draft, "verify_block": t_verify,
-                           "commit_rewind": 0.0, "hidden_extract": 0.0}
+                           "commit_rewind": None, "hidden_extract": None}
             cap.add("stage_cost_complete", "unknown",
                     "DFlash 拒绝采样/KV 回退与 hidden 提取缺独立耗时；"
-                    "时间线以显式 0 占位，仅为已建模阶段下界。R07a 源码核对："
+                    "事件时长保持未知，轮耗时为已计价阶段下界。R07a 源码核对："
                     "两栈 accept/bonus/prepare-inputs 均为 GPU kernel，但计时边界"
                     "不同——vLLM prepare_dflash_inputs 是图外 eager Triton，"
                     "draft sampler 在 draft FULL 图内；SGLang draft sampler "
@@ -526,8 +534,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
             from .count.draft import mtp_kv_rewind_row, mtp_layer_model
             from .lowering.sharding import engram_gather
             mtp_model = mtp_layer_model(model)
-            mtp_plan = validate_parallel(mtp_model, dep.target_tp,
-                                         dep.target_ep)
+            mtp_plan = validate_parallel(mtp_model, dep.target_tp, dep.target_ep,
+                                         replicate_full_kv=replicate_full_kv)
             if not mtp_plan.valid:
                 return _bundle_error(scenario, cap, "unsupported_combo",
                                      f"MTP 微头并行组合非法：{mtp_plan.errors[0]}")
@@ -546,7 +554,8 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                 if j == plan.k_effective - 1:
                     rows_j.append(mtp_kv_rewind_row(stage, plan.k_effective,
                                                     e_n, model, mtp_quant,
-                                                    dep.target_tp))
+                                                    dep.target_tp,
+                                                    replicate_full_kv=replicate_full_kv))
                 # draft_lm_head 读目标物理对象 → 目标档与目标 basis；
                 # 其余草稿行用草稿档（计数与计价同源 dquant，R27 一致性修复）
                 p_j = [priced_row(r, target_dev,
@@ -718,6 +727,14 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
                            scope=Scope(role="system", rank=k),
                            evidence=(Evidence.COUNTED,))
             for k, v in ps["utilization"].items()}
+        if ps.get("timing_complete") is False:
+            partial = [metrics["M18_per_round_throughput_ms"],
+                       *metrics["M18_cohort_period_ms"].values(),
+                       *metrics["M18_utilization"].values()]
+            for metric in partial:
+                metric.support = Support.APPROXIMATED
+                metric.feasibility = Feasibility.UNKNOWN
+                metric.reason = ps["timing_reason"]
         # R27：模式增补说明不再整体重建 Metric——保留既有 support/reason/
         # evidence/formula/assumptions（如 Engram host "Host 成本未计"
         # 下界声明），追加流水口径注记并去重，避免丢字段或堆叠警告。
@@ -768,8 +785,9 @@ def run_v2(scenario: ScenarioV2, catalog: Optional[Dict[str, Any]] = None,
         cost=cost,
         execution={"rounds": [round_obj.to_json()],
                    "mode": "serial-analytical",
-                   "note": "串行解析档：阶段和=轮墙钟（无重叠）；M3 事件核接入后"
-                           "本值作同假设对照"},
+                   "note": round_obj.reason if round_obj.unpriced_stages else (
+                       "串行解析档：阶段和=轮墙钟（无重叠）；M3 事件核接入后"
+                       "本值作同假设对照")},
         metrics=metrics,
         capability=cap.to_json(),
         evidence_refs=_run_evidence_refs(
@@ -922,18 +940,20 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
             drm = RankMemory("draft-r0", dep.draft_device, db)
             dm = _draft_as_model(draft_ir)
             dq = {**quant, **(dquant or {})}
+            draft_full_kv = DEVICES[dep.draft_device].backend != "cuda"
             for a in target_weight_allocations(dm, dq, dep.draft_tp,
-                                               role="draft"):
+                                               role="draft", replicate_full_kv=draft_full_kv):
                 a.consumers = ["draft"]
                 if "embed" in a.alloc_id or "lm_head" in a.alloc_id:
                     a.live_note += "；独立组无共享配方：按全量副本口径（保守）"
                 drm.add(a)
             for a in draft_extra_allocations(draft_ir, dq, dep.draft_tp,
-                                             ctx_kv_path=draft_ctx_kv_path):
+                                             ctx_kv_path=draft_ctx_kv_path,
+                                             replicate_full_kv=draft_full_kv):
                 a.consumers = ["draft"]
                 drm.add(a)
             for a in kv_allocations(dm, dq, B, ctx, role="draft",
-                                    tp=dep.draft_tp):
+                                    tp=dep.draft_tp, replicate_full_kv=draft_full_kv):
                 a.consumers = ["draft"]
                 drm.add(a)
             drm.unknown_components = list(UNKNOWN_RUNTIME_COMPONENTS)
@@ -1028,10 +1048,17 @@ def _build_metrics(scenario, plan, acc, round_obj, t_base, msg_bytes,
                                     statistic=Statistic.EXPECTATION, scope=sc,
                                     evidence=(Evidence.COUNTED,))
     m["M04_stage_breakdown_ms"] = {
-        e.stage: metric_from(e.t_ms, "ms", FR.F_ROOFLINE,
-                             statistic=Statistic.EXPECTATION, scope=sc,
-                             evidence=(Evidence.COUNTED,))
+        e.stage: (Metric.unknown("ms", e.reason, scope=sc)
+                  if e.t_ms is None else metric_from(
+                      e.t_ms, "ms", FR.F_ROOFLINE, statistic=Statistic.EXPECTATION,
+                      scope=sc, evidence=(Evidence.COUNTED,)))
         for e in round_obj.events}
+    if round_obj.unpriced_stages:
+        for key in ("M01_tpot_analytical", "M04_round_ms"):
+            metric = m[key]
+            metric.support = Support.APPROXIMATED
+            metric.feasibility = Feasibility.UNKNOWN
+            metric.reason = round_obj.reason
     # M05 MoE 并集（从账本聚合）
     moe_u = _moe_union_summary(base_rows)
     if moe_u:

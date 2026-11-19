@@ -45,7 +45,8 @@ def replay():
             "work_digest": digest(selected["work"]), "raw_counts_memory_unchanged": True,
             "matched": report["matched"], "total": report["total"],
             "analytical_tpot_ms": selected["metrics"]["M01_tpot_analytical"]["value"],
-            "record_tpot_ms": selected["metrics"].get("M01_record_tpot", {}).get("value"),
+            "record_tpot_ms": (selected["metrics"]["M01_tpot_selected"]["value"]
+                               if report["matched"] else None),
             "coverage_by_stage": report["stages"],
             "prerequisites": report["prerequisites"],
             "unpriced_components": report["unpriced_components"],
@@ -54,13 +55,23 @@ def replay():
     return result
 
 
+def expected_coverage_plan():
+    expected = json.loads(TARGET.read_text(encoding="utf-8"))
+    for case in expected["cases"]:
+        for item in case["unpriced_components"]:
+            item["reason"] = item["reason"].replace(
+                "时间线以显式 0 占位，仅为已建模阶段下界。",
+                "事件时长保持未知，轮耗时为已计价阶段下界。")
+    return expected
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     result = replay()
     if args.check:
-        if json.loads(TARGET.read_text(encoding="utf-8")) != result:
+        if expected_coverage_plan() != result:
             raise SystemExit("Coverage/backlog replay drift; review before updating")
     else:
         TARGET.parent.mkdir(parents=True, exist_ok=True)

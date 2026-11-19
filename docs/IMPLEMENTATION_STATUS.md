@@ -14,6 +14,14 @@ DSH 只读核对的四项建议已落实，主控负责全量验收。规划和�
 七场景 Ascend 覆盖计划无漂移，JavaScript 静态检查通过。浏览器核验解析、R29 TP2 命中、
 TP8 全回退与组 CSV；下载的 7 组与同场景 API/CLI 导出逐字段相同。
 
+## 2026-11-20 KV 计数、未知时长和归档入口修正
+
+- CUDA 生产目录的 GQA 在 `TP > Hkv` 时每 rank 持 1 个 KV 头。同一个规则用于目标、DFlash、MTP 的投影与流量，以及权重、缓存和临时对象。默认 H100 TP8 预设的解析 TPOT 从 36.859181 ms 变为 36.844173 ms，已知显存下界从 2,832,959,265 B 变为 2,654,701,345 B。Ascend 条件档及历史 H200 的假设与对应锚点沿用原适用域。来源为仓内固定的 [vLLM 注意力实现](https://github.com/vllm-project/vllm/blob/dc74b8cbbbe3dbb9399fe369757d63defd614cc2/vllm/model_executor/models/qwen3_next.py#L306-L315)和 [QKVParallelLinear](https://github.com/vllm-project/vllm/blob/dc74b8cbbbe3dbb9399fe369757d63defd614cc2/vllm/model_executor/layers/linear.py#L1110-L1125)。
+- DFlash 的 `commit_rewind` 和 `hidden_extract` 在事件和 M04 分解中返回未知及原因，trace CSV 的时长留空。轮耗时与 TPOT 提供已计价阶段下界。DT 串行轮补入此前已计价但漏列的 T→D 传输。经过未知步骤的事件只提供开始时间下界，流水周期披露省略的步骤。
+- `simverse archive {run,sweep,export}` 提供 v0.1 离线重放。原 v0.1 网页、HTTP 路由和顶层命令退役。新结果的选用指标和执行详情统一走 canonical 字段与 `cost.selection`，记录、校准回放工具已迁移。旧版 v0.2 结果仍可通过 `export-v2` 导出。
+- 工作台只接受最近一次单场景运行的响应。Playwright 1.65.0 的 [路由拦截](https://playwright.dev/docs/api/class-route)用于控制真实 Chrome 中的到达顺序。两个测试覆盖旧成功与旧 HTTP 失败，均核对新 `run_id`、时间轴和下载身份，接入 Windows 合入门禁。
+- 冻结证据保持原文件。15 个离线回放场景覆盖 5 个 CUDA 新数值锚点和 10 个原计数与容量锚点，另复核 7 个 Ascend 成本覆盖场景。R23、R26、R27 的历史对账通过 `tools/replay_frozen.py` 在合并前的 `a457c76` 复跑。源码核对、离线数值回归和浏览器验证分别记录，未做硬件测量。
+
 ## 2026-11-20 重复实现与入口归整
 
 - GQA 的目标与草稿计数、显存和分片说明共用每 rank 几何计算。同卡与 baseline/DT 复用目标端显存对象组装，分别保留自己的草稿驻留和预算契约。

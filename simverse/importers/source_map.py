@@ -965,7 +965,7 @@ ENTRIES: List[SourceMapEntry] = [
     SourceMapEntry(
         entry_id="sm-vllm-attn-gdn-shard",
         model_or_method="qwen3_5_moe attention/GDN 分片",
-        semantic="full attn：heads/tp；kvh>=tp 切 kvh/tp、kvh<tp 复制全量；"
+        semantic="full attn：heads/tp；kvh>=tp 切 kvh/tp、kvh<tp 单头跨 rank 复制；"
                  "o_proj 行切。GDN：in_proj_qkvz((2k+2v)/tp)、in_proj_ba"
                  "(2nv/tp)、conv1d(conv_dim/tp)、out_proj 行切；状态 "
                  "temporal=nv/tp×hk×hv、conv=conv_dim/tp×(kernel−1)",
@@ -977,7 +977,7 @@ ENTRIES: List[SourceMapEntry] = [
                         "layers/mamba/mamba_utils.py:280-301 "
                         "(gated_delta_net_state_shape)",
         branch_predicate="kvh >= tp → assert kvh % tp == 0 切分；"
-                         "else assert tp % kvh == 0 复制",
+                         "else assert tp % kvh == 0，rank 持 1 个 KV 头",
         input_domain="Qwen3.6（heads16/kvh2/GDN 16k32v）TP{1,2,4,8}",
         both_sides_covered=True,
         note="KV 复制=每 rank 同字节（不随 tp 缩减）；计数/容量同口径"),

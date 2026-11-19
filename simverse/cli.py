@@ -1,11 +1,9 @@
 """CLI：生产命令与工作台复用 v0.2 管线，旧命令用于归档重放。
 
 命令：
-  simverse run [场景.json] [-o run.json] [--csv ops.csv]   单场景计算与导出
-  simverse sweep [场景.json] [-o sweep.json] [--charts 目录]  扫描与边界图
-  simverse export run.json [--csv ops.csv] [--events timeline.csv]  从 RunResult 导出
+  simverse archive {run,sweep,export}  v0.1 离线归档重放
   simverse serve [--host --port]                              启动 Web 工作台
-  simverse list [models|drafts|devices|links|formulas]        注册表
+  simverse list [models|drafts|devices|formulas]        注册表
 
 v0.2 命令（ResultBundle 管线；JSON/CSV/trace/HTML 四类导出）：
   simverse run-v2 [场景.json] [-o run.json] [--csv ops.csv] [--trace events.csv] [--html report.html]
@@ -183,7 +181,7 @@ def cmd_export_v2(args):
 
 def cmd_list(args):
     if args.what == "formulas":
-        from .formulas import formulas_json
+        from .formula_registry import formulas_json
         print(json.dumps(formulas_json(), ensure_ascii=False, indent=1))
         return
     if args.what in ("models", "drafts"):
@@ -206,7 +204,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="simverse")
     ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    register_legacy_commands(sub)
+    archive = sub.add_parser("archive", help="v0.1 离线归档重放")
+    register_legacy_commands(archive.add_subparsers(dest="archive_cmd", required=True))
     p_ls = sub.add_parser("list", help="注册表")
     p_ls.add_argument("what", nargs="?", default="models")
     p_ls.set_defaults(fn=cmd_list)

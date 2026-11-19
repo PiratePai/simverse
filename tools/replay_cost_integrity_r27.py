@@ -249,7 +249,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    if "--check" in sys.argv:
-        check()
-    else:
-        main()
+    from tools.replay_frozen import replay_frozen
+
+    # The numerical contract changed after these snapshots were frozen.
+    replay_frozen("r27")

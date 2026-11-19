@@ -23,7 +23,8 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                       e_produced: float, start_ctx: int, quant: dict,
                       target_quant_act: float, tp: int = 1,
                       batch: int = 1, ctx_kv_path: str = "unknown",
-                      block_size: Optional[int] = None) -> List[OpRow]:
+                      block_size: Optional[int] = None, *,
+                      replicate_full_kv: bool = False) -> List[OpRow]:
     """DFlash 每轮草稿前向账本（**per-rank、整批口径**）。
 
     e_produced：**每序列**上轮提交 token 数期望；batch=B 时所有 token 维
@@ -80,7 +81,7 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
     for layer in draft.layers:
         li = layer.index
         a = layer.attn
-        shard = attention_shard_rule(a, tp)
+        shard = attention_shard_rule(a, tp, replicate_full_kv=replicate_full_kv)
         heads_c = shard.heads_per_rank
         kvh = shard.kv_heads_per_rank
         d = a.head_dim
@@ -243,7 +244,8 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
     # vLLM implementation_id 计，差异登记在 source_map。
     if draft.layers:
         a0 = draft.layers[0].attn
-        kvh0 = attention_shard_rule(a0, tp).kv_heads_per_rank
+        kvh0 = attention_shard_rule(
+            a0, tp, replicate_full_kv=replicate_full_kv).kv_heads_per_rank
         elems = span * len(draft.layers) * 2 * kvh0 * a0.head_dim
         rows.append(OpRow(stage, -1, "ctx_kv_layout_copy",
                           act_read=int(elems * b_a), act_write=int(elems * b_a),
@@ -360,8 +362,9 @@ def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
         shape=f"[{B},{2 * h}]@[{2 * h},{fc_out}]（列切 h/tp，gather_output="
               f"True → TP>1 all-gather 见通信行；无激活/无残差直加）"))
     # 4) full_attention 层（几何=目标 full 层；draft 自有 KV：S=ctx+step_idx）
-    layer_rows = gqa_layer_rows(stage, li, layer, B, ctx + step_idx, 1, h,
-                                quant, tp)
+    layer_rows = gqa_layer_rows(
+        stage, li, layer, B, ctx + step_idx, 1, h, quant, tp,
+        replicate_full_kv=plan.replicate_full_kv if plan is not None else False)
     rows += layer_rows
     T = B
     rows += ffn_or_moe_rows(stage, li, layer, T, h, quant, tp=tp, ep=ep,
@@ -390,12 +393,12 @@ def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
 
 
 def mtp_kv_rewind_row(stage: str, k: int, e_produced: float, target: ModelIR,
-                      quant: dict, tp: int) -> OpRow:
+                      quant: dict, tp: int, *, replicate_full_kv: bool = False) -> OpRow:
     """每轮草稿 KV 回退浪费期望（K 步行写入 vs E[N] 提交；DFlash 同式）。"""
     from ..lowering.parallel import attention_shard_rule
 
     attn = _mtp_template_layer(target).attn
-    kvh = attention_shard_rule(attn, tp).kv_heads_per_rank
+    kvh = attention_shard_rule(attn, tp, replicate_full_kv=replicate_full_kv).kv_heads_per_rank
     kv_elems = 2 * kvh * attn.head_dim
     wasted = max(0.0, k - e_produced)
     return OpRow(
