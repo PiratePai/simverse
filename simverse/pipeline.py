@@ -870,9 +870,12 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
     （不填 0）→ 峰值不完整 → feasible 判定 unknown（已知下界超标称仍 OOM）。
     """
     from .lowering.memory import (RankMemory, UNKNOWN_RUNTIME_COMPONENTS,
-                                  colocated_rank_memory,
+                                  add_target_allocations, draft_extra_allocations,
                                   kv_allocations, target_weight_allocations)
-    pplan = plan
+    tp = dep.target_tp if plan is None else plan.tp
+    ep = dep.target_ep if plan is None else plan.ep
+    budget = _device_budget(dep.target_device, dep.budget)
+    device_sms = DEVICES[dep.target_device].sm_count
     blocks: Dict[str, Any] = {}
     # R04：Engram 表位置显式输入 + staged_rows 下界按稳态 decode T=B×1 计
     e_place = getattr(dep, "engram_table_placement", "cpu_offload")
@@ -880,18 +883,15 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
     # R20：V4.1 KV 记录配方（显式场景输入，默认 fp8_ds_mla_sm90）
     v41_rec = getattr(dep, "v41_kv_record", "fp8_ds_mla_sm90")
     if dep.mode == "colocated":
-        tp = dep.target_tp if pplan is None else pplan.tp
-        ep = dep.target_ep if pplan is None else pplan.ep
         ranks = []
         for r in range(tp):
             rank_mem = colocated_rank_memory(
-                model, draft_ir, quant, dquant, tp, B, ctx,
-                _device_budget(dep.target_device, dep.budget),
+                model, draft_ir, quant, dquant, tp, B, ctx, budget,
                 ep=ep, rank=r, block_size=block_size, e_produced=e_produced,
                 draft_ctx_kv_path=draft_ctx_kv_path,
                 engram_table_placement=e_place, engram_tokens=e_tokens,
                 v41_kv_record=v41_rec, mtp_model=mtp_model,
-                device_sms=DEVICES[dep.target_device].sm_count)
+                device_sms=device_sms, plan=plan)
             rep = rank_mem.peak_vs_budget()
             rep["inventory"] = rank_mem.inventory()
             ranks.append(rep)
@@ -905,37 +905,11 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
         blocks["colocated_worst"] = {"rank_id": worst["rank_id"],
                                      "known_peak_bytes": worst["known_peak_bytes"]}
     else:
-        from .lowering.memory import RankMemory as RM
-        tb = _device_budget(dep.target_device, dep.budget)
-        ep = dep.target_ep if pplan is None else pplan.ep
-        rm = RM("target-r0", dep.target_device, tb)
-        for a in target_weight_allocations(model, quant, dep.target_tp,
-                                           ep=ep, plan=pplan,
-                                           engram_table_placement=e_place):
-            a.consumers = ["target"]
-            rm.add(a)
-        if e_tokens:
-            from .lowering.memory import engram_staged_allocations
-            for a in engram_staged_allocations(
-                    (model.extras or {})["engram"], dep.target_tp, e_tokens):
-                a.consumers = ["target"]
-                rm.add(a)
-        kv_spec = (model.extras or {}).get("kv_spec")
-        if kv_spec and kv_spec.get("family") == "v41_csa2" and e_tokens:
-            from .lowering.memory import (v41_attn_transient_allocations,
-                                          v41_index_buffer_allocations)
-            for a in v41_index_buffer_allocations(kv_spec, e_tokens):
-                a.consumers = ["target"]
-                rm.add(a)
-            for a in v41_attn_transient_allocations(
-                    kv_spec, e_tokens, ctx,
-                    DEVICES[dep.target_device].sm_count):
-                a.consumers = ["target"]
-                rm.add(a)
-        for a in kv_allocations(model, quant, B, ctx, tp=dep.target_tp,
-                                v41_kv_record=v41_rec):
-            a.consumers = ["target"]
-            rm.add(a)
+        rm = RankMemory("target-r0", dep.target_device, budget)
+        add_target_allocations(
+            rm, model, quant, tp, B, ctx, ep=ep, plan=plan,
+            engram_table_placement=e_place, engram_tokens=e_tokens,
+            v41_kv_record=v41_rec, device_sms=device_sms)
         rm.unknown_components = list(UNKNOWN_RUNTIME_COMPONENTS)
         rep = rm.peak_vs_budget()
         rep["inventory"] = rm.inventory()
@@ -945,11 +919,9 @@ def _memory_block(model, draft_ir, quant, dquant, dep, B, ctx, cap,
             # 独立组需全量 embed/lm_head 副本——服务栈未见证据，如实登记）
             db = _device_budget(dep.draft_device, dep.draft_budget,
                                 path="$.deployment.draft_budget")
-            drm = RM("draft-r0", dep.draft_device, db)
-            from .lowering.memory import _as_model, draft_extra_allocations
-            dm = _as_model(draft_ir)
-            dq = dict(quant)
-            dq.update(dquant or {})
+            drm = RankMemory("draft-r0", dep.draft_device, db)
+            dm = _draft_as_model(draft_ir)
+            dq = {**quant, **(dquant or {})}
             for a in target_weight_allocations(dm, dq, dep.draft_tp,
                                                role="draft"):
                 a.consumers = ["draft"]

@@ -14,6 +14,14 @@ DSH 只读核对的四项建议已落实，主控负责全量验收。规划和�
 七场景 Ascend 覆盖计划无漂移，JavaScript 静态检查通过。浏览器核验解析、R29 TP2 命中、
 TP8 全回退与组 CSV；下载的 7 组与同场景 API/CLI 导出逐字段相同。
 
+## 2026-11-20 重复实现与入口归整
+
+- GQA 的目标与草稿计数、显存和分片说明共用每 rank 几何计算。同卡与 baseline/DT 复用目标端显存对象组装，分别保留自己的草稿驻留和预算契约。
+- 接受率由方法层校验，HTTP 和 CLI 解码复用同一规则。空逐位接受率在入口给出字段错误，经 `run_v2` 直接调用时返回失败结果。默认扫描保留 27 个输出点，按完整场景摘要在请求内复用求值，实际运行 25 次。
+- 工作台和 CLI 使用同一个 CSV 生成器。工作台通过 `POST /api/v2/export/{ops,groups}` 提交已有结果，保留大整数和旧结果的解析行价回退。旧 GET 导出路由继续返回 410。v0.1 CLI 和 HTTP 适配器归入 `simverse/legacy`，公开命令和路由继续供归档重放。记录成本指标别名和报告副本按现有回放契约保留。
+- KV 数值评估基于 [vLLM 固定提交 `dc74b8cb`](https://github.com/vllm-project/vllm/tree/dc74b8cbbbe3dbb9399fe369757d63defd614cc2) 的 `Qwen3NextAttention` 与 `QKVParallelLinear` 源码。对 Qwen3.6 的 2 个 KV 头，vLLM 在 TP4/8 按单头跨 rank 复制。仿真旧口径按每 rank 2 头计。临时替换几何规则的离线试算中，默认 H100 TP8 预设的 TPOT 从 36.859181 ms 变为 36.844173 ms，已知显存下界减少 178,257,920 B。15 个冻结场景中有 9 个改变计数和容量，影响 Ascend 条件成本及历史 H200 235B 对照。此次归整保留冻结口径，数值变更需要按后端和归档采集口径分别验收。
+- Windows / Python 3.12 全量 672 项通过。15 场景冻结回放、R27 归因和 JavaScript 语法检查通过。无头 Chrome 从真实工作台运行默认预设，下载两类 CSV 和结果 JSON，并用 CLI 从同一 JSON 导出比较，两类 CSV 内容一致。归档首页和注册表可访问。此次验证使用源码、离线回放和本地浏览器。
+
 ## 2026-11-17 Ascend 逐记录成本与补采计划
 
 R29 双 rank 五类 collective 曲线与 R28 14 个独立 GEMM 形状分别接入条件记录档，来源/派生双重哈希校验；模型、形状、BF16、rank、原语、角色逐项门禁。只改选用成本，原始计数/容量与纯解析指标保留；没有新增 NPU 执行。两栈不可混用，不升级生产实测 profile，排名资格不变。Web 新增选择器、分阶段覆盖/时间口径/逐项回退与补采表，KPI/矩阵/扫描/逐行/时间轴及 CLI/API/CSV/HTML 同源。七个固定场景的覆盖与回退计划已落档，按实际缺点调整昇腾计划（真实原语、TP2 形状、verify M16、实际 MoE/GDN/attention、草稿身份，TP4/8 后排）。新增 12 项回归，收集 557→569；全量 `py -3.12 -m pytest tests -q`：**569 passed**（19.27s）。蒸馏/七场景回放 `--check` 与 JavaScript 静态检查通过。浏览器核验 R29 TP2 命中/TP8 全回退、R28 TP8 精确 GEMM、关闭记录、KPI 与 CSV 一致；未计价方法阶段显式 unknown，不计入分母。见 [说明](validation/ascend-record-costs.md)。

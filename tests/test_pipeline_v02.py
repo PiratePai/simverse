@@ -115,7 +115,14 @@ def test_run_id_deterministic_and_digest_identity():
     assert a.manifest.run_id == c.manifest.run_id
     sc2 = _dflash_sc(acceptance={"alpha": 0.73})
     b2 = run_v2(sc2)
+    assert b2.metrics["M03_E_N"].value != a.metrics["M03_E_N"].value
     assert b2.manifest.run_id != a.manifest.run_id   # 输入变 → 身份变
+
+
+def test_empty_position_alphas_is_rejected_by_pipeline():
+    b = run_v2(_dflash_sc(acceptance={"kind": "position_alphas", "alphas": []})).to_json()
+    assert b["manifest"]["status"] == "failed"
+    assert "alphas" in b["metrics"]["error"]["reason"]
 
 
 def test_unknown_acceptance_propagates_to_tpot():

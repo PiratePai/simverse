@@ -50,6 +50,8 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
     # block_size 显式传入（R07a 修正：场景 k 截断/覆盖时草稿前向按生效块计，
     # 不得用 checkpoint 原生 block_size——vLLM num_speculative_tokens 与
     # SGLang --speculative-dflash-block-size 均按生效块执行草稿前向）
+    from ..lowering.parallel import attention_shard_rule
+
     blk = int(block_size) if block_size else draft.block_size
     span = B * blk
     b_w = quant["dense_w"] / 8
@@ -78,9 +80,9 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
     for layer in draft.layers:
         li = layer.index
         a = layer.attn
-        heads_c = a.heads // tp
-        # KV 头 per-rank（kvh≥tp 切分；kvh<tp 复制）
-        kvh = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
+        shard = attention_shard_rule(a, tp)
+        heads_c = shard.heads_per_rank
+        kvh = shard.kv_heads_per_rank
         d = a.head_dim
         T = B * blk
         rows.append(OpRow(stage, li, "q_proj",
@@ -99,7 +101,7 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
                               weight_capacity=int(h * kvh * d * b_w),
                               formula=FR.F_GEMM,
                               shape=f"kv(卡上)={kvh}"
-                                    f"{'（复制）' if a.kv_heads < tp else ''}"))
+                                    f"{'（复制）' if shard.kv_replicated else ''}"))
         win = a.sliding_window
         end = start_ctx + blk
         # 层内因果性来自 pinned 实现（HF dflash/model.py L364-366；vLLM
@@ -241,7 +243,7 @@ def dflash_round_rows(stage: str, draft: DraftIR, target_vocab: int,
     # vLLM implementation_id 计，差异登记在 source_map。
     if draft.layers:
         a0 = draft.layers[0].attn
-        kvh0 = a0.kv_heads // tp if a0.kv_heads >= tp else a0.kv_heads
+        kvh0 = attention_shard_rule(a0, tp).kv_heads_per_rank
         elems = span * len(draft.layers) * 2 * kvh0 * a0.head_dim
         rows.append(OpRow(stage, -1, "ctx_kv_layout_copy",
                           act_read=int(elems * b_a), act_write=int(elems * b_a),
@@ -390,8 +392,10 @@ def mtp_step_rows(stage: str, target: ModelIR, step_idx: int, ctx: int,
 def mtp_kv_rewind_row(stage: str, k: int, e_produced: float, target: ModelIR,
                       quant: dict, tp: int) -> OpRow:
     """每轮草稿 KV 回退浪费期望（K 步行写入 vs E[N] 提交；DFlash 同式）。"""
+    from ..lowering.parallel import attention_shard_rule
+
     attn = _mtp_template_layer(target).attn
-    kvh = attn.kv_heads // tp if attn.kv_heads >= tp else attn.kv_heads
+    kvh = attention_shard_rule(attn, tp).kv_heads_per_rank
     kv_elems = 2 * kvh * attn.head_dim
     wasted = max(0.0, k - e_produced)
     return OpRow(

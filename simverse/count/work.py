@@ -80,12 +80,14 @@ def _rope_row(toks: int, heads: int, width: int, rotary: int, b_act: float):
 
 def gqa_layer_rows(stage: str, li: int, layer: LayerIR, B: int, S: int, Q: int,
                    h: int, quant: dict, tp: int = 1) -> List[OpRow]:
+    from ..lowering.parallel import attention_shard_rule
+
     attn = layer.attn
+    shard = attention_shard_rule(attn, tp)
     b_w, b_a, b_kv = quant["dense_w"] / 8, quant["act"] / 8, quant["kv"] / 8
-    heads_c = attn.heads // tp
-    # KV 头 per-rank（vLLM QKVParallelLinear：kvh≥tp → kvh/tp；kvh<tp → 复制）
-    kv_heads_c = attn.kv_heads // tp if attn.kv_heads >= tp else attn.kv_heads
-    kv_replicated = attn.kv_heads < tp
+    heads_c = shard.heads_per_rank
+    kv_heads_c = shard.kv_heads_per_rank
+    kv_replicated = shard.kv_replicated
     T = B * Q
     win = attn.sliding_window
     rows: List[OpRow] = []

@@ -31,6 +31,7 @@ from typing import Dict, List, Optional, Tuple
 from ..model_ir.schema import ModelIR
 from ..model_ir.families import engram_bucket_primes
 from ..count.moe import require_divisible_ep
+from .parallel import attention_shard_rule
 from ..draft_quant import (FUSED_RAW, MXFP8_CONTEXT_PROJ, PER_LAYER_FALLBACK,
                            dtype_bytes, path_unknown_components,
                            require_ctx_kv_path)
@@ -469,7 +470,7 @@ def target_weight_allocations(model: ModelIR, quant: dict, tp: int,
         dense_b = 0
         if layer.attn is not None:
             a = layer.attn
-            kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
+            kv_rank = attention_shard_rule(a, tp).kv_heads_per_rank
             # q_proj（output_gated 输出 2×）列切；k/v 切或复制；o_proj 行切。
             # 权重字节 = 输出宽 × 输入宽 h（2026-11-10 修正：旧式漏乘 h，
             # attention 投影按输出宽单元素计，低估 h 倍）
@@ -722,8 +723,7 @@ def kv_allocations(model: ModelIR, quant: dict, batch: int, ctx: int,
         elems = 0
         for l in model.layers:
             if l.attn is not None:
-                kv_rank = (l.attn.kv_heads // tp if l.attn.kv_heads >= tp
-                           else l.attn.kv_heads)
+                kv_rank = attention_shard_rule(l.attn, tp).kv_heads_per_rank
                 elems += 2 * kv_rank * l.attn.head_dim
         allocs.append(Allocation(f"{role}-kv", "kv", role,
                                  int(elems * ctx * b_kv) * batch,
@@ -798,7 +798,7 @@ def draft_extra_allocations(draft_ir, quant: dict, tp: int,
         a = layer.attn
         if a is None:
             continue
-        kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
+        kv_rank = attention_shard_rule(a, tp).kv_heads_per_rank
         fused_kv_elems += 2 * kv_rank * a.head_dim
         k_norm_elems += a.head_dim
     if k_norm_elems:
@@ -914,8 +914,9 @@ def transient_allocations(model: ModelIR, draft_ir, quant: dict, dquant: dict,
         for layer in draft_ir.layers:
             if layer.attn is not None:
                 a = layer.attn
-                kv_rank = a.kv_heads // tp if a.kv_heads >= tp else a.kv_heads
-                q_rank = a.heads // tp
+                shard = attention_shard_rule(a, tp)
+                kv_rank = shard.kv_heads_per_rank
+                q_rank = shard.heads_per_rank
                 d_head = a.head_dim
                 break
     # R07a：verify 跨度基（两栈全跨度物化；见 docstring）；E[N] 只保留在
@@ -1041,38 +1042,14 @@ def mtp_transient_allocations(mtp_model: ModelIR, quant: dict, batch: int,
     ]
 
 
-def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
-                          batch: int, ctx: int, budget: DeviceBudget,
-                          draft_batch: Optional[int] = None, ep: int = 1,
-                          rank: int = 0, block_size: int = 0,
-                          e_produced: float = 0.0,
-                          with_transients: bool = True,
-                          draft_ctx_kv_path: str = "unknown",
-                          engram_table_placement: str =
-                          ENGRAM_PLACEMENT_CPU_OFFLOAD,
-                          engram_tokens: int = 0,
-                          v41_kv_record: str = "fp8_ds_mla_sm90",
-                          mtp_model: Optional[ModelIR] = None,
-                          device_sms: Optional[int] = None) -> RankMemory:
-    """同卡混部 per-rank 账本（R02a/R02b）。
-
-    草稿与 target 同 TP 组（vLLM pin）；embed/lm_head 为 target 的物理
-    分片对象，草稿以 reference 行引用（零字节，consumer 登记），不再
-    重复驻留。draft_batch：草稿批（默认 = target batch B；逐请求草稿）。
-    draft_ctx_kv_path：显式 ctx-KV 实现路径（draft_quant.py 枚举）；
-    未知时拒绝，不按 dense_w 猜分支。
-    R04：engram_table_placement 显式表位置（默认 cpu_offload 研究假设）；
-    engram_tokens>0 时补 staged_rows 下界临时对象（V4.1 主模型）。
-    R23：mtp_model（mtp_layer_model 产物）在场时登记 Qwen3.6 原生 MTP 头
-    常驻/草稿 KV/临时对象——层权重与 embed/lm_head 共享沿用 DFlash 同一
-    配方（load_eagle_model 物理共享，eagle_utils.py L82-112/L44-71）。
-    """
-    if draft_batch is None:
-        draft_batch = batch
-    path = None
-    rank_mem = RankMemory(f"colocated-r{rank}", budget.device_id, budget)
+def add_target_allocations(
+    rank_mem: RankMemory, model: ModelIR, quant: dict, tp: int, batch: int, ctx: int,
+    *, ep: int, engram_table_placement: str, engram_tokens: int,
+    v41_kv_record: str, device_sms: Optional[int], rank: int = 0, plan=None,
+) -> None:
+    """Populate the target portion of a rank's memory ledger."""
     for a in target_weight_allocations(model, quant, tp, role="target",
-                                       ep=ep, rank=rank,
+                                       ep=ep, rank=rank, plan=plan,
                                        engram_table_placement=
                                        engram_table_placement):
         a.consumers = ["target"]
@@ -1100,12 +1077,49 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                             v41_kv_record=v41_kv_record):
         a.consumers = ["target"]
         rank_mem.add(a)
+
+
+def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
+                          batch: int, ctx: int, budget: DeviceBudget,
+                          draft_batch: Optional[int] = None, ep: int = 1,
+                          rank: int = 0, block_size: int = 0,
+                          e_produced: float = 0.0,
+                          with_transients: bool = True,
+                          draft_ctx_kv_path: str = "unknown",
+                          engram_table_placement: str =
+                          ENGRAM_PLACEMENT_CPU_OFFLOAD,
+                          engram_tokens: int = 0,
+                          v41_kv_record: str = "fp8_ds_mla_sm90",
+                          mtp_model: Optional[ModelIR] = None,
+                          device_sms: Optional[int] = None, plan=None) -> RankMemory:
+    """同卡混部 per-rank 账本（R02a/R02b）。
+
+    草稿与 target 同 TP 组（vLLM pin）；embed/lm_head 为 target 的物理
+    分片对象，草稿以 reference 行引用（零字节，consumer 登记），不再
+    重复驻留。draft_batch：草稿批（默认 = target batch B；逐请求草稿）。
+    draft_ctx_kv_path：显式 ctx-KV 实现路径（draft_quant.py 枚举）；
+    未知时拒绝，不按 dense_w 猜分支。
+    R04：engram_table_placement 显式表位置（默认 cpu_offload 研究假设）；
+    engram_tokens>0 时补 staged_rows 下界临时对象（V4.1 主模型）。
+    R23：mtp_model（mtp_layer_model 产物）在场时登记 Qwen3.6 原生 MTP 头
+    常驻/草稿 KV/临时对象——层权重与 embed/lm_head 共享沿用 DFlash 同一
+    配方（load_eagle_model 物理共享，eagle_utils.py L82-112/L44-71）。
+    """
+    if draft_batch is None:
+        draft_batch = batch
+    path = None
+    rank_mem = RankMemory(f"colocated-r{rank}", budget.device_id, budget)
+    add_target_allocations(
+        rank_mem, model, quant, tp, batch, ctx, ep=ep, rank=rank, plan=plan,
+        engram_table_placement=engram_table_placement,
+        engram_tokens=engram_tokens, v41_kv_record=v41_kv_record,
+        device_sms=device_sms)
+    draft_q = {**quant, **(draft_quant or {})}
     if draft_ir is not None:
         path = require_ctx_kv_path(draft_ctx_kv_path)
-        draft_q = dict(quant)
-        draft_q.update(draft_quant or {})
         # 草稿层权重：同 tp 切分（gqa 家族路径）
-        for a in target_weight_allocations(_as_model(draft_ir), draft_q, tp,
+        draft_model = _as_model(draft_ir)
+        for a in target_weight_allocations(draft_model, draft_q, tp,
                                            role="draft"):
             if "embed" in a.alloc_id or "lm_head" in a.alloc_id:
                 # 草稿共享 target 的词表行切对象：登记引用（零字节），
@@ -1124,7 +1138,7 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
                                          ctx_kv_path=path):
             a.consumers = ["draft"]
             rank_mem.add(a)
-        for a in kv_allocations(_as_model(draft_ir), draft_q, draft_batch, ctx,
+        for a in kv_allocations(draft_model, draft_q, draft_batch, ctx,
                                 role="draft", tp=tp):
             a.consumers = ["draft"]
             rank_mem.add(a)
@@ -1140,8 +1154,6 @@ def colocated_rank_memory(model: ModelIR, draft_ir, quant, draft_quant, tp: int,
         # target_weight_allocations 配方；embed/lm_head 物理共享目标分片
         # （load_eagle_model；qwen3_5_mtp.py L303-320 只消费 mtp.*+
         # embed_tokens+lm_head，无独立副本）。
-        draft_q = dict(quant)
-        draft_q.update(draft_quant or {})
         for a in target_weight_allocations(mtp_model, draft_q, tp,
                                            role="draft", ep=ep, rank=rank):
             if a.alloc_id == "draft-w-final-norm":

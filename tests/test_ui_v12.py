@@ -91,13 +91,3 @@ def test_web_cli_json_csv_consistent(tmp_path):
     html = html_p.read_text(encoding="utf-8")
     assert cli["manifest"]["run_id"][:30] in html
     assert "T0 解析估算" in html
-
-
-def test_stale_response_not_reused():
-    """切换场景后 run_id 变化：晚到的旧响应不可覆盖新结果（UI 键含身份）。"""
-    a = run_v2(ScenarioV2.from_json(SC))
-    sc2 = dict(SC)
-    sc2["acceptance"] = {"kind": "geometric", "alpha": 0.9}
-    b = run_v2(ScenarioV2.from_json(sc2))
-    assert a.manifest.run_id != b.manifest.run_id
-    assert a.metrics["M03_E_N"].value != b.metrics["M03_E_N"].value
