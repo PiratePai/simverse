@@ -128,7 +128,7 @@
 
 ## 3. 测试与验证记录
 
-* 新增 `tests/test_entry_points_r10.py`（50 项：资产定位双模式、清单
+* 新增 `tests/test_entry_points_r10.py`（56 项：资产定位双模式、清单
   覆盖/排除、预设 digest 对齐与三入口一致、CLI 真实 run-v2、畸形请求
   参数化矩阵 ×run/sweep、内部异常 500 语义、根文档白名单与链接链、
   workbench 预设逻辑静态断言）；`tests/test_scan_compare_r10.py`
@@ -140,10 +140,10 @@
   supported，保留"仅 forward 缺口独立拦截"的原意图；缺失拦截行为由
   资格矩阵新测试覆盖（准则 §4.3：行为修复驱动的期望更新，在此单列）。
 * 命令与结果（Windows/Python 3.12，worktree 内）：
-  * `py -3.12 -m pytest tests -q` → **666 passed**（收集 666；
+  * `py -3.12 -m pytest tests -q` → **672 passed**（收集 672；
     IMPLEMENTATION_STATUS 已同步，G6 核对通过）
   * `node --check simverse/static/workbench.js` → 通过
-  * `py -3.12 tools/wheel_smoke.py` → 全部通过（安装入口、目录和文档链路）
+  * `py -3.12 -X utf8 tools/wheel_smoke.py` → 全部通过（安装入口、目录和文档链路）
   * `py -3.12 -X utf8 tools/replay_cost_integrity_r27.py --check` →
     counts invariant; anchors hold（M01/M02/成本组数值零漂移）
   * `git diff --check` → 通过

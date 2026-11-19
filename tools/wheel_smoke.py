@@ -10,7 +10,7 @@
   5. 工作台首页与 /api/v2/catalog 返回 200，目录恰两款主模型；
   6. wheel 内清单文件与仓库原始字节逐一致（受哈希约束资产不重排）。
 
-用法：py -3.12 tools/wheel_smoke.py [--keep]
+用法：py -3.12 -X utf8 tools/wheel_smoke.py [--keep]
 """
 from __future__ import annotations
 

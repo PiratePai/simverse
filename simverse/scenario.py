@@ -208,7 +208,7 @@ class ScenarioV2:
         for field_name, defaults in (("quant", _DEFAULT_QUANT),
                                      ("draft_quant", _DEFAULT_DRAFT_QUANT)):
             given = getattr(self, field_name)
-            if given and len(given) < len(defaults):
+            if defaults.keys() - given.keys():
                 merged = dict(defaults)
                 merged.update(given)
                 setattr(self, field_name, merged)
@@ -246,7 +246,13 @@ class ScenarioV2:
             raise ScenarioInputError("$.workload.batch", "batch 必须为正")
         if self.workload.ctx_tokens < 1:
             raise ScenarioInputError("$.workload.ctx_tokens", "ctx 必须为正")
+        if self.workload.osl_tokens is not None and self.workload.osl_tokens < 1:
+            raise ScenarioInputError("$.workload.osl_tokens", "osl_tokens 必须为正")
         dep = self.deployment
+        if dep.mode == "dt_pipeline_sim":
+            for name in ("pipeline_rounds", "pipeline_microbatches"):
+                if getattr(dep, name) < 1:
+                    raise ScenarioInputError(f"$.deployment.{name}", f"{name} 必须为正")
         active_roles = [("target", dep.target_device, self.quant)]
         if self.method_id != "baseline":
             active_roles.append(("draft", dep.target_device if dep.mode == "colocated"

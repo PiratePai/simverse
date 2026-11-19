@@ -188,6 +188,11 @@ MALFORMED_CASES = [
     ("负块长", {"block_size": -1}, "$.block_size"),
     ("未知设备", {"deployment": {"target_device": "missing"}}, "$.deployment.target_device"),
     ("未知链路", {"deployment": {"link": "missing"}}, "$.deployment.link"),
+    ("微批越界", {"deployment": {"mode": "dt_pipeline_sim", "pipeline_microbatches": 0}},
+     "$.deployment.pipeline_microbatches"),
+    ("流水轮数越界", {"deployment": {"mode": "dt_pipeline_sim", "pipeline_rounds": 0}},
+     "$.deployment.pipeline_rounds"),
+    ("输出上限越界", {"workload": {"osl_tokens": -1}}, "$.workload.osl_tokens"),
     ("上下文越界", {"workload": {"ctx_tokens": 0}}, "$.workload.ctx_tokens"),
     ("目标 KV 位宽非法", {"quant": {"kv": 3}}, "$.quant.kv"),
     ("草稿 KV 位宽非法", {"draft_quant": {"kv": 3}}, "$.draft_quant.kv"),
@@ -239,6 +244,13 @@ def test_r10d_valid_scenarios_still_run_on_both_endpoints():
     r = client.post("/api/v2/run", json=body)
     assert r.status_code == 200
     assert r.get_json()["manifest"]["status"] == "completed"
+    explicit_defaults = {**body, "quant": {}, "draft_quant": {}}
+    same = client.post("/api/v2/run", json=explicit_defaults)
+    assert same.status_code == 200
+    assert same.get_json()["manifest"]["input_digest"] == r.get_json()["manifest"]["input_digest"]
+    scan = client.post("/api/v2/sweep", json=explicit_defaults)
+    assert scan.status_code == 200
+    assert scan.get_json()["base_digest"] == r.get_json()["manifest"]["input_digest"]
 
 
 def test_r10d_unsupported_combo_keeps_result_status_not_4xx():

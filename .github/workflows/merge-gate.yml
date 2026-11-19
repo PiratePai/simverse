@@ -45,4 +45,4 @@ jobs:
       # 构建、隔离 venv 安装、仓库外执行真实 run-v2 与工作台端点（tools/
       # wheel_smoke.py 内含逐步断言；失败即 exit 非 0）。
       - name: Wheel install smoke (R10c)
-        run: python tools/wheel_smoke.py
+        run: python -X utf8 tools/wheel_smoke.py
