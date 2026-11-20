@@ -1,0 +1,79 @@
+# R07b/R09 端到端请求轨迹验收方案
+
+基于 `main@7228e75` 的代码盘点。首轮交付目标是为同一组 Qwen3.6 文本请求，分别核对 baseline、DFlash 和原生 MTP 的服务端产出、阶段计时和资源边界。验收分为离线导入与归约、匹配环境下的服务采集。本文给出离线验收数据和上机条件。导入器、采集和部署排名仍待各自验收。
+
+## 当前可复用的实现
+
+| 实现 | 现有用途和边界 |
+| --- | --- |
+| [`execute/reduce.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/reduce.py#L12-L133) 与 [V08 人工轨迹测试](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tests/test_metrics_v08.py#L26-L67) | 可复用窗口事件计数、请求平均 ITL、最近秩分位、busy 区间并集及完成请求计数的窗口判定。完成请求吞吐当前存在跨窗计数缺口，见下方手算复现。现有 goodput 仅检查平均 ITL，尚无到达时间、TTFT 或组合 SLO 输入。 |
+| [`execute/validate.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/validate.py#L17-L79) 与 [`resource_core.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/resource_core.py#L111-L146) | 事件核可核对依赖、资源互斥和消息顺序，主要输入为仿真事件。并发采集的区间只有在独占资源和时钟语义明确时才使用对应互斥检查。 |
+| [`ResultBundle`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/contracts/run.py#L49-L93) 与 [trace CSV 导出](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/exports.py#L67-L77) | 已有结果身份和仿真轮事件导出。现有 CSV 缺少请求到达、提交输出、失败状态及观测窗口，无法还原服务端指标。 |
+| [`methods/acceptance.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/methods/acceptance.py#L78-L125) 与 [Ascend 蒸馏工具](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tools/distill_ascend_cost_records.py#L21-L44) | 接受率实现消费场景假设，采集尚未接入。蒸馏工具的源文件与哈希登记可作为参考，现有读入范围是局部算子与通信成本。 |
+
+首个实现缺口是**完成请求吞吐的窗口过滤**。先让吞吐和完成请求计数使用同一窗口判定，并加入跨窗回归。随后实现单份 JSON 的字段校验、来源核验和服务端 TTFT 归约，复用已通过手算对照的现有归约函数。已有 CLI、HTTP 工作台和仿真 `ResultBundle` 可以继续独立运行。现有用例可通过 `py -3.12 -m pytest -q tests/test_metrics_v08.py tests/test_resource_core.py` 复验。
+
+## 采集输入与配对
+
+- baseline、DFlash、MTP 使用同一目标权重与 tokenizer revision、精度、输入 token 序列、请求到达轨迹、采样配置与输出上限。固定设备和 TP/EP、批处理和并发设置、缓存冷暖状态及测量开关。逐方法另记草稿 checkpoint 或 MTP 头、实现和配置的版本。输出长度或停止原因有差异时逐请求披露，按实际提交 token 计数。
+- 首轮固定一个后端版本与一个同卡规模，先核对三个方法的实际支持路径、模型输出和可分配预算。缺配对时记录缺项并保留已取得的单方法证据。DFlash DT 仿真与 Ascend 条件成本档各自保留现有身份。Ascend 上机条件见 [A-N6](../ascend-validation-plan.md)。
+- 固定请求清单、原始日志、命令、版本和哈希。先预热，再开启观测窗口，排空阶段保留原轨迹。对实际服务比较采用独立进程重复，预先登记 SLO、误差门槛、观察窗口、允许变化的字段和输出一致性判据。记录失败试次与 profiler 开关，必要时以同负载无 profiler 的运行估计采集开销。
+
+## 最小输入字段
+
+以下字段是拟实现的离线输入协议，首版可用单个 JSON 对象表示。时间使用距本次采集起点的整数纳秒，展示时转换为毫秒。缺失值使用 `null` 和原因。跨进程或跨设备的时钟仅在对齐依据与误差可追溯时计算差值。
+
+| 对象 | 必采字段 |
+| --- | --- |
+| 运行清单 | schema 版本、`source_kind`（合成或采集）、`run_id`、方法、后端与改动身份、权重和 tokenizer revision、设备与拓扑、TP/EP、精度、方法配置、请求清单哈希、采集命令和原始文件哈希。 |
+| 观测窗口 | 窗口起止、预热与排空边界、单调时钟来源、时间基准、流粒度（逐 token 或成组提交）。客户端轨迹如有采集，另记同名字段和自己的时钟。 |
+| 请求与提交 | 请求 ID、输入 token 数与样本身份、arrival、admit、提交输出序号和时刻、输出 token 数、完成状态、终止时刻与原因。多 token 组保留序号范围和组提交时刻。客户端只有流块时记录块粒度。 |
+| 服务阶段 | span ID、请求或批 ID、轮 ID、角色、设备/rank、资源、阶段、起止、计时边界及可定位的原始记录引用。baseline 采 prefill/decode。DFlash 与 MTP 分别采 draft、verify、commit/recovery 和实际存在的附加阶段。 |
+| 投机轮 | 请求 ID、轮 ID、配置上限、实际提议数、实际校验数、接受草稿前缀长度、提交 token 数及结束原因。可识别时单列 target bonus 和其输出序号。记录 `K=0` 的原因并单列。 |
+| 容量 | 每 rank 可分配预算、观测峰值、采样窗口和口径。保留 allocated/reserved 及 KV、workspace、graph、通信池等可定位分量，缺值单列。 |
+
+校验包括唯一 ID、引用闭合、输出序号连续、时间单调、窗口正长度、请求到达与输出顺序，以及每轮 `0 ≤ accepted ≤ verified ≤ proposed ≤ configured_k`。提交 token 数按停止和截断后的实际事件核对。EOS 或输出上限可能改变本轮提交数量。按请求保留 `(proposed, verified, accepted, committed)` 的联合记录，另报接受长度直方图、样本数和条件分布。有明确分母时才给全接受比例。只拿到均值或边际分布时，动态 K 的联合律保持未知。
+
+## 指标和残差
+
+| 指标 | 首轮验收口径 |
+| --- | --- |
+| TTFT / E2E | 服务端首个提交输出减 arrival，最后提交输出减 arrival。终止时刻另留作请求状态核对。全程无输出保持未知。 |
+| ITL / 请求 TPOT | 同请求同时间基准下报告相邻输出的间隔分布。另报请求平均间隔 `(last - first) / (N - 1)`。只有 0 或 1 个 token 时返回 `null`。对于可证实的同刻提交，保留零间隔。只有流块且无法确认组内提交时，报告块间隔和粒度。 |
+| 吞吐 | 用窗口 `[start,end)` 内的提交 token 数除墙钟，单位 token/s。完成请求口径另列，以成功请求的最后提交落入窗口为归属条件。带输出的失败或取消请求实际提交仍计入事件吞吐，状态和计数单列。 |
+| Goodput | 只计在窗口内成功完成且同时满足预先冻结的 TTFT 和请求平均 ITL 阈值的请求，分别报告 req/s 和 token/s。单 token 请求仅检查 TTFT。缺失的必需观测不能通过 SLO。 |
+| 分位与残差 | 保留样本量和分位估计方法。阶段对账先按已对齐的同边界区间取并集，报告对应墙钟和未解释残差。对照仿真时另报同边界的有符号误差和绝对误差。时钟不可对齐或阶段缺失时保留未知。 |
+
+同 rank/资源的 busy 时间用区间并集。在多 rank 或有重叠的运行中分别披露慢 rank、每 rank 资源窗口和端到端墙钟。只在资源归属和时钟都成立时给联合窗口。显存缺口和未归属时长继续进入证据门禁，按 [合入准则](../MERGE_CRITERIA.md) 判定。
+
+## 离线验收样本
+
+时间均为毫秒。观测窗口为 `[10,50)`。A 的两个 `20` 是明确记录的同刻服务端提交。
+
+| 请求 | 到达 | 提交时刻 | 状态 |
+| --- | ---: | --- | --- |
+| A | 0 | 8、20、20、50 | 成功 |
+| B | 4 | 10、30、48 | 成功 |
+| C | 12 | 16 | 成功 |
+| D | 41 | 45 | 49 时取消 |
+| E | 42 | 无 | 43 时失败 |
+
+- 窗口内有 7 个提交 token，事件吞吐为 175 token/s。A 最后提交在右边界，按完成口径只有 B、C 的 4 token，完成吞吐为 100 token/s。
+- 当前 `throughput_tokens_per_ms(..., count_basis="completed_requests")` 在本样本返回 200 token/s。原因是非空输出列表使条件提前成立，跳过最后提交是否在窗口内的检查。现有 V08 吞吐用例中的成功请求均在窗口内结束。后续用本样本要求 100 token/s，并同时断言同一窗口只有 2 个完成请求。
+- B 的 TTFT 为 6 ms，E2E 为 44 ms，ITL 为 20、18 ms，请求平均间隔为 19 ms。C 的 TTFT 为 4 ms，平均间隔为 `null`。示例 SLO 取 TTFT ≤ 5 ms、请求平均间隔 ≤ 20 ms，只有 C 通过，goodput 为 25 req/s 和 25 token/s。E 的 TTFT 为 `null`。
+- 投机另设手算样本。DFlash 的 `(proposed, verified, accepted, committed)` 可取 `(3,3,0,1)`、`(3,3,3,4)` 及输出上限截断的 `(2,2,1,1)`，接受长度直方图的 0、1、3 档各有 1 轮。MTP 用独立的 `(1,1,0,1)`、`(1,1,1,2)`。baseline 没有投机轮。
+- 残差样本以 `[10,50)` 为墙钟，两种资源的已解释区间为 `[10,20)`、`[18,25)`、`[40,50)`。并集为 25 ms，未解释为 15 ms。不能对齐时钟的变体应输出未知。
+- 负例至少覆盖逆序时间、重复输出、缺失轮引用、接受数超过校验数、混用时钟、采集身份不匹配，以及模拟合成数据被标记为硬件实测。
+
+从仓库根目录复现当前完成吞吐口径，输出单位为 token/s。
+
+```powershell
+py -3.12 -c "from simverse.execute.reduce import throughput_tokens_per_ms as t; e = {'A':[8,20,20,50],'B':[10,30,48],'C':[16],'D':[45],'E':[]}; print(t(e, ['A','B','C'], 10, 50, 'completed_requests') * 1000)"
+```
+
+实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付验收第一阶段的设计和手算对照。窗口过滤修复、导入器、采集结果和硬件门槛仍待各自验收。
+
+## 上游参考
+
+- 阅读了活跃的 vLLM 仓库在 `11aa1369` 的服务基准归约及模拟流测试。借鉴成功请求筛选、区分服务端与客户端时间、剔除无内容流块和覆盖单 token 边界。本仓保留半开窗口、实际提交序号和显式缺值，避免将客户端分块统计直接当作服务端逐 token 指标。所查代码与测试为源码阅读。 [基准源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/benchmarks/serve.py) · [时序测试](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/tests/benchmarks/test_endpoint_request_func_timing.py)
+- vLLM 官方说明区分提议数、校验数和接受数，部分版本可导出逐轮列表。按实际采集版本核查字段，再与服务端提交事件对账。现有 DFlash 双栈核对和 MTP 头映射仍分别作为实现证据。 [接受统计](https://docs.vllm.ai/en/latest/features/speculative_decoding/acceptance_metrics/) · [DFlash 服务栈审查](dflash-serving-audit-20261112.md) · [MTP forward 映射](qwen36-mtp-forward-20261113.md)

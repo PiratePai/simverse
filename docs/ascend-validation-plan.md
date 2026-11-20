@@ -1,64 +1,30 @@
-# 昇腾优先：少卡 forward、测试与 profiling 校对计划
+# 昇腾验证计划
 
-更新：2026-11-18；本文件补充 [ROADMAP](../ROADMAP.md) 的 C/D 组与 R02b/R03。
-**新增设备与采数投入先昇腾、后 NVIDIA**。先用已有 910B3 双卡建立可信闭环，再逐
-SKU 接 910C/950DT/950PR；后几款没有匹配规格/实现证据时保持候选。H100/H200/L40
-已交付功能继续回归；NVIDIA 新卡和新 profile 后排，不作为昇腾工作的前置条件。
-910B3、910C、A2/A3 系统和 950 的能力不能相互继承，尤其不能把 CUDA SM 数填作 NPU 核数。
+更新于 2026-11-20。新增设备与采数优先 910B3。后续 910C、950DT 和 950PR 按 SKU 单独登记，H100/H200/L40 保留现有回归。910B3、910C、A2/A3 系统和 950 的能力分别验收，CUDA SM 数与 NPU 核数分开登记。工程优先级见 [待开发计划](../ROADMAP.md)。
 
-## 1. 已有证据与下一批交付
+## 1. 已有证据与交付顺序
 
-### 成本组简化后的验收顺序（2026-11-18）
+910B3 已提供继承旧仓假设的 BF16 解析档，工作台可选择目标和 DT 草稿设备。V4.1 和未支持的量化路径会被拒绝。R28 与 R29 为局部归档，R29 留有 TP1、物理卡 5 的少层随机权重 fixture 产 token 记录。真实 checkpoint、实际后端数值、TP2/EP2 集成与容量未验收。AllGather 的规范化分子、逐头 MRoPE、来源完整性和容量解释仍需修正。原始归档与派生审查同时保留。见 [910B3 解析档](validation/ascend-910b3-device.md)、[R28](validation/ascend-910b3-20261117.md) 和 [R29 审查](validation/ascend-910b3-r29-review.md)。
 
-已有解析、条件记录和归档 profile 已统一成本路径，见[简化说明](validation/cost-group-simplification-20261118.md)。
-细粒度计数保留；耗时优先按有依据的融合/模块组验收，不要求为每个逻辑行采时。
+解析、条件记录和归档 profile 已共用计数与成本选用路径。工作台默认展示成本组，按原始账本保留细粒度计数。R28 GEMM 和 R29 通信沿用各自的条件对照档。R30 [PR #26](https://github.com/PiratePai/simverse/pull/26) 仍开放。分支重建报告记录六个 run 的 42 条消费文件哈希及 GroupedMoE/KV-write 剩余量。原件在仓库外，`--check` 校验派生产物。正式成本需要补运行身份和组归属。见 [成本组简化说明](validation/cost-group-simplification-20261118.md)。
 
-| 对应事项 | 调整后交付 | 仍需满足的边界 |
-|---|---|---|
-| PR #26 / #28，P0 | 先归档并哈希实际消费的 kernel_details/op_statistic/step/analysis 数据，恢复 batch/M/阶段/角色关联；可恢复的元数据不重测 | 六个 run 的来源闭环，原始包不覆盖；未分配 GroupedMoE/KV-write 不能从核总时长静默排除；摘要不是原始证据 |
-| #29，P1 | 接入可核验的投影融合组总耗时和成员集合，核对 split/norm/rope 归属 | 不按 K/N 汇总、宽度或调用数拆成伪逐行实测；组域不能混 dtype、prefill/decode/verify、目标/草稿 |
-| #30，P1 | 单列 graph/host/sync/拷贝等边界开销组，保留未解析项 | 一个时间区间只收费一次，已含在事件括号内的间隙不再相加；不靠核时间百分比推 E2E/launch |
-| #27，独立推进 | 实际设备/软件栈指纹与官方 dense 规格分别收集 | 910B3 继承解析档继续可用；实际组审计不等待官方峰值，正式成本适用域仍需匹配硬件与实现 |
-| #31，P2 | 历史三模型包只作显式离线归档、parser/回放回归 | 不扩活跃模型目录，不将历史 profile 迁给两款重点模型 |
+| 优先级 / 任务 | 具体交付 | 验收 |
+| --- | --- | --- |
+| P0 / A-N1a 采集整改 | 新 run ID 和目录，拒绝覆盖。归档 runtime commit/dirty diff、本地 warmup 补丁、CANN/驱动版本、拓扑、输入、脚本哈希、完整命令、退出码及日志。修复 ACL 错误码、collective mismatch、KV/路由失败的汇总。 | 离线拒绝返回码非整数或非零、shape 不符、缺 rank 和缺必需元数据。manifest 覆盖实际脚本与原始文件，提交后逐字节校验。R29 的 hash 差异继续单列。 |
+| P0 / A-N5a R30 来源审计 | 复核六个 run 的 kernel_details/op_statistic/step/analysis 哈希及原件可取得性。补 batch/M、阶段、角色、权重 revision 和 warmup/step 边界，按 [#28](https://github.com/PiratePai/simverse/issues/28) 恢复可查的身份信息。 | 离线审计可独立交付。缺源、缺归属和未分配时间显式记录，GroupedMoE/KV-write 继续计入未分配项。原始包与现有摘要单独保存，源链未闭环时保持 audit-only。 |
+| P1 / A-N1b 逐头 MRoPE | 按头 reshape 后旋转。Q/K 的每个 head、位置与频率带分别核对，identity 对照独立 T 行，NeoX 带用 `j/j+32`。先核对融合接口和 vLLM 调用链，再定位 161002。 | 非零位置逐 head 检查 abs/rel/finite，错误布局和 section 必须拒绝。保留融合与非融合的证据边界。可复用已 pin 的 R26 CPU oracle。 |
+| P1 / A-N2a 后端数值与状态（R06/R08） | 固定 vLLM、vLLM-Ascend、CANN、torch_npu 与 runtime patches，沿用成功日志中权重 0.32 GiB 的小 fixture，显式限制 KV budget。先单卡，再分别验收 TP2 与 EP2。V4.1 继续核对可执行路径、量化和配方。 | 对照 GDN/full-attn/MoE 中间张量，至少 16 步 cached decode vs 重算，检查 chunk 边界与拒绝后状态回退。EP2 验证实际 NPU SwiGLU 专家核、空/偏斜专家、重复/漏 token 与逆置换。完整 checkpoint 与随机少层 fixture 分别登记，域外路径在预检拒绝。 |
+| P1 / A-N3a 同栈容量与通信（R02b/R03/G-D7/R17） | 同进程记录 init/load/KV/warmup/capture/replay/release。graph 加 clone-only 对照及输出检查。AllGather 统一逻辑字节分子，保留联合批 ID、两 rank 最慢窗口与真实 transport。 | weights/KV/runtime/HCCL/graph/allocator 与 free 分列，实际 serving 栈按 rank 验证已知峰值与未知项。旧 100 项 exact 观测按原用途保存，按缺失载荷和独立重复补点。小实例容量只支持匹配域内判断。 |
+| P1 / A-N4 设备与实现（R15/R16） | [#27](https://github.com/PiratePai/simverse/issues/27) 固定实际 board/SKU 和软件栈指纹，核验官方 dense 规格、单位、精度与 Ascend 专用量化和 lowering 配方。 | 有来源证据和不支持精度的负例。继承解析档可继续使用，正式成本依赖匹配身份。离线组归属审计可并行。 |
+| P1 / A-N5b 成本组（R08/R18） | [#29](https://github.com/PiratePai/simverse/issues/29) 核对投影融合组的总时长、成员集合及 split/norm/rope 归属。[#30](https://github.com/PiratePai/simverse/issues/30) 核对实际 MoE permute/dispatch、GDN、数据搬运及 graph/host/sync 的边界。按解析回退权重选补采点。 | 组域匹配 dtype、prefill/decode/verify、目标或草稿角色。每段时间只记一次，事件区间已含的间隙不再加计，无法归属的时长保留 unknown。融合总时长不按宽度或调用数分摊。正式校准还需按 shape 去重留出、域外回退，原始计数守恒。 |
+| P1 / A-N6 匹配 E2E（R07b/R09） | 复用 [端到端 trace 验收方案](validation/r07b-r09-trace-acceptance.md) 的字段和离线样本。上机前固定真实权重、精度、后端、容量和服务支持，分别采 baseline、DFlash 与 MTP。 | 按事先冻结的场景阈值核对 TTFT、ITL、吞吐、每 rank 峰值与未解释残差。缺方法配对、请求轨迹或时钟归因时保留缺项。 |
+| P2 / 历史归档 | [#31](https://github.com/PiratePai/simverse/issues/31) 的三模型包用于离线 parser 和回放回归。 | 历史 profile 按原模型、实现和采集域绑定。 |
 
-补采按组的解析回退权重、真实原语与未知原因排序。优先来源修复、实际 MoE/GDN/attention、
-链路启动与运行时边界；TP4/8 继续等待匹配资源。只有当前元数据无法恢复或统计目标改变时
-新建采集 run，不要求重新铺满全部形状网格。后续硬件运行仍需设备与窗口授权。
-
-910B3 可选解析档已先行交付，来源、单位与边界见 [旧仓参数迁移](validation/ascend-910b3-device.md)。目标与 DT 草稿选择器可选，Qwen3.6 使用 BF16；不支持的 V4.1/量化路径明确拒绝。设备可选不等待整模验证；A-N4 仍需补官方 SKU/后端配方，A-N1–3/5–6 的验收条件不变。
-
-PR #21（R28）与 PR #23（R29）均作为局部、未准入采集归档。R29 已补 ACL 返回码/context 和 ReduceScatter list 形状，并记录 TP1 少层 fixture 产出 token；但 AllGather 规范化、逐头 MRoPE、来源完整性、实际后端数值与容量仍有缺口。以 [R29 审查](validation/ascend-910b3-r29-review.md) 与派生 review.json 为准，采集时报告保留作历史材料；不把原 manifest 的「A-N3 未执行」或原文「7/7」当作整体状态。
-
-**下一批按以下可独立验收的小项推进，不重新跑已无问题的全部网格，也不因误读 OOM 先缩小 fixture。** 本轮审查没有执行硬件任务；后续 NPU 执行仍需明确设备与运行窗口。
-
-| 次序 / 子项 | 具体动作 | 验收与边界 |
-|---|---|---|
-| P0 / A-N1a 来源与采集器 | 新 run ID + 新目录，拒绝覆盖；归档 runtime commit/dirty diff、本地 warmup 补丁、CANN/驱动实际版本、各尝试完整命令/退出码/日志；修复 ACL 非 int/非零返回码、collective mismatch、KV/路由 flag 不进入失败汇总 | 离线坏返回码/坏 shape/掉 rank/metadata 缺失必须失败；manifest 覆盖最终脚本且提交后离线逐字节检查。R29 日志 hash 差异不能靠重新计算原 manifest 消除 |
-| P0 / A-N1b MRoPE | 每头 reshape 后旋转；Q/K、head0–末头、位置与频率带逐项独立 oracle；identity 对照独立 T 行，NeoX 带用 j/j+32；先核实融合接口与实际 vLLM 调用链，再定位 161002 | 非零位置对全部 head 逐元素 abs/rel/finite，尾部按 head 比较；已 pin R26 CPU oracle 可先行。错误布局/section 必须拒绝。非融合成功不升格为融合或模型集成通过 |
-| P0 / A-N2a 实际后端数值与状态 | 沿用小 fixture（成功日志权重 0.32 GiB），显式限制 KV budget；先单卡，再 TP2。归档每次失败与成功；GDN/full-attn/MoE 中间张量、cached decode vs 重算、chunk 边界与回退；固定 runtime patches 后与独立参考对照 | TP1 产 token只算执行接线；TP2 与 EP2 各自验收。至少 16 decode 步、空/偏斜专家、重复/漏 token、逆置换与实际 NPU 专家核；玩具 CPU GELU 路由不能代替 Qwen SwiGLU/真实分片 |
-| P0 / A-N3a 同栈容量与通信补点 | 同一进程记录 init/load/KV/warmup/capture/replay/release；graph 加 clone-only 控制与输出 finite/等价检查；通信修 AllGather 分子、记录统一逻辑字节和联合批 ID、两 rank 最慢窗；补实际 transport | weights/KV/runtime/HCCL/graph/allocator 与 free 分列，峰值不重复相加；free 差不当分配粒度。只补必要点/独立重复，旧 100 项 exact 观测保留，但未证明跨 rank 同步窗口/拓扑 |
-| P1 / A-N4→A-N5 | 设备/实现独立登记；并行准备 trace parser、ownership 和差异表；身份与正确性通过的局部算子才接生产成本 | 原始计数不变、计时边界分栏、按 shape 去重留出、域外回退；不等待整模即可做局部审计。R29 本身不作生产 profile |
-
-这些交付未解除 G-D7、R02b、R17、R18，也未证明完整模型在 NPU 执行。R28 原审查仍见 [报告](validation/ascend-910b3-20261117.md)。
-
-| 顺序 / 任务 | 具体交付与依赖 | 通过条件；不能推导的结论 |
-|---|---|---|
-| P0 / A-N1 采集整改（R28 后续） | 修正 ACL 返回码/context、通信 shape/校验、graph 基线、MRoPE 分段；独立目录保存新 run；补版本、拓扑、输入与脚本哈希 | 原始样本可离线重放，返回码与数值正确；旧数据只归档，不覆盖为“重测成功” |
-| P0 / A-N2 昇腾 forward 路径（R06/R08） | 固定 vLLM + vLLM-Ascend + CANN/torch_npu 组合；逐一核对模型注册、config、GDN/attention/MoE/量化/KV 路径；提供预检与显式执行入口 | 少层随机权重与完整 checkpoint 两种身份分开；无匹配 kernel/型号立即拒绝。源码映射/离线接线不冒称 NPU 已运行 |
-| P0 / A-N3 1–2 卡正确性与容量（R02b/R03/G-D7） | 先做下表无权重/局部层测试；同一进程分阶段快照，实际 serving 栈 budget + workspace/graph/HCCL | 数值 oracle、分片重组、状态守恒；每 rank 已知峰值及未知项分栏。小样例可分配不代表整模 feasible |
-| P1（昇腾第一顺位）/ A-N4 设备与实现档（R15/R16） | 独立 Ascend 设备身份、官方 dense 规格及能力；NPU 核/引擎字段与 CUDA sm_count 分离；平台特定量化/lowering recipe | 来源与不支持精度负例；不得复用 Marlin/FlashMLA SM90 调度器为 Ascend 实现，也不得用实测峰值填 spec |
-| P1（昇腾第一顺位）/ A-N5 profiling 校对与局部校准（R17/R18） | 先提供原始 trace 审核、映射与差异表；只有设备/实现/形状域匹配后才接 CalibratedPricer | 行数/时间双覆盖、去重留出、域外回退、原账本不变；可独立交付局部校对，无需等待整模 |
-| P1 / A-N6 匹配 E2E（R07b/R09） | 权重、显存、后端集成条件满足后，固定 workload 实测 prefill/decode/verify 与接受长度分布 | 按 TTFT/ITL/吞吐/显存误差验收；没有真实配对和请求轨迹时保持缺口。DFlash/MTP 单独核对 |
-
-本轮 A-N2 已交付 `tools/ascend_forward_probe.py` 的 Qwen3.6 fixture/本地权重入口与离线门禁；R29 有 TP1、物理卡 5 的 fixture 成功记录，来源仍有限，数值正确性、TP2 集成和完整权重身份未验收。V4.1 仅交付明确阻断的部署计划，没有将 V4 或双 910B3 代理冒充整模。
-
-A-N1/A-N2/A-N3 可按模块推进；A-N5 的离线 parser/映射工作可先做，生产成本准入依赖
-A-N4 和匹配采数。没有足够显存加载整模时不等待扩容，转入以下少卡路径。
-本计划没有启动远端硬件任务；采集需在明确指定的设备与运行窗口执行。
+`tools/ascend_forward_probe.py` 已提供 Qwen3.6 fixture、本地权重入口和离线预检。V4.1 当前只提供带阻断原因的部署计划。运行需明确设备与窗口，资源有限时按下节拆分验证。
 
 ## 2. 无法全量跑时，分别能测什么
 
-### 记录接入后的补采顺序（2026-11-17）
+### 按解析回退权重补采
 
 按 [七场景回放](evidence/ascend-record-costs/coverage-plan.json) 与当前 run 的 `cost.record_cost.measurement_plan` 排序。以下只调整采测计划，没有授权或启动硬件执行；解析回退权重是缺口定位依据，不当成实测瓶颈。
 
@@ -126,7 +92,7 @@ record_function 或后端已有标记、correlation ID、stream、rank、step �
 | communication | 每 rank 的 transit/wait/sync/idle、消息尺寸、collective 类型、最慢 rank | algbw 与规范化 busbw 分开，按 collective 定义；不能把所有 wait 当链路慢；跨 rank 时钟未校准不得直接拼全局时间 |
 | 单步/阶段 | prefill/decode/draft/verify 的起止窗、stream interval union、依赖 critical path | kernel 总和不等于 step wall time；通信和计算重叠用区间/依赖去重，不能简单相加后再套统一 overlap 比例 |
 | 容量 | init、load、KV、warmup、capture、replay、steady、release 的 allocated/reserved/free/peak | 对象可见峰值与设备 free 差分开；同生命周期重叠取真实峰值，非共存对象不简单求和；预算扣减与 overhead 避免重复 |
-| E2E | 真实请求 TTFT、逐 token ITL、吞吐/goodput、tail、峰值内存 | 核对到达轨迹与输出 token 数、排队/组批；无服务/请求 trace 时不做 E2E 精度声明 |
+| E2E | 服务端 TTFT、ITL、吞吐、goodput、尾延迟和峰值内存 | 按 [端到端 trace 验收方案](validation/r07b-r09-trace-acceptance.md) 核对窗口、请求状态、输出序号及 token 或分块粒度。局部 R28/R29 成本和 R30 离线审计只用于各自证据范围。 |
 
 输出逐行 `analytic_base / observed / selected / boundary / ownership / error /
 coverage / fallback_reason / evidence_ref`，以及按模型、阶段、算子、rank 的差异表。
@@ -148,8 +114,7 @@ coverage / fallback_reason / evidence_ref`，以及按模型、阶段、算子�
 5. 开/关校准重放确保 Work/Traffic/Memory 逐字段不变；成本所覆盖的部署域有预算与
    数值证据后再讨论排名。原 PR21 的代理、冲突结果和缺元数据摘要不进入训练/留出。
 
-工程交付的导入/差异报告/覆盖与回退信息须在工作台可查看并导出；本轮只增加规划和
-离线验证/采集工装，不宣称已实现 profiling 导入 UI 或 NPU 生产校准。
+导入后的差异、覆盖与回退信息应能从工作台查看和导出。R30 分支的离线审计界面按 audit-only 验收，NPU 生产校准独立验收。
 
 ## 4. 官方实现参考与取舍
 

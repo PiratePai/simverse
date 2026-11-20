@@ -2,6 +2,10 @@
 
 当前开发优先级见 [待开发计划](../ROADMAP.md)。
 
+## 2026-11-19 仓库审视
+
+审视基线 `main@d8dfbfc`，Windows / Python 3.12 全量 580 项通过。额外检查复现了 wheel 缺生产资产、无效场景请求返回 500、扫描跨缺失点插值、比较资格缺证据放行以及导出时间轴以 0 ms 表示未计价阶段。入口与比较问题已通过 [R10 验证](validation/entry-scan-compare-fixes-20261119.md)。未计价阶段与 trace 兼容的修正见下方 2026-11-20 记录。
+
 ## 2026-11-18 成本组与统一选用路径
 
 新增 CostSession，移除条件记录的二次全量求值；一次计数/lowering/容量/解析定价，缓存阶段成本
@@ -30,7 +34,13 @@ TP8 全回退与组 CSV；下载的 7 组与同场景 API/CLI 导出逐字段相
 - 新结果的同卡清单读取 `cost.memory.colocated_ranks[i]`，M06 与能力检查名称沿用原格式。选用时间轴、流水模拟与解析结果相同的场景直接读取顶层 `execution` 和 `cost.pipeline_sim`。有差异时读取 `cost.selection` 中的对应字段。旧结果仍可从文件导出。
 - 历史回放入口统一调用 `a457c76` 的实现。Windows / Python 3.12 全量 679 项、Chrome 3 项、15 个冻结场景、Ascend 7 个回放场景和 H200 9 个对照点通过。15 个冻结场景按原序列化口径核对已有数值与库存摘要。未新增硬件测量。
 
-## 2026-11-20 重复实现与入口归整
+## 2026-11-20 R07b/R09 方案验收
+
+已核对请求轨迹可复用的归约、事件校验、导出和成本蒸馏入口。已约定三路配对、字段、时间边界、离线手算和真实采集准入条件。手算样本已复现完成吞吐的跨窗计数缺口。窗口过滤修复、离线请求导入、TTFT 归约和上机采集仍待实施。 本轮文档验收核对了 106 项仓内链接、5 个源码工作台文档路由和手算样本。Windows / Python 3.12 全量 679 项通过。见 [端到端 trace 验收方案](https://github.com/PiratePai/simverse/blob/main/docs/validation/r07b-r09-trace-acceptance.md)。
+
+## 2026-11-20 重复实现与入口归整（PR #34 历史记录）
+
+以下记录 PR #34 合入时的入口和结果口径。后续变更见本页 2026-11-20 KV 计数与合入后复查记录。
 
 - GQA 的目标与草稿计数、显存和分片说明共用每 rank 几何计算。同卡与 baseline/DT 复用目标端显存对象组装，分别保留自己的草稿驻留和预算契约。
 - 接受率由方法层校验，HTTP 和 CLI 解码复用同一规则。空逐位接受率在入口给出字段错误，经 `run_v2` 直接调用时返回失败结果。默认扫描保留 27 个输出点，按完整场景摘要在请求内复用求值，实际运行 25 次。
@@ -152,7 +162,7 @@ norm BF16 未量化 + ≤SM90 Marlin W8A16/W4A16 执行域激活 BF16；scale_fm
 **pytest 收集数：679**（2026-11-19 R10 两批：批次二扫描/比较 36 项（tests/test_scan_compare_r10.py：sweep 口径配对与回退、find_crossover 手算锚点、统一资格矩阵与口径核对正负例）+ 批次一入口修复 56 项：tests/test_entry_points_r10.py——wheel 资产定位/清单、共享预设三入口digest 一致、run/sweep 畸形输入 4xx 字段路径、根目录文档白名单；2026-11-18 成本组回归 11 项）；历史收集说明：（`py -3.12 -m pytest --collect-only -q tests`，2026-11-17 R29 审查：543→550 = 离线证据回归7项；此前 R28 路径移植542→543；516→542 = 证据5 + forward21；此前两项任务集成516。469→495 = R27 cost-integrity 26 项（tests/test_cost_integrity_fixes.py 回归 20：路由/元数据/期望字节/chain/警告保留/身份/隔离/计数不变；tests/test_v41_quant_numeric_r27.py 数值 fixture 6：e4m3/e2m1/e8m0/MXFP4 打包双解码器/W8A16 反量化 GEMM 等价/SwiGLU 随机模糊）。2026-11-16 R25+R26 合并时为 469；442→469 = R25 注意力核本体 27 项（tests/test_v41_csa2_core.py：pin 1、调度器锚点/独立重演/负例/块公式 7、decode 手算绝对 5、prefill 手算 3、守恒/瞬态/设备 3、device_sms 拒绝 1、replay 冻结 1、门禁事实 2）；425→442 = R26 文本 MRoPE 语义 17 项（tests/test_qwen36_mrope_r26.py）；424→425 = 草稿私有专家位宽与驻留守恒回归 1 项；399→424 = R23 原生 MTP 25 项；367→399 = R24 SwiGLU/尾部 oracle 32 项；365→367 = R22 验收回归 2 项；334→365 = R22 量化映射 31 项）。
 R23 验收修复：MTP 私有层 count/cost/通信改用 `draft_quant`（与 memory 原有口径一致），共享目标 `lm_head` 继续按目标位宽读取与计价；伪模型重复登记的 final norm 驻留对象移除。固定 K=1/TP8 replay 的草稿专家 `weight_read_expected` 1,572,864→3,145,728 B、M01 66.96182490→66.96209320 ms、steady 2,841,006,528→2,841,004,480 B；target_decode/verify 冻结。`replay_qwen36_mtp.py --check` 现同步校验成本、归因和指标，避免只比较 work totals 漏掉成本漂移。来源仍为 R23 vLLM @`10a854ed`/SGLang @`1b2870d` pin；本次未执行 vLLM/SGLang 模块或 GPU 测量。
 R22 验收修复：`_coverage` 为未知 `quantization_config.*` 叶键登记 unsupported-semantic 与 gap；V4.1 仅移除已映射的 5 叶键及容器缺口，避免未来新增语义被静默放行。`ScenarioV2` 的部分 `draft_quant` 覆盖改用草稿默认档（expert_w=8），避免继承主模型的 expert_w=4。来源仍为 R22 固定 vLLM @`f358f057` 的源码 pin；本修复只调整本仓覆盖门禁与场景默认值，未执行 vLLM kernel、CPU forward 或 GPU 测量；两款主模型的部署排名限制不变。
-工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/（生产 v0.2 首页 /；/legacy 为 v0.1 历史存档）。
+工作台 `py -3.12 -m simverse.cli serve` → http://127.0.0.1:8765/。v0.2 首页为 `/`。v0.1 离线重放使用 `simverse archive`。
 合入准则：[MERGE_CRITERIA.md](MERGE_CRITERIA.md)（G1–G17 门禁在 tests/test_merge_gate.py，测试数与本文件一致性由 G6 强制）。
 
 **2026-11-17 两项任务集成审查**：495→515 = 工作台回归 20 项；515→516 = 逐行计价覆盖集成回归 1 项。审查发现原 top-40 仅覆盖 Qwen 27 类中的 4 类及 V4.1 51 类中的 3 类，新增 `cost.row_prices` 全行计价摘要，透视与 CSV 优先使用该字段；原 `cost.roofline_points` 保留 top-40 供历史证据兼容。文档路径锚定改用 `Path.is_relative_to`。全量验收见本轮合入记录。
@@ -591,7 +601,7 @@ Windows 管道 stdio 使用 ANSI 代码页 cp1252，`simverse.cli export` 在写
 通过证据。修复文件尚未提交/推送；PR #1 现有检查仍是修复前失败记录，远端重跑
 由外层执行。
 
-## 0. 当前有效状态（2026-11-10 两模型门禁轮）
+## 0. 2026-11-10 两模型门禁轮记录
 
 - **活跃目录恰两款**：`deepseek_v41_flash`、`qwen36_35b_a3b`，加绑定 Qwen3.6 的
   `dflash_qwen36_35b_a3b` DraftIR。`qwen3_30b_a3b`、`qwen3_235b_a22b`、
@@ -963,21 +973,15 @@ Qwen3-235B-A22B 官方身份入册（HF main @8efa6172，config SHA256 0ecd5d6f�
 - **一键**：双击仓库根目录 `启动工作台.bat`（起服务+开浏览器，可选端口参数；
   重复双击=只开浏览器；`停止工作台.bat` 停止）。已实测 冷启动/已在运行/停止 三路径。
 - 测试：`py -3.12 -m pytest tests -q`
-- 工作台：`py -3.12 -m simverse.cli serve`（/ 生产、/legacy 旧视图）
+- 工作台使用 `py -3.12 -m simverse.cli serve`，首页为 `/`。
 - 必需场景：`py -3.12 -m simverse.cli run-v2`（内置默认=Qwen3.6+DFlash colocated）
-- v0.1 存档重放：`py -3.12 -m simverse.cli run`（legacy）
+- v0.1 存档使用 `py -3.12 -m simverse.cli archive run`，传入 v0.1 场景文件。
 - 证据产物（已入册 docs/evidence/）：workbench_desktop_run.png、
   workbench_mobile_run.png、run_v2_qwen36_dflash.json、ops_v2.csv、
   trace_v2.csv、report_v2.html（历史轮）；A 组轮：
   run_v2_qwen36_dflash_agroup.json、ops_v2_agroup.csv、
   trace_v2_agroup.csv、report_v2_agroup.html、workbench_ep_budget_run.png。
-- 下一工作项：V4.1 量化执行变体（Humming/SM100/emulation）、
-  稀疏 MLA 专门 decode/SM100 执行变体、MoE 部署变体（MegaMoE/DSpark 草稿 MoE）、
-  Engram DP 分片交换路径（或显式永久登记单副本口径）；Qwen3.6 MTP
-  模型级执行验证；两款主模型 CPU forward 与 GPU 实测；DFlash 服务端集成/
-  运行时池尺寸；可分配预算 G-D7；G-D4/G-C2 prefill/verify 形状域；
-  G-C4 单请求超前 → M17；
-  V09b 三方对账。历史 235B MoE 蒸馏仅作归档研究，不再是产品优先项。
+- 当前缺口与交付次序见 [待开发计划](../ROADMAP.md)。
 
 
 ## 2026-11-10 产品范围收敛
