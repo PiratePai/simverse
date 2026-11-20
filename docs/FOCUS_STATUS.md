@@ -1,14 +1,10 @@
-2026-11-19 R10 入口/扫描/比较修复：wheel 安装（统一资产定位 + CI 冒烟）、共享默认
-预设（CLI/API/工作台同源，digest 对齐）、run/sweep 结构化输入校验（4xx 带字段路径）、
-状态页根文档白名单；sweep 指标口径配对（默认选用/显式解析/旧结果回退明示）与
-find_crossover 确定性规则；管线与 compare_runs 共用一套按场景适用域的部署资格判定
-（必需证据缺失=unknown，预算未知/假设/OOM 不排名）与指标口径核对（不相容不给相对
-变化）。数值与既有锚点零漂移（R27 replay --check 通过）。详见
-[报告](validation/entry-scan-compare-fixes-20261119.md)。
+# 重点模型与功能状态
 
-当前开发优先级见 [待开发计划](../ROADMAP.md)。
+当前开发顺序见 [待开发计划](../ROADMAP.md)。昇腾采集、准入与硬件边界见 [昇腾验证计划](https://github.com/PiratePai/simverse/blob/main/docs/ascend-validation-plan.md)。
 
-# 重点模型与功能状态（2026-11-10；2026-11-11 R04、2026-11-12 R06、2026-11-16 R25 增补）
+2026-11-20 已修正 CUDA GQA 分片、DFlash 未计价阶段和 Engram GPU 侧耗时下界。旧 v0.2 trace 可回读，工作台保留最近运行状态。仓库已有请求指标归约函数，真实请求轨迹仍待接入。见 [实施状态](IMPLEMENTATION_STATUS.md)。
+
+2026-11-19 R10：wheel 安装、共享预设、场景输入校验、工作台文档导航与扫描比较资格已通过验收。现有解析数值锚点通过回放。见 [R10 验证记录](validation/entry-scan-compare-fixes-20261119.md)。
 
 2026-11-18 建模简化：解析、条件记录和历史 profile 共用一次计数与成本选用路径，默认展示成本组；
 逐行计数/诊断折叠保留，融合组不分摊伪造逐行实测。KPI/扫描/时间轴/导出使用统一选用口径，
@@ -123,38 +119,23 @@ k_norm 堆叠按草稿 config dtype（bfloat16→2B/elem，1,536 B）计，
 
 | 能力 | 范围与限制 |
 |---|---|
-| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 config 全覆盖、主干关键分支 + 原生 MTP 头（R23，双栈 pin）source-checked；V4.1 Engram 单副本路径 + hc（R04）与 CSA2 索引打分/top-k/candidate（R20）、MoE 路由（R21）、量化映射（R22）已 source-checked 建模（Engram DP 交换/cpu_offload 运行时、注意力核本体/swiglu 仍缺口；Qwen3.6 文本 MRoPE 已 R26 source-checked、多模态 2D 域外）；四栏证据见 JSON |
-| Qwen3.6+DFlash | pinned 草稿、接受律、draft/verify 解析成本、同卡与 DT 串行；非实测收益；CPU 仅 R06 fixture 级对照（模型级未执行），GPU 未执行 |
+| 身份、ModelIR、配置覆盖与逐算子账本 | Qwen3.6 配置已覆盖，主干、原生 MTP（R23）与文本 MRoPE（R26）已有源码证据，多模态 2D 域外。V4.1 配置已覆盖，Engram 单副本、mHC、CSA2 索引与注意力核、MoE 路由、量化映射和 SwiGLU 已建模。Engram DP 交换/CPU offload 运行时以及其他执行变体仍待验证，`structure_complete=False`。 |
+| Qwen3.6+DFlash | 固定草稿，同卡、DT 串行与流水解析估算。同卡服务路径已有源码核对，真实接受分布和配对硬件 E2E 尚未验收。 |
 | **per-rank TP/EP 配方（A组 R01）** | vLLM @dc74b8cb pin（FusedMoE inter/tp 或 E/ep 整专家、router 复制、KV 头切/复制、GDN 切分、词表行切、DFlash 同 TP 组共享 embed/lm_head、lm_head logits_gather）；ep∉{1,tp} 显式拒绝 |
 | **同卡对象账本（R02a/b）** | 物理 allocation 身份 + consumer 引用（草稿共享 target embed/lm_head 零额外驻留；vLLM fused ctx-KV 副本入账）；生命周期分列（常驻/每请求/跨轮/阶段临时）+ 峰值取阶段 max；workspace/graph/NCCL 池为缺口组件传播（不填 0） |
 | **预算契约与判定（R03a/b）** | nominal/allocatable(measured/hypothesis)/额外开销分列；四态判定 unknown/oom/feasible/conditional；已知下界超标称即 OOM；假设预算不进实际部署排名 |
 | mHC / Engram | mHC kernel 源已 pin，Sinkhorn 算术公式精确、norm 惯例近似（R05；部署变体/物理执行未覆盖）；Engram 素数桶表/哈希/查表/wkv/门控已建模（R04；表位置 cpu_offload 为研究假设，DP 分片交换未覆盖） |
 | DT 流水事件核 | 微批依赖、资源互斥、周期和利用率；非完整在线服务 |
 | 接受律与比较 | 显式假设、未知传播、资格门禁；不从平均接受长度推造完整概率律 |
-| CLI/Web/导出/扫描 | 共用生产结果、精度选择、EP 选择、预算输入、独立运行身份 |
+| CLI/Web/导出/扫描 | 共用 v0.2 结果、精度和 TP/EP 配置及预算输入。v0.1 重放使用 CLI 的 `archive`。 |
 | H200 校准基础设施 | **历史归档**：30B-tiny/235B 数据绑定已归档模型；跨模型使用直接拒绝，不能覆盖两款主模型 |
 
-## 待完成工程
+## 当前验证缺口
 
-1. ~~Qwen3.6 优先：统一 MoE per-rank TP/EP 配方~~（2026-11-10 A组 R01 完成）。
-2. ~~同卡显存复核（草稿 batch/共享去重/KV 分片/生命周期峰值分列）~~（A组 R02a/b 完成；运行时池尺寸证据仍缺，见下）。
-3. 可分配预算：契约已就绪（R03a），**真实 measured 数据仍缺**（G-D7）；解除前默认场景保持 unknown。
-4. ~~V4.1：获取并固定 Engram 实现、补查表/投影/参数/容量/跨层依赖~~（单副本路径 2026-11-11 R04 完成）；~~CSA2 索引打分/top-k/candidate block~~（2026-11-12 R20 完成）；~~MoE scoring/top-k/分组路由~~（2026-11-12 R21 完成，部署变体 MegaMoE/DSpark 草稿 MoE/padding skip 仍缺）；剩余 DP 分片交换/MXFP8 批路径/amd 变体、稀疏 MLA 注意力核本体、swiglu 缺口（量化映射已由 R22 2026-11-13 解除，执行变体见 G-C14），完整前不解除结构门禁。
-5. 请求级 lookahead、取消与浪费；在线到达/组批/抢占、KV 分页、Chunked Prefill/PD/Prefix Cache。
-6. ~~235B moe.csv TP8/EP1 准入~~：模型已移出活跃 catalog，只保留历史归档研究；
-   不再作为产品优先项。两款主模型缺匹配 profile，需新采集。
-
-## 待验证或需额外数据
-
-- 重点模型小尺寸 CPU forward 与计数的独立执行对照——Qwen3.6 的 GDN+MoE
-  fixture 级形状与算量对照已执行（R06，2026-11-12）；V4.1 侧与其余模块、
-  真实 checkpoint 级对照仍未执行。
-- Qwen3.6+DFlash 实际接受分布、draft/verify 延迟及服务栈配对验证。
-- 重点模型各精度/TP 的 GDN、MoE、attention 测量；历史 H200 profile 不能按名称相似迁移。
-- V4.1 Engram DP 分片交换路径与 mHC tilelang kernel 数值/操作边界（单机 Engram 已 source-checked）。
-- 实际可分配显存（G-D7）、非 KV 运行时开销（workspace/CUDA graph/NCCL 池尺寸，当前按缺口传播）、匹配 E2E 请求轨迹。
-- 浏览器交互与像素复核：2026-11-10 A组轮已实测 EP 选择/预算输入/运行链路
-  （截图 docs/evidence/workbench_ep_budget_run.png）；其余页面沿此前口径。
+- 两款模型需补真实 checkpoint 与匹配后端的数值、容量和 E2E 证据。Qwen3.6 已有小型 CPU fixture、文本 MRoPE 和 910B3 单卡 fixture 产 token 的局部证据。
+- DFlash 与 MTP 分别采接受分布、draft/verify/recovery 时延，并与同负载 baseline 配对。离线导入和人工轨迹可先验收。见 [端到端 trace 验收方案](https://github.com/PiratePai/simverse/blob/main/docs/validation/r07b-r09-trace-acceptance.md)。
+- G-D7 可分配预算、workspace/graph/通信池和实际拓扑仍待验收。已有 Ascend 条件成本记录与历史 H200 profile 按各自适用域使用。
+- 当前工程优先级及剩余工作台验收见 [待开发计划](../ROADMAP.md)。
 
 ## 历史轮次修复（2026-11-10 A 组；数值不自动继承）
 
