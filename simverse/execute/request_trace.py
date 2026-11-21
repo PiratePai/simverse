@@ -10,7 +10,7 @@ from math import isfinite
 from pathlib import Path
 
 from ..contracts import TimeBasis, digest
-from .reduce import (completed_request_ids_in_window, quantile_nearest_rank,
+from .reduce import (busy_integral, completed_request_ids_in_window, quantile_nearest_rank,
                      request_mean_itl, throughput_tokens_per_ms,
                      window_token_count)
 
@@ -18,6 +18,12 @@ NS_PER_MS = 1_000_000
 NS_PER_S = 1_000_000_000
 STATUSES = ("completed", "cancelled", "failed", "in_flight")
 METHODS = ("baseline", "dflash_v1", "mtp")
+ROUND_PHASES = {
+    "draft": {"role": "draft", "boundary": "speculator.propose"},
+    "verify": {"role": "target", "boundary": "kv_connector.pre_forward.entry_to_finish_forward.entry"},
+    "recovery": {"role": "target", "boundary": "postprocess_sampled"},
+}
+MEMORY_COUNTERS = ("allocated", "reserved")
 
 
 @dataclass(frozen=True)
@@ -216,6 +222,165 @@ def _ms(value):
     return value / NS_PER_MS if value is not None else None
 
 
+def _runtime_memory(row, backend, field):
+    memory = row.get("memory")
+    if memory is not None and backend != "native":
+        raise ValueError(f"{field}.memory 仅接受 native CUDA allocator 的计数")
+    memory = {} if memory is None else _object(memory, f"{field}.memory")
+    reason = "分配器不支持此计数口径" if backend != "native" else "缺少运行时显存计数"
+    counters = {}
+    keys = ("start_bytes", "end_bytes", "peak_bytes")
+    for name in MEMORY_COUNTERS:
+        if memory.get(name) is None:
+            counters[name] = {"peak_bytes": None, "reason": reason}
+            continue
+        counter_field = f"{field}.memory.{name}"
+        counter = _object(memory[name], counter_field)
+        counters[name] = {key: _integer(counter, key, counter_field) for key in keys}
+        start, end, peak = counters[name].values()
+        if peak < max(start, end):
+            raise ValueError(f"{counter_field}.peak_bytes 低于窗口边界读数")
+    for key in keys:
+        allocated, reserved = (counters[name].get(key) for name in MEMORY_COUNTERS)
+        if allocated is not None and reserved is not None and allocated > reserved:
+            raise ValueError(f"{field}.memory.{key} 的 allocated 超过 reserved")
+    return counters
+
+
+def _runtime_step(row, field, start, end):
+    step = _integer(row, "step", field)
+    ids = {}
+    for key in ("batch_request_ids", "verify_request_ids"):
+        values = _list(row.get(key), f"{field}.{key}")
+        if any(not isinstance(v, str) or not v.strip() for v in values) or len(set(values)) != len(values):
+            raise ValueError(f"{field}.{key} 须为不重复的请求 ID")
+        ids[key] = tuple(sorted(values))
+    batch, verified = ids.values()
+    if not step or not batch or not set(verified).issubset(batch):
+        raise ValueError(f"{field} 的轮 ID 或校验请求归属无效")
+    draft_count = _integer(row, "draft_tokens_to_schedule", field)
+    expected = ({"draft"} if draft_count else set()) | ({"verify", "recovery"} if verified else set())
+    spans = _object(row.get("phases"), f"{field}.phases")
+    if spans.keys() - expected:
+        raise ValueError(f"{field}.phases 存在未调度的阶段")
+    observations = {}
+    for phase, span in spans.items():
+        span_field = f"{field}.phases.{phase}"
+        span = _object(span, span_field)
+        stream = _text(span, "stream_id", span_field)
+        lo, hi, host_lo, host_hi = (_integer(span, key, span_field) for key in
+                                    ("start_ns", "end_ns", "host_start_ns", "host_end_ns"))
+        if lo > hi or not start <= host_lo <= host_hi <= end:
+            raise ValueError(f"{span_field} 的 CUDA 区间或主机窗口无效")
+        observations[phase] = (stream, lo, hi)
+    return step, (batch, verified, draft_count), expected, observations
+
+
+def _rank_timings(observed, expected_steps, reason):
+    summary = {}
+    for phase, expected in expected_steps.items():
+        samples = {step: phases[phase] for step, phases in observed.items() if phase in phases}
+        missing = sorted(expected - samples.keys())
+        durations = [hi - lo for _, lo, hi in samples.values()]
+        gap = None
+        if missing or not samples:
+            gap = reason or ("缺少轮内阶段时间" if missing else "无适用轮次")
+        summary[phase] = {
+            "sample_count": len(samples), "expected_count": len(expected), "missing_steps": missing,
+            "observed_p50_ms": _ms(quantile_nearest_rank(durations, 0.50)),
+            "observed_p95_ms": _ms(quantile_nearest_rank(durations, 0.95)), "reason": gap,
+        }
+    streams = {}
+    for phases in observed.values():
+        for stream, lo, hi in phases.values():
+            streams.setdefault(stream, []).append((lo, hi))
+    return summary, {stream: _ms(busy_integral(intervals)) for stream, intervals in sorted(streams.items())}
+
+
+def _summarize_runtime(data, manifest):
+    field = "runtime_observations"
+    data_runtime = _object(data[field], field)
+    tp = _integer(manifest, "tp", "manifest")
+    if not tp:
+        raise ValueError("manifest.tp 必须大于零")
+    ranks = _list(data_runtime.get("ranks"), f"{field}.ranks")
+    origin = _integer(data_runtime, "clock_origin_ns", field) if ranks else None
+    speculative = manifest["method"] != "baseline"
+    first_arrival = min((row["arrival_ns"] for row in data["requests"]), default=None)
+    last_terminal = max((row.get("terminal_ns") or row["arrival_ns"] for row in data["requests"]), default=None)
+    rank_summaries, rank_steps, all_steps = {}, {}, {}
+    expected_steps = {phase: set() for phase in ROUND_PHASES} if speculative else {}
+    for i, row in enumerate(ranks):
+        row_field = f"{field}.ranks[{i}]"
+        row = _object(row, row_field)
+        rank = _integer(row, "rank", row_field)
+        if rank >= tp or rank in rank_summaries:
+            raise ValueError(f"{row_field}.rank 超出 TP 范围或重复")
+        window = _object(row.get("window"), f"{row_field}.window")
+        start, end = (_integer(window, key, f"{row_field}.window") for key in ("start_ns", "end_ns"))
+        if start >= end or (first_arrival is not None and
+                            not start <= origin + first_arrival <= origin + last_terminal <= end):
+            raise ValueError(f"{row_field}.window 未覆盖请求的观测区间")
+        backend = _text(row, "allocator_backend", row_field)
+        phase_reason = row.get("phase_reason")
+        if phase_reason is not None:
+            phase_reason = _text(row, "phase_reason", row_field)
+        elif speculative and "steps" not in row:
+            phase_reason = "缺少后端轮次清单"
+        rank_summaries[rank] = {
+            "rank": rank, "device_index": _integer(row, "device_index", row_field), "source_row": i,
+            "allocator_backend": backend, "window": {"start_ns": start, "end_ns": end},
+            "memory": _runtime_memory(row, backend, row_field),
+            "phase_reason": phase_reason,
+            **{key: {"value": _integer(row, key, row_field)} if row.get(key) is not None else
+               {"value": None, "reason": "缺少 vLLM 的初始化预算"}
+               for key in ("requested_memory_bytes", "kv_cache_budget_bytes")},
+        }
+        rank_steps[rank] = observed = {}
+        for j, step in enumerate(_list(row.get("steps", []), f"{row_field}.steps")):
+            step_field = f"{row_field}.steps[{j}]"
+            if not speculative:
+                raise ValueError("baseline 含投机轮内记录")
+            index, identity, expected, phases = _runtime_step(_object(step, step_field), step_field, start, end)
+            if index in observed or all_steps.setdefault(index, identity) != identity:
+                raise ValueError(f"{step_field} 的轮 ID 重复或跨 rank 的批次归属不一致")
+            observed[index] = phases
+            for phase in expected:
+                expected_steps[phase].add(index)
+
+    complete = True
+    for rank in range(tp):
+        missing_reason = "缺少 rank 的运行时记录"
+        result = rank_summaries.setdefault(rank, {
+            "rank": rank, "device_index": None, "source_row": None, "allocator_backend": None, "window": None,
+            "memory": {name: {"peak_bytes": None, "reason": missing_reason} for name in MEMORY_COUNTERS},
+            "requested_memory_bytes": {"value": None, "reason": missing_reason},
+            "kv_cache_budget_bytes": {"value": None, "reason": missing_reason},
+            "phase_reason": missing_reason,
+        })
+        timings, busy = _rank_timings(rank_steps.get(rank, {}), expected_steps, result["phase_reason"])
+        result.update(phases=timings, observed_stream_busy_ms=busy)
+        if any(metric["peak_bytes"] is None for metric in result["memory"].values()) or any(
+            phase["reason"] is not None for phase in timings.values()
+        ):
+            complete = False
+    slowest = {}
+    for phase in expected_steps:
+        samples = [(rank, summary["phases"][phase]) for rank, summary in rank_summaries.items()]
+        if any(timing["reason"] is not None for _, timing in samples):
+            slowest[phase] = {"rank": None, "p95_ms": None, "reason": "缺少可对照的各 rank 轮内时间"}
+            continue
+        peak = max(timing["observed_p95_ms"] for _, timing in samples)
+        rank = min(rank for rank, timing in samples if timing["observed_p95_ms"] == peak)
+        slowest[phase] = {"rank": rank, "p95_ms": peak}
+    return {"complete": complete, "phase_applicable": speculative, "estimator": "nearest_rank",
+            "phase_boundaries": ROUND_PHASES if speculative else {}, "slowest_rank_by_phase_p95": slowest,
+            "phase_clock": "cuda_event_per_rank_stream", "phase_host_clock": data["window"]["clock_id"],
+            "memory_scope": "pytorch_cuda_allocator", "clock_origin_ns": origin,
+            "whole_device_peak": {"value": None, "reason": "缺少分配器之外的 CUDA 显存峰值"},
+            "ranks": [rank_summaries[rank] for rank in range(tp)]}
+
+
 def _summarize(requests, window, slo, start, end):
     # Reducers consume a common time unit. Keep integer ns for exact window comparisons.
     emissions = {rid: req.emissions for rid, req in requests.items()}
@@ -324,9 +489,11 @@ def summarize_request_trace(path: str | Path) -> dict:
         raise ValueError("manifest.workload_sha256 与请求清单不匹配")
     _provenance(manifest, path.resolve().parent)
     _check_details(data, requests, window, manifest)
+    runtime = {"runtime_observations": _summarize_runtime(data, manifest)} if "runtime_observations" in data else {}
     return {
         "schema_version": "1.0",
         "trace_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
         "manifest": manifest,
         **_summarize(requests, window, slo, start, end),
+        **runtime,
     }

@@ -51,9 +51,25 @@ python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
 
 每个方法目录包含 `plan.json`、原始 `server.json`、带 SHA256 引用的 `trace.json` 和由现有归约器生成的 `summary.json`。实采还保留 `backend.log`。输出目录须为新目录。进程失败时保留已写入的结果和失败日志。
 
-采集点为 vLLM `AsyncLLM.generate` 在服务端生成进程交付增量输出的时刻，使用 `server_emitted` 和 `commit_group`。同一组内的 token 使用同一真实观测时戳。预填充和解码可用 engine-core 原生事件时，记录首次调度至首 token、首 token 至末 token 的请求墙钟区间，并披露缺测。DFlash 与 MTP 保留原生逐轮提议、校验和接受数及其联合分布。服务端输出组可能合并多个后端轮，逐轮提交归属和 draft、verify、recovery 的独立时长仍标为未知。设备空闲显存只用于实采前置检查。
+采集点为 vLLM `AsyncLLM.generate` 在服务端生成进程交付增量输出的时刻，使用 `server_emitted` 和 `commit_group`。同一组内的 token 使用同一观测时戳。engine-core 提供原生事件时，预填充和解码分别记录首次调度至首 token、首 token 至末 token 的请求墙钟区间。DFlash 与 MTP 保留原生逐轮提议、校验和接受数及其联合分布。服务端输出组可能合并多个后端轮，逐轮提交归属保持未知。
 
 适配器以 [vLLM 11aa1369 的服务端生成入口](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/engine/async_llm.py)、[增量输出队列](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/engine/output_processor.py) 和 [原生统计字段](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/metrics/stats.py) 为准。启动条件为 Linux CUDA、与计划 TP 相同的可见设备数、已登记的空闲显存门槛，以及可导入的固定提交源码安装。固定模型版本和文件身份见 [模型清单](../../assets/identity/required_scenarios_identity.json)。离线验收环境没有 CUDA 设备或 vLLM，实采数据仍待匹配环境。
+
+### 轮内计时与运行时显存
+
+`server.json` 的 `rank_observations` 保留 worker 原始记录。`trace.json` 携带由同一记录生成的 `runtime_observations`，由 `trace-summary` 校验并归约。轮 ID 是本次采集中有调度 token 的后端批次序号，请求归属使用后端原生 ID。同一批次中，`draft` 产生的候选供后续批次校验。
+
+| 阶段 | 计时边界 |
+| --- | --- |
+| `draft` | 调度候选数大于零时，记录 `speculator.propose` 在当前 CUDA stream 上的区间。 |
+| `verify` | 批次含待校验候选时，从 `kv_connector.pre_forward` 入口至 `finish_forward` 入口，包括目标模型 forward 或 CUDA Graph replay。混合批次的区间同时包含同批普通请求的 forward。拒绝采样留待单独观测。 |
+| `recovery` | 含候选的批次执行 `postprocess_sampled` 的区间，包括提交状态更新和拒绝后修正。CPU scheduler 回退的独立耗时保持未知。 |
+
+worker 在阶段所在 stream 上记录 CUDA 事件，排空后读取时长。同一 rank、同一 stream 的 CUDA 时间从首个阶段事件起算，已采区间的 busy 时间取并集。主机时钟只用于标记事件入队和采集窗口。分位数按 rank 计算，某阶段在所有 rank 上完整时才比较 P95。实采需单独评估 CUDA 事件和记录开销。[vLLM 11aa1369 GPUModelRunner 源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/worker/gpu/model_runner.py) · [PyTorch CUDA Event](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.Event.html)
+
+三路都在预热排空后逐 rank 重置 PyTorch native CUDA allocator 的峰值计数，工作负载排空后读取 `allocated`、`reserved` 的峰值和窗口边界值。vLLM 初始化登记的显存和 KV 预算单列。空闲显存属于前置检查。整卡显存峰值和未分项观测的 KV、workspace、graph、通信池峰值仍为未知。[vLLM 11aa1369 GPU worker 源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/worker/gpu_worker.py) · [PyTorch allocated 计数](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.memory.max_memory_allocated.html) · [PyTorch reserved 计数](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.memory.max_memory_reserved.html)
+
+摘要记录每个阶段的预期轮次、已采样本数和缺失轮 ID。缺失 rank、缺失阶段或不支持的 allocator 会将运行时观测标记为不完整，已有样本和服务端吞吐仍可查看。轮归属冲突、窗口越界和峰值低于边界读数会使归约失败。
 
 ### 实采计划示例
 
@@ -92,11 +108,11 @@ python -m simverse.cli trace-summary run-out/dflash_v1/trace.json
 python -m simverse.cli collect-service-trace plan.json replay-out --replay run-out
 ```
 
-可用 `python -m pytest -q tests/test_service_trace.py` 复验三路离线样本。测试复用 A–E 请求、同刻输出和半开窗口，核对每路完成吞吐 100 token/s、事件吞吐 175 token/s、TTFT P50 4 ms 和 P95 6 ms。原生投机分布、计划不匹配、到达偏差和输出差异分别有断言。
+可用 `python -m pytest -q tests/test_service_trace.py` 复验三路离线样本。测试复用 A–E 请求、同刻输出和半开窗口，核对每路完成吞吐 100 token/s、事件吞吐 175 token/s、TTFT P50 4 ms 和 P95 6 ms。双 rank 合成样本经 worker 探针采集后重放，核对 rank 0 的 draft P50 为 2 ms、verify P95 为 5 ms、recovery P50 为 1 ms，以及各 rank 显存峰值、区间并集和缺项。原生投机分布、计划不匹配、到达偏差和输出差异分别有断言。
 
 ## 最小输入字段
 
-以下为完整采集目标。离线导入已支持上表字段，实际设备、容量和硬件阶段证据按采集计划归档。时间使用距本次采集起点的整数纳秒，展示时转换为毫秒。缺失值使用 `null` 和原因。跨进程或跨设备的时钟仅在对齐依据与误差可追溯时计算差值。
+以下为完整采集目标。实际设备、容量和硬件阶段证据按采集计划归档。请求轨迹使用距本次采集起点的整数纳秒，轮内 CUDA 事件使用各 rank 和 stream 的相对时间。展示时转换为毫秒。缺失值使用 `null` 和原因。跨进程或跨设备的时钟仅在对齐依据与误差可追溯时计算差值。
 
 | 对象 | 必采字段 |
 | --- | --- |
