@@ -1,6 +1,6 @@
 """M3/V07/V08：指标归约器人工 oracle + 事件验证器负例。
 
-期望值全部来自 golden/oracles_v02.py §5 的人工轨迹（独立手算）。
+期望值来自 golden/oracles_v02.py §5 和 R07b/R09 验收方案的人工轨迹（独立手算）。
 每条负例注明“哪个错误由哪个断言发现”。
 """
 import importlib.util
@@ -14,6 +14,7 @@ from simverse.execute.reduce import (busy_integral, goodput_tokens_per_ms,  # no
                                      quantile_nearest_rank,
                                      request_mean_itl,
                                      throughput_tokens_per_ms,
+                                     window_completed_requests,
                                      window_token_count)
 from simverse.execute.validate import TraceEvent, validate_trace  # noqa: E402
 
@@ -39,6 +40,22 @@ def test_window_token_count_vs_completed_requests():
     assert t == G.THROUGHPUT_COMPLETED == 0.12
     t_events = throughput_tokens_per_ms(EM, COMPLETED, 0, 50, "token_events")
     assert t_events == 6 / 50.0          # 同批同刻 token 全计（不均摊 Q12）
+
+
+def test_completed_request_throughput_excludes_cross_window_completions():
+    """R07b/R09 验收样本。A 落在右边界，D 已取消，E 失败且没有输出。"""
+    emissions = {
+        "A": [8, 20, 20, 50],
+        "B": [10, 30, 48],
+        "C": [16],
+        "D": [45],
+        "E": [],
+    }
+    completed = ["A", "B", "C"]
+    assert window_completed_requests(emissions, completed, 10, 50) == 2
+    assert throughput_tokens_per_ms(emissions, iter(completed), 10, 50) * 1000 == 100
+    assert throughput_tokens_per_ms(emissions, completed, 10, 50, "token_events") * 1000 == 175
+    assert throughput_tokens_per_ms(emissions, completed, 48, 50) * 1000 == 1500
 
 
 def test_goodput_slo():

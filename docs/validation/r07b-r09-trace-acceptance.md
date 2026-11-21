@@ -6,12 +6,12 @@
 
 | 实现 | 现有用途和边界 |
 | --- | --- |
-| [`execute/reduce.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/reduce.py#L12-L133) 与 [V08 人工轨迹测试](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tests/test_metrics_v08.py#L26-L67) | 可复用窗口事件计数、请求平均 ITL、最近秩分位、busy 区间并集及完成请求计数的窗口判定。完成请求吞吐当前存在跨窗计数缺口，见下方手算复现。现有 goodput 仅检查平均 ITL，尚无到达时间、TTFT 或组合 SLO 输入。 |
+| [`execute/reduce.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/reduce.py#L12-L133) 与 [V08 人工轨迹测试](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tests/test_metrics_v08.py#L26-L67) | 可复用窗口事件计数、请求平均 ITL、最近秩分位和 busy 区间并集。完成请求计数、吞吐与 goodput 共用窗口判定，手算样本已补跨窗回归。现有 goodput 仅检查平均 ITL，尚无到达时间、TTFT 或组合 SLO 输入。 |
 | [`execute/validate.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/validate.py#L17-L79) 与 [`resource_core.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/resource_core.py#L111-L146) | 事件核可核对依赖、资源互斥和消息顺序，主要输入为仿真事件。并发采集的区间只有在独占资源和时钟语义明确时才使用对应互斥检查。 |
 | [`ResultBundle`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/contracts/run.py#L49-L93) 与 [trace CSV 导出](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/exports.py#L67-L77) | 已有结果身份和仿真轮事件导出。现有 CSV 缺少请求到达、提交输出、失败状态及观测窗口，无法还原服务端指标。 |
 | [`methods/acceptance.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/methods/acceptance.py#L78-L125) 与 [Ascend 蒸馏工具](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tools/distill_ascend_cost_records.py#L21-L44) | 接受率实现消费场景假设，采集尚未接入。蒸馏工具的源文件与哈希登记可作为参考，现有读入范围是局部算子与通信成本。 |
 
-首个实现缺口是**完成请求吞吐的窗口过滤**。先让吞吐和完成请求计数使用同一窗口判定，并加入跨窗回归。随后实现单份 JSON 的字段校验、来源核验和服务端 TTFT 归约，复用已通过手算对照的现有归约函数。已有 CLI、HTTP 工作台和仿真 `ResultBundle` 可以继续独立运行。现有用例可通过 `py -3.12 -m pytest -q tests/test_metrics_v08.py tests/test_resource_core.py` 复验。
+完成请求吞吐的跨窗过滤已修复。下一步实现单份 JSON 的字段校验、来源核验和服务端 TTFT 归约，复用现有归约函数。已有 CLI、HTTP 工作台和仿真 `ResultBundle` 可以继续独立运行。现有用例可通过 `py -3.12 -m pytest -q tests/test_metrics_v08.py tests/test_resource_core.py` 复验。
 
 ## 采集输入与配对
 
@@ -59,19 +59,19 @@
 | E | 42 | 无 | 43 时失败 |
 
 - 窗口内有 7 个提交 token，事件吞吐为 175 token/s。A 最后提交在右边界，按完成口径只有 B、C 的 4 token，完成吞吐为 100 token/s。
-- 当前 `throughput_tokens_per_ms(..., count_basis="completed_requests")` 在本样本返回 200 token/s。原因是非空输出列表使条件提前成立，跳过最后提交是否在窗口内的检查。现有 V08 吞吐用例中的成功请求均在窗口内结束。后续用本样本要求 100 token/s，并同时断言同一窗口只有 2 个完成请求。
+- 修复前，非空输出列表会跳过最后提交的窗口检查，使完成吞吐误计为 200 token/s。V08 回归现在断言完成吞吐为 100 token/s、完成请求数为 2，并核对左边界计入和事件吞吐。
 - B 的 TTFT 为 6 ms，E2E 为 44 ms，ITL 为 20、18 ms，请求平均间隔为 19 ms。C 的 TTFT 为 4 ms，平均间隔为 `null`。示例 SLO 取 TTFT ≤ 5 ms、请求平均间隔 ≤ 20 ms，只有 C 通过，goodput 为 25 req/s 和 25 token/s。E 的 TTFT 为 `null`。
 - 投机另设手算样本。DFlash 的 `(proposed, verified, accepted, committed)` 可取 `(3,3,0,1)`、`(3,3,3,4)` 及输出上限截断的 `(2,2,1,1)`，接受长度直方图的 0、1、3 档各有 1 轮。MTP 用独立的 `(1,1,0,1)`、`(1,1,1,2)`。baseline 没有投机轮。
 - 残差样本以 `[10,50)` 为墙钟，两种资源的已解释区间为 `[10,20)`、`[18,25)`、`[40,50)`。并集为 25 ms，未解释为 15 ms。不能对齐时钟的变体应输出未知。
 - 负例至少覆盖逆序时间、重复输出、缺失轮引用、接受数超过校验数、混用时钟、采集身份不匹配，以及模拟合成数据被标记为硬件实测。
 
-从仓库根目录复现当前完成吞吐口径，输出单位为 token/s。
+从仓库根目录运行下列命令，预期输出为 100.0 token/s。
 
 ```powershell
 py -3.12 -c "from simverse.execute.reduce import throughput_tokens_per_ms as t; e = {'A':[8,20,20,50],'B':[10,30,48],'C':[16],'D':[45],'E':[]}; print(t(e, ['A','B','C'], 10, 50, 'completed_requests') * 1000)"
 ```
 
-实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付验收第一阶段的设计和手算对照。窗口过滤修复、导入器、采集结果和硬件门槛仍待各自验收。
+实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付验收第一阶段的设计和手算对照。导入器、采集结果和硬件门槛仍待各自验收。
 
 ## 上游参考
 
