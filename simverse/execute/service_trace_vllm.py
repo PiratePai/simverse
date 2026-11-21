@@ -10,7 +10,7 @@ import shlex
 import subprocess
 import sys
 import time
-from contextlib import aclosing
+from contextlib import aclosing, contextmanager
 from math import isfinite
 from pathlib import Path
 
@@ -82,7 +82,7 @@ async def capture_requests(engine, params, plan, epoch_ns, now=time.monotonic_ns
         await asyncio.sleep(max(0, epoch_ns + planned - now()) / NS_PER_S)
         arrival = now() - epoch_ns
         row = {"request_id": rid, "prompt_token_ids": request["prompt_token_ids"],
-               "arrival_ns": arrival, "chunks": [], "status": "failed",
+               "arrival_ns": arrival, "chunks": [], "emitted_token_count": 0, "status": "failed",
                "end_reason": "stream ended without final output"}
         stats = None
 
@@ -102,7 +102,9 @@ async def capture_requests(engine, params, plan, epoch_ns, now=time.monotonic_ns
                     completion = output.outputs[0]
                     tokens = list(completion.token_ids)
                     if tokens:
-                        row["chunks"].append({"time_ns": observed, "token_ids": tokens})
+                        row["chunks"].append({"time_ns": observed, "token_start": row["emitted_token_count"],
+                                              "token_ids": tokens})
+                        row["emitted_token_count"] += len(tokens)
                     if not output.finished:
                         continue
                     reason = completion.finish_reason
@@ -133,6 +135,23 @@ async def capture_requests(engine, params, plan, epoch_ns, now=time.monotonic_ns
     return await asyncio.gather(*(capture(request) for request in ordered))
 
 
+@contextmanager
+def _backend_request_ids(processor):
+    original = processor.add_request
+    ids = {}
+
+    def add_request(request, *args, **kwargs):
+        result = original(request, *args, **kwargs)
+        ids[request.external_req_id] = request.request_id
+        return result
+
+    processor.add_request = add_request
+    try:
+        yield ids
+    finally:
+        processor.add_request = original
+
+
 async def capture_service_window(engine, params, plan, speculative):
     # Pause waits for the core's scheduler and outstanding batches, including on DP=1.
     await asyncio.wait_for(engine.pause_generation(mode="wait", clear_cache=False), timeout=60)
@@ -142,7 +161,13 @@ async def capture_service_window(engine, params, plan, speculative):
     await engine.resume_generation()
     # Let the first scheduled tasks arm their timers before the capture origin.
     origin = time.monotonic_ns() + 100_000_000
-    rows = await capture_requests(engine, params, plan, origin)
+    if speculative:
+        with _backend_request_ids(engine.output_processor) as backend_ids:
+            rows = await capture_requests(engine, params, plan, origin)
+        for row in rows:
+            row["backend_request_id"] = backend_ids.get(row["request_id"])
+    else:
+        rows = await capture_requests(engine, params, plan, origin)
     await asyncio.wait_for(engine.pause_generation(mode="wait", clear_cache=False), timeout=60)
     scheduler = None
     if speculative:

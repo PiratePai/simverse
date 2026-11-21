@@ -13,6 +13,8 @@ from ..contracts import TimeBasis, digest
 from .reduce import (busy_integral, completed_request_ids_in_window, quantile_nearest_rank,
                      request_mean_itl, throughput_tokens_per_ms,
                      window_token_count)
+from .service_round_commits import summarize_round_commits
+from .trace_fields import _check_round_counts, _integer, _list, _object, _text
 
 NS_PER_MS = 1_000_000
 NS_PER_S = 1_000_000_000
@@ -34,32 +36,6 @@ class _Request:
     arrival_ns: int
     status: str
     emissions: tuple[int, ...]
-
-
-def _object(value, field):
-    if not isinstance(value, dict):
-        raise ValueError(f"{field} 必须是对象")
-    return value
-
-
-def _list(value, field):
-    if not isinstance(value, list):
-        raise ValueError(f"{field} 必须是数组")
-    return value
-
-
-def _text(obj, key, field):
-    value = obj.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field}.{key} 必须是非空字符串")
-    return value
-
-
-def _integer(obj, key, field):
-    value = obj.get(key)
-    if type(value) is not int or not 0 <= value < 2**63:
-        raise ValueError(f"{field}.{key} 必须是非负 64 位整数")
-    return value
 
 
 def _check_timing(obj, window, field):
@@ -167,8 +143,7 @@ def _check_details(data, requests, window, manifest):
             _integer(current, key, field) for key in
             ("configured_k", "proposed", "verified", "accepted", "committed")
         )
-        if not accepted <= verified <= proposed <= limit:
-            raise ValueError(f"{field} 须满足 accepted ≤ verified ≤ proposed ≤ configured_k")
+        _check_round_counts(proposed, verified, accepted, limit, field)
         if not proposed:
             _text(current, "end_reason", field)
         first = _integer(current, "token_start", field)
@@ -592,7 +567,11 @@ def summarize_request_trace(path: str | Path) -> dict:
         raise ValueError("manifest.workload_sha256 与请求清单不匹配")
     _provenance(manifest, path.resolve().parent)
     _check_details(data, requests, window, manifest)
-    runtime = {"runtime_observations": _summarize_runtime(data, manifest)} if "runtime_observations" in data else {}
+    runtime = {}
+    if "runtime_observations" in data:
+        runtime["runtime_observations"] = _summarize_runtime(data, manifest)
+        if manifest["method"] != "baseline":
+            runtime["round_commits"] = summarize_round_commits(data, manifest)
     return {
         "schema_version": "1.0",
         "trace_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),

@@ -258,6 +258,168 @@ def _edit_capture(replay, method, edit):
     path.write_text(json.dumps(server), encoding="utf-8")
 
 
+@pytest.fixture
+def round_commit_capture(offline_capture):
+    plan, replay = offline_capture
+
+    def round_row(rid, step, start, counts, ids, end=None):
+        proposed, verified, accepted = counts
+        row = {"step": step, "backend_request_id": f"{rid}-native", "token_start": start,
+               "proposed": proposed, "verified": verified, "accepted": accepted,
+               "target_offset": accepted, "backend_token_ids": ids}
+        if end is not None:
+            row["backend_finish_reason"] = end
+        return row
+
+    def edit(raw):
+        a, b, *_ = raw["requests"]
+        a["chunks"][1:] = [{"time_ns": a["terminal_ns"], "token_ids": [1001, 1001, 1003, 1004]}]
+        b["chunks"][1:] = [{"time_ns": b["terminal_ns"], "token_ids": [1001, 1002]}]
+        b["end_reason"] = "length"
+        for request in raw["requests"]:
+            offset = 0
+            for group in request["chunks"]:
+                group["token_start"] = offset
+                offset += len(group["token_ids"])
+            request["emitted_token_count"] = offset
+        if raw["method"] == "baseline":
+            return
+        scheduler = raw["scheduler_observations"]
+        for rank in raw["rank_observations"]:
+            for step in rank["steps"][1:]:
+                step["batch_request_ids"] = ["A-native", "B-native"]
+                step["verify_request_ids"] = ["A-native", "B-native"]
+        if raw["method"] == "dflash_v1":
+            rounds = [round_row("B", 2, 1, (3, 3, 0), [1001]),
+                      round_row("A", 3, 1, (3, 3, 3), [1001, 1001, 1003, 1004], "stop"),
+                      round_row("B", 3, 2, (2, 2, 1), [1002], "length")]
+            scheduler["rollbacks"][0]["request_id"] = "B-native"
+        else:
+            rounds = [round_row("A", 2, 2, (1, 1, 0), [1001]),
+                      round_row("A", 3, 3, (1, 1, 1), [1003, 1004], "stop")]
+            scheduler["rollbacks"].pop()
+            scheduler["rollback_count"] = 1
+        scheduler["rounds"] = rounds
+        for request in raw["requests"]:
+            backend_id = f"{request['request_id']}-native"
+            request["backend_request_id"] = backend_id
+            observed = [row for row in rounds if row["backend_request_id"] == backend_id]
+            request["native_speculation"] = {"num_spec_steps": len(observed), **{
+                f"per_step_{key}": [row[field] for row in observed]
+                for key, field in (("drafted", "proposed"), ("verified", "verified"), ("accepted", "accepted"))
+            }}
+
+    for method in METHODS:
+        _edit_capture(replay, method, edit)
+    return plan, replay
+
+
+def test_round_commits_link_merge_truncation_and_exact_bonus(round_commit_capture, tmp_path):
+    plan, replay = round_commit_capture
+    out = tmp_path / "round-report"
+    report = collect_service_traces(plan, out, replay)
+    assert report["output_mismatches"] == {"dflash_v1": [], "mtp": []}
+    for mode in METHODS:
+        summary = summarize_request_trace(out / mode / "trace.json")
+        assert summary["completed_token_per_s"] == 100
+        if mode == "baseline":
+            assert "round_commits" not in summary
+            continue
+        assert report["modes"][mode]["round_commit_reason"] is None
+        linked = summary["round_commits"]
+        assert linked["complete"] and linked["unassigned_backend_round_count"] == 0
+        rounds = {row["round_id"]: row for row in linked["rounds"]}
+        assert linked["requests"]["C"]["expected_round_count"] == 0
+        if mode == "dflash_v1":
+            assert linked["native_acceptance_histogram"] == {"0": 1, "1": 1, "3": 1}
+            assert {tuple(r[key] for key in ("proposed", "verified", "accepted", "committed"))
+                    for r in linked["joint_distribution"]} == {(3, 3, 0, 1), (3, 3, 3, 4), (2, 2, 1, 1)}
+            assert rounds["B:2"]["emission_group_indices"] == rounds["B:3"]["emission_group_indices"] == [1]
+            assert rounds["B:2"]["target_bonus"] == {"kind": "replacement", "token_index": 1, "token_id": 1001}
+            assert rounds["B:3"]["token_indices"] == [2]
+            assert rounds["B:3"]["backend_finish_reason"] == "length"
+            assert rounds["B:3"]["target_bonus_status"] == "not_emitted"
+            assert rounds["B:3"]["target_bonus"] is None
+            assert rounds["A:3"]["target_bonus"] == {"kind": "bonus", "token_index": 4, "token_id": 1004}
+        else:
+            assert rounds["A:2"]["token_indices"] == [2]
+            assert rounds["A:3"]["token_indices"] == [3, 4]
+            assert rounds["A:2"]["emission_group_indices"] == rounds["A:3"]["emission_group_indices"] == [1]
+            assert rounds["A:2"]["target_bonus"]["token_index"] == 2
+            assert rounds["A:3"]["target_bonus"]["token_index"] == 4
+
+
+def test_round_commits_report_gaps_without_guessing_from_repeated_tokens(round_commit_capture, tmp_path):
+    plan, replay = round_commit_capture
+
+    def partial(raw):
+        rounds = raw["scheduler_observations"]["rounds"]
+        del rounds[0]["backend_token_ids"]
+        del rounds[1]["target_offset"]
+        # The scheduler emitted a target token that the service stopped before delivering.
+        rounds[2]["backend_token_ids"].append(1003)
+
+    def unbound(raw):
+        del raw["requests"][0]["backend_request_id"]
+
+    _edit_capture(replay, "dflash_v1", partial)
+    _edit_capture(replay, "mtp", unbound)
+    out = tmp_path / "round-gaps"
+    collect_service_traces(plan, out, replay)
+    partial = summarize_request_trace(out / "dflash_v1" / "trace.json")["round_commits"]
+    assert not partial["complete"]
+    assert partial["requests"]["B"]["linked_round_count"] == 1
+    rounds = {row["round_id"]: row for row in partial["rounds"]}
+    assert rounds["B:2"]["committed"] is None and rounds["B:2"]["token_indices"] is None
+    assert rounds["A:3"]["committed"] == 4 and rounds["A:3"]["target_bonus_status"] == "unknown"
+    assert rounds["B:3"]["backend_committed"] == 2 and rounds["B:3"]["committed"] == 1
+    assert rounds["B:3"]["target_bonus_status"] == "not_emitted"
+    unbound = summarize_request_trace(out / "mtp" / "trace.json")["round_commits"]
+    assert unbound["unassigned_backend_round_count"] == 2
+    assert unbound["requests"]["A"]["reason"] == "缺少后端请求 ID"
+    assert unbound["rounds"] == []
+
+
+@pytest.mark.parametrize(("key", "value", "message"), [
+    ("token_start", 1, "提交序号重复"),
+    ("backend_token_ids", [4444], "与服务端输出序号上的 token 不符"),
+    ("target_offset", 0, "与接受前缀不符"),
+    ("verified", 1, "与原生投机统计不符"),
+])
+def test_round_commits_reject_inconsistent_source(round_commit_capture, tmp_path, key, value, message):
+    plan, replay = round_commit_capture
+
+    def edit(raw):
+        raw["scheduler_observations"]["rounds"][2][key] = value
+
+    _edit_capture(replay, "dflash_v1", edit)
+    with pytest.raises(ValueError, match=message):
+        collect_service_traces(plan, tmp_path / "invalid-round", replay)
+
+
+def test_missing_backend_round_does_not_shift_later_indices(round_commit_capture, tmp_path):
+    plan, replay = round_commit_capture
+    _edit_capture(replay, "mtp", lambda raw: raw["scheduler_observations"]["rounds"].pop(0))
+    out = tmp_path / "missing-round"
+    collect_service_traces(plan, out, replay)
+    summary = summarize_request_trace(out / "mtp" / "trace.json")["round_commits"]
+    assert summary["requests"]["A"] == {
+        "expected_round_count": 2, "observed_round_count": 1, "linked_round_count": 1,
+        "complete": False, "reason": "缺少后端投机轮",
+    }
+    [later] = summary["rounds"]
+    assert later["round_id"] == "A:3" and later["token_indices"] == [3, 4]
+    assert later["target_bonus"]["token_index"] == 4
+
+
+@pytest.mark.parametrize(("index", "message"), [(0, "连续输出序号"), (1, "emitted_token_count")])
+def test_replay_rejects_dropped_service_groups(round_commit_capture, tmp_path, index, message):
+    plan, replay = round_commit_capture
+    _edit_capture(replay, "mtp", lambda raw: raw["requests"][0]["chunks"].pop(index))
+    with pytest.raises(ValueError, match=message):
+        collect_service_traces(plan, tmp_path / "missing-group", replay)
+
+
 def test_runtime_replay_reports_gaps_and_uses_stream_union(offline_capture, tmp_path):
     plan, replay = offline_capture
 
@@ -383,6 +545,8 @@ def test_independent_telemetry_rejects_invalid_samples(offline_capture, tmp_path
 def _scheduler_update_fixture(self, scheduler_output, model_runner_output):
     req_id = scheduler_output.request_id
     request, output_is_stale, num_rejected = model_runner_output
+    num_draft_tokens = num_verified = 4
+    num_accepted, num_sampled = num_verified - num_rejected, 1
     self.clock[0] += 100
     if not output_is_stale:
         if request.num_computed_tokens > 0:
@@ -390,7 +554,8 @@ def _scheduler_update_fixture(self, scheduler_output, model_runner_output):
         if request.num_output_placeholders > 0:
             request.num_output_placeholders -= num_rejected
     self.clock[0] += 200
-    return request.num_computed_tokens
+    output = SimpleNamespace(request_id=req_id, new_token_ids=[123], finish_reason=None)
+    return {0: SimpleNamespace(outputs=[output])}
 
 
 def test_scheduler_hook_times_only_native_counter_updates():
@@ -401,17 +566,20 @@ def test_scheduler_hook_times_only_native_counter_updates():
             clock[0] += 10
             super().__setattr__(name, value)
 
-    request = Request(num_computed_tokens=12, num_output_placeholders=4)
+    request = Request(num_computed_tokens=12, num_output_placeholders=4, num_output_tokens=1)
     capture = _SchedulerCapture(lambda: clock[0])
     scheduler = SimpleNamespace(clock=clock, _simverse_rollback=capture)
     capture.steps = 2
     update = _instrument_rollback(_scheduler_update_fixture)
     batch = SimpleNamespace(request_id="A", total_num_scheduled_tokens=2)
     start = clock[0] + 100
-    assert update(scheduler, batch, (request, False, 2)) == 10
+    update(scheduler, batch, (request, False, 2))
+    assert request.num_computed_tokens == 10
     assert request.num_output_placeholders == 2
-    assert update(scheduler, batch, (request, True, 3)) == 10
-    assert update(scheduler, batch, (request, False, 0)) == 10
+    update(scheduler, batch, (request, True, 3))
+    assert request.num_computed_tokens == 10
+    update(scheduler, batch, (request, False, 0))
+    assert request.num_computed_tokens == 10
     assert capture.finish(None)["rollbacks"] == [
         {"step": 2, "request_id": "A", "rejected_tokens": 2, "start_ns": start, "end_ns": start + 20},
     ]
@@ -441,14 +609,20 @@ def test_scheduler_factory_drains_native_variant_through_core_utility(monkeypatc
     core.scheduler = service_trace_scheduler.TraceScheduler(vllm_config=config)
     assert isinstance(core.scheduler, AsyncScheduler) == async_scheduling
     batch = SimpleNamespace(request_id="A", total_num_scheduled_tokens=2)
-    warmup = SimpleNamespace(num_computed_tokens=6, num_output_placeholders=2)
-    assert core.scheduler.update_from_output(batch, (warmup, False, 1)) == 5
+    warmup = SimpleNamespace(num_computed_tokens=6, num_output_placeholders=2, num_output_tokens=1)
+    core.scheduler.update_from_output(batch, (warmup, False, 1))
+    assert warmup.num_computed_tokens == 5
     core.simverse_scheduler_trace(True)
-    request = SimpleNamespace(num_computed_tokens=12, num_output_placeholders=4)
-    assert core.scheduler.update_from_output(batch, (request, False, 2)) == 10
+    request = SimpleNamespace(num_computed_tokens=12, num_output_placeholders=4, num_output_tokens=4)
+    core.scheduler.update_from_output(batch, (request, False, 2))
+    assert request.num_computed_tokens == 10
     report = core.simverse_scheduler_trace(False)
     assert report["reason"] is None and report["step_count"] == report["rollback_count"] == 1
     assert report["rollbacks"][0]["request_id"] == "A"
+    assert report["rounds"] == [{
+        "step": 1, "backend_request_id": "A", "token_start": 4, "proposed": 4, "verified": 4,
+        "accepted": 2, "target_offset": 2, "backend_token_ids": [123],
+    }]
 
 
 @pytest.mark.parametrize("poll_fails", [False, True])
@@ -541,13 +715,20 @@ def test_service_window_arms_after_warmup_and_finishes_after_core_drain(monkeypa
     async def requests(engine, params, plan, origin):
         order.append("requests")
         assert origin > 0
-        return ["request-data"]
+        engine.output_processor.add_request(SimpleNamespace(request_id="server-id", external_req_id="A"))
+        return [{"request_id": "A"}]
+
+    def add_request(request):
+        assert request.request_id == "server-id"
 
     engine = SimpleNamespace(pause_generation=pause, collective_rpc=rpc, resume_generation=resume,
-                             engine_core=SimpleNamespace(call_utility_async=utility))
+                             engine_core=SimpleNamespace(call_utility_async=utility),
+                             output_processor=SimpleNamespace(add_request=add_request))
     monkeypatch.setattr(service_trace_vllm, "capture_requests", requests)
     _, rows, ranks, scheduler = asyncio.run(service_trace_vllm.capture_service_window(engine, None, {}, True))
-    assert (rows, ranks, scheduler) == (["request-data"], ["rank-data"], "scheduler-data")
+    assert (rows, ranks, scheduler) == ([{"request_id": "A", "backend_request_id": "server-id"}],
+                                       ["rank-data"], "scheduler-data")
+    assert engine.output_processor.add_request is add_request
     assert order == [("wait", False), ("simverse_begin_trace", (True,)), ("simverse_scheduler_trace", True),
                      "resume", "requests", ("wait", False), ("simverse_scheduler_trace", False),
                      ("simverse_end_trace", ())]
@@ -612,8 +793,9 @@ def test_service_emitter_records_delta_groups_and_native_timing():
 
     [row] = asyncio.run(capture_requests(Engine(), object(), plan, epoch, now))
     assert row["arrival_ns"] == 1_000_000
-    assert row["chunks"] == [{"time_ns": 5_000_000, "token_ids": [10]},
-                             {"time_ns": 9_000_000, "token_ids": [11, 12]}]
+    assert row["chunks"] == [{"time_ns": 5_000_000, "token_start": 0, "token_ids": [10]},
+                             {"time_ns": 9_000_000, "token_start": 1, "token_ids": [11, 12]}]
+    assert row["emitted_token_count"] == 3
     assert row["terminal_ns"] == 9_000_000
     assert row["status"] == "completed"
     assert row["phase_spans"] == {

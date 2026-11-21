@@ -9,8 +9,8 @@ from collections import Counter
 from pathlib import Path
 
 from ..contracts import digest
-from .request_trace import (METHODS, _finite_float, _integer, _list, _object,
-                            _text, _unique_object, summarize_request_trace)
+from .request_trace import METHODS, _finite_float, _unique_object, summarize_request_trace
+from .trace_fields import _integer, _list, _object, _text, _tokens
 
 VLLM_REVISION = "11aa1369e297f67bc4dc26e119d10830f39956c6"
 SERVER_CLOCK_ID = "linux_host_monotonic"
@@ -30,13 +30,6 @@ def _sha(raw):
 def _save(path, data):
     path.write_text(json.dumps(data, ensure_ascii=False, allow_nan=False, indent=2) + "\n",
                     encoding="utf-8")
-
-
-def _tokens(value, field):
-    tokens = _list(value, field)
-    if any(type(token) is not int or not 0 <= token < 2**31 for token in tokens):
-        raise ValueError(f"{field} 含无效 token ID")
-    return tokens
 
 
 def read_plan(path):
@@ -127,28 +120,6 @@ def speculative_config(method, plan):
     raise ValueError("不支持的采集方法")
 
 
-def _acceptance(row, field, limit):
-    stats = row.get("native_speculation")
-    if stats is None:
-        return None
-    stats = _object(stats, f"{field}.native_speculation")
-    keys = ("per_step_drafted", "per_step_verified", "per_step_accepted")
-    if not all(key in stats for key in keys) and stats.get("num_spec_steps") == 0:
-        return []
-    counts = [_list(stats.get(key), f"{field}.native_speculation.{key}") for key in keys]
-    if len({len(values) for values in counts}) != 1:
-        raise ValueError(f"{field} 的投机轮数组长度不符")
-    steps = list(zip(*counts))
-    if stats.get("num_spec_steps", len(steps)) != len(steps):
-        raise ValueError(f"{field} 的原生投机轮数与逐轮数组不符")
-    for proposed, verified, accepted in steps:
-        if any(type(n) is not int for n in (proposed, verified, accepted)) or not (
-            0 <= accepted <= verified <= proposed <= limit
-        ):
-            raise ValueError(f"{field} 的原生投机统计超出数量边界")
-    return steps
-
-
 def _package_mode(plan, plan_raw, mode, directory, server_raw):
     capture = _object(_json(server_raw), "server")
     if capture.get("method") != mode or capture.get("plan_sha256") != _sha(plan_raw):
@@ -164,7 +135,6 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
         raise ValueError(f"{mode} 的 vLLM 提交与采集适配器不匹配")
     offered = {r["request_id"]: r for r in plan["requests"]}
     requests, spans, outputs = [], [], {}
-    all_steps = Counter()
     request_coverage = Counter()
     max_drift = 0
     for i, item in enumerate(_list(capture.get("requests"), "server.requests")):
@@ -179,23 +149,30 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
         actual_arrival = _integer(row, "arrival_ns", field)
         max_drift = max(max_drift, abs(actual_arrival - source["planned_arrival_ns"]))
         emissions, ids = [], []
-        for chunk in _list(row.get("chunks"), f"{field}.chunks"):
-            record = _object(chunk, f"{field}.chunks[]")
-            tokens = _tokens(record.get("token_ids"), f"{field}.chunks[].token_ids")
+        for j, chunk in enumerate(_list(row.get("chunks"), f"{field}.chunks")):
+            chunk_field = f"{field}.chunks[{j}]"
+            record = _object(chunk, chunk_field)
+            tokens = _tokens(record.get("token_ids"), f"{chunk_field}.token_ids")
+            if "token_start" in record and _integer(record, "token_start", chunk_field) != len(ids):
+                raise ValueError(f"{chunk_field}.token_start 与服务端连续输出序号不符")
             if tokens:
-                emissions.append({"time_ns": _integer(record, "time_ns", f"{field}.chunks[]"),
-                                  "token_indices": list(range(len(ids), len(ids) + len(tokens)))})
+                emissions.append({"time_ns": _integer(record, "time_ns", chunk_field),
+                                  "token_indices": list(range(len(ids), len(ids) + len(tokens))),
+                                  "token_ids": tokens})
                 ids.extend(tokens)
+        if "emitted_token_count" in row and _integer(row, "emitted_token_count", field) != len(ids):
+            raise ValueError(f"{field}.emitted_token_count 与服务端输出组不符")
         if len(ids) > plan["sampling"]["max_tokens"]:
             raise ValueError(f"{field} 的实际输出超出计划上限")
         outputs[rid] = (row.get("status"), row.get("end_reason"), ids)
-        requests.append({
+        request = {
             "request_id": rid, "sample_id": source["sample_id"],
             "input_tokens": len(source["prompt_token_ids"]), "arrival_ns": actual_arrival,
             "status": row.get("status"), "terminal_ns": row.get("terminal_ns"),
             "end_reason": row.get("end_reason"), "output_tokens": len(ids),
             "emissions": emissions,
-        })
+        }
+        requests.append(request)
         for phase in ("prefill", "decode"):
             timing = _object(_object(row.get("phase_spans", {}), f"{field}.phase_spans").get(
                 phase, {}), f"{field}.phase_spans.{phase}")
@@ -209,10 +186,8 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
                 request_coverage[phase] += 1
             spans.append(span)
         if native_config is not None:
-            steps = _acceptance(row, field, native_config["num_speculative_tokens"])
-            if steps is not None:
-                request_coverage["native_speculation"] += 1
-                all_steps.update(steps)
+            request["native_speculation"] = row.get("native_speculation")
+            request["backend_request_id"] = row.get("backend_request_id")
         elif row.get("native_speculation") is not None:
             raise ValueError("baseline 含原生投机统计")
     if set(outputs) != set(offered):
@@ -250,18 +225,17 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
     _save(directory / "trace.json", trace)
     summary = summarize_request_trace(directory / "trace.json")
     _save(directory / "summary.json", summary)
-    histogram = Counter()
-    for (_, _, accepted), count in all_steps.items():
-        histogram[accepted] += count
+    round_commits = summary.get("round_commits", {})
+    if round_commits.get("native_request_count"):
+        request_coverage["native_speculation"] = round_commits["native_request_count"]
     return {
         "source_kind": kind, "runtime": runtime, "max_arrival_drift_ns": max_drift,
         "arrivals_within_tolerance": max_drift <= plan["arrival_tolerance_ns"],
         "observed_phase_requests": dict(request_coverage),
-        "native_acceptance_histogram": dict(sorted(histogram.items())) if request_coverage["native_speculation"] else None,
-        "native_round_distribution": [{"proposed": p, "verified": v, "accepted": a, "count": count}
-                                      for (p, v, a), count in sorted(all_steps.items())],
+        "native_acceptance_histogram": round_commits.get("native_acceptance_histogram"),
+        "native_round_distribution": round_commits.get("native_round_distribution", []),
         "runtime_observations_complete": summary["runtime_observations"]["complete"],
-        "round_commit_reason": "服务端输出组与后端轮缺少关联" if native_config is not None else None,
+        "round_commit_reason": round_commits.get("reason"),
         "status_counts": summary["status_counts"],
     }, outputs
 

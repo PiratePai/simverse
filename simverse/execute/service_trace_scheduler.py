@@ -1,4 +1,4 @@
-"""Engine-core timing for the pinned scheduler's inline rejection rollback."""
+"""Engine-core probes for pinned vLLM decode rounds."""
 from __future__ import annotations
 
 import ast
@@ -17,7 +17,7 @@ _ROLLBACK = ast.dump(ast.parse(dedent("""
 
 
 def _instrument_rollback(original):
-    """Insert two clock reads around the original state update, preserving its branches."""
+    """Observe the rollback and the round counts before native output truncation."""
     source, lineno = inspect.getsourcelines(original)
     tree = ast.parse(dedent("".join(source)))
 
@@ -38,6 +38,11 @@ def _instrument_rollback(original):
             after = ast.parse(dedent("""
                 if _simverse_start is not None:
                     self._simverse_rollback.record(req_id, num_rejected, _simverse_start)
+                if self._simverse_rollback is not None:
+                    self._simverse_rollback.note_round(
+                        req_id, request.num_output_tokens, num_draft_tokens,
+                        num_verified, num_accepted, num_sampled,
+                    )
             """)).body
             for stmt in before + after:
                 ast.increment_lineno(stmt, node.lineno - stmt.lineno)
@@ -60,16 +65,38 @@ class _SchedulerCapture:
         self.started = now()
         self.steps = 0
         self.rollbacks = []
+        self.rounds = []
+        self.pending_rounds = {}
 
     def record(self, request_id, rejected, start):
         end = self.now()
         self.rollbacks.append({"step": self.steps, "request_id": request_id, "rejected_tokens": rejected,
                                "start_ns": start, "end_ns": end})
 
+    def note_round(self, request_id, token_start, proposed, verified, accepted, num_sampled):
+        round_row = {
+            "step": self.steps, "backend_request_id": request_id, "token_start": token_start,
+            "proposed": proposed, "verified": verified, "accepted": accepted,
+            "target_offset": accepted if num_sampled == 1 else None, "backend_token_ids": None,
+        }
+        self.pending_rounds[request_id] = round_row
+        self.rounds.append(round_row)
+
+    def finalize_round_outputs(self, outputs):
+        if self.pending_rounds:
+            for batch in outputs.values():
+                for output in batch.outputs:
+                    row = self.pending_rounds.get(output.request_id)
+                    if row is not None:
+                        row["backend_token_ids"] = list(output.new_token_ids)
+                        if output.finish_reason is not None:
+                            row["backend_finish_reason"] = output.finish_reason.name.lower()
+            self.pending_rounds.clear()
+
     def finish(self, reason):
         return {"window": {"start_ns": self.started, "end_ns": self.now()},
                 "step_count": self.steps, "rollback_count": len(self.rollbacks) if reason is None else None,
-                "rollbacks": self.rollbacks, "reason": reason}
+                "rollbacks": self.rollbacks, "rounds": self.rounds, "reason": reason}
 
 
 def _scheduler_trace_control(core, start):
@@ -97,16 +124,20 @@ class TraceScheduler:
         try:
             update = _instrument_rollback(update)
         except (OSError, TypeError, ValueError, SyntaxError) as exc:
-            reason = f"CPU scheduler 回退挂点不可用 ({type(exc).__name__})"
+            reason = f"CPU scheduler 投机轮挂点不可用 ({type(exc).__name__})"
 
         class InstrumentedScheduler(base):
             _simverse_rollback = None
             _simverse_rollback_reason = reason
 
             def update_from_output(self, scheduler_output, model_runner_output):
-                if self._simverse_rollback is not None and scheduler_output.total_num_scheduled_tokens > 0:
-                    self._simverse_rollback.steps += 1
-                return update(self, scheduler_output, model_runner_output)
+                capture = self._simverse_rollback
+                if capture is not None and scheduler_output.total_num_scheduled_tokens > 0:
+                    capture.steps += 1
+                outputs = update(self, scheduler_output, model_runner_output)
+                if capture is not None:
+                    capture.finalize_round_outputs(outputs)
+                return outputs
 
         EngineCore.simverse_scheduler_trace = _scheduler_trace_control
         return InstrumentedScheduler(vllm_config=vllm_config, **kwargs)

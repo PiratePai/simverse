@@ -51,9 +51,19 @@ python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
 
 每个方法目录包含 `plan.json`、原始 `server.json`、带 SHA256 引用的 `trace.json` 和由现有归约器生成的 `summary.json`。实采还保留 `backend.log`。输出目录须为新目录。进程失败时保留已写入的结果和失败日志。
 
-采集点为 vLLM `AsyncLLM.generate` 在服务端生成进程交付增量输出的时刻，使用 `server_emitted` 和 `commit_group`。同一组内的 token 使用同一观测时戳。engine-core 提供原生事件时，预填充和解码分别记录首次调度至首 token、首 token 至末 token 的请求墙钟区间。DFlash 与 MTP 保留原生逐轮提议、校验和接受数及其联合分布。服务端输出组可能合并多个后端轮，逐轮提交归属保持未知。
+采集点为 vLLM `AsyncLLM.generate` 在服务端生成进程交付增量输出的时刻，使用 `server_emitted` 和 `commit_group`。同一组内的 token 使用同一观测时戳。engine-core 提供原生事件时，预填充和解码分别记录首次调度至首 token、首 token 至末 token 的请求墙钟区间。
 
 适配器以 [vLLM 11aa1369 的服务端生成入口](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/engine/async_llm.py)、[增量输出队列](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/engine/output_processor.py) 和 [原生统计字段](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/metrics/stats.py) 为准。启动条件为 Linux CUDA、与计划 TP 相同的可见设备数、已登记的空闲显存门槛，以及可导入的固定提交源码安装。固定模型版本和文件身份见 [模型清单](../../assets/identity/required_scenarios_identity.json)。离线验收环境没有 CUDA 设备或 vLLM，实采数据仍待匹配环境。
+
+### 投机轮与服务端输出组
+
+DFlash 与 MTP 在前端注册请求时保留公开请求 ID 与 vLLM 后端请求 ID 的映射。scheduler 记录本轮提议、校验、接受数以及更新前的请求输出偏移，再保留原生停止截断后 `EngineCoreOutput` 实际携带的 token ID。服务端同时记录各 DELTA 组的起始序号和本次已交付 token 总数。[vLLM 请求注册](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/engine/async_llm.py#L581-L598) · [vLLM scheduler 输出](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/core/sched/scheduler.py#L2354-L2555)
+
+`trace-summary` 按请求 ID 和原生输出偏移核对 token ID，将后端轮关联到从 0 起算的 `token_indices` 与 `emission_group_indices`。一组可以包含多个后端轮，同组仍只有一个服务端观测时戳。普通解码产生的 token 可以与投机轮的 token 同组。`backend_committed` 统计后端输出，`committed` 只统计已交付且通过核对的服务端 token。
+
+`target_bonus` 记录接受前缀后由目标侧提供的 token ID 与服务端输出序号。按原生有效校验计数，全接受时标为 `bonus`，接受前缀短于已校验数量时标为 `replacement`。已证实被截断的目标 token 标为 `not_emitted`，证据不足时标为 `unknown`。[vLLM 拒绝采样与补位](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/worker/gpu/spec_decode/rejection_sampler_utils.py#L1082-L1097)
+
+`round_commits` 保留逐轮结果、已关联轮的 `(proposed, verified, accepted, committed)` 联合分布和逐请求覆盖率。终态原生统计提供预期轮数。缺失后端轮、请求映射或 token 证据时保留缺项原因，后续已有证据的轮继续按原生偏移关联。原生计数冲突、输出序号重叠和 token 不一致会使归约失败。
 
 ### 轮内计时与运行时显存
 
@@ -115,6 +125,8 @@ python -m simverse.cli collect-service-trace plan.json replay-out --replay run-o
 ```
 
 可用 `python -m pytest -q tests/test_service_trace.py` 复验三路离线样本。测试复用 A–E 请求、同刻输出和半开窗口，核对每路完成吞吐 100 token/s、事件吞吐 175 token/s、TTFT P50 4 ms 和 P95 6 ms。双 rank 合成样本核对 rank 0 拒绝采样 P95 为 3 ms，CPU 回退 P95 为 5 μs，整卡采样峰值分别为 780 B 和 880 B，并验证 allocator 数据、区间并集、零次回退及缺项。原生投机分布、计划不匹配、到达偏差和输出差异分别有断言。
+
+轮次关联样本使用下文的 DFlash 三轮和 MTP 两轮手算数据，覆盖同组多轮、重复 token、全接受 bonus、拒绝补位、输出上限截断和后端轮缺失。轮缺失时，后续轮的输出序号保持原位。该样本三路完成吞吐同为 100 token/s。
 
 ## 最小输入字段
 
