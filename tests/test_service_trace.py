@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,7 +14,8 @@ from simverse.execute.request_trace import summarize_request_trace
 from simverse.execute.service_trace import (METHODS, collect_service_traces,
                                              speculative_config)
 from simverse.execute.service_trace_cuda import _RankCapture
-from simverse.execute import service_trace_vllm
+from simverse.execute import service_trace_nvml, service_trace_scheduler, service_trace_vllm
+from simverse.execute.service_trace_scheduler import _SchedulerCapture, _instrument_rollback
 from simverse.execute.service_trace_vllm import capture_requests
 
 FIXTURE = Path(__file__).with_name("fixtures") / "r07b_r09_request_trace.json"
@@ -80,6 +82,7 @@ def _capture_fixture_rank(rank, speculative, backend="native"):
 
     runner.kv_connector = SimpleNamespace(pre_forward=lambda *_: None, finish_forward=lambda: None)
     runner.speculator = SimpleNamespace(propose=lambda *, ms, **_: work(ms))
+    runner.rejection_sampler = work
     runner.postprocess_sampled = work
 
     def execute(scheduler, intermediate_tensors=None, dummy_run=False):
@@ -89,6 +92,8 @@ def _capture_fixture_rank(rank, speculative, backend="native"):
         runner.execute_model_state = SimpleNamespace(num_spec_tokens_to_schedule=scheduler.k)
 
     def sample(scheduler):
+        if scheduler.scheduled_spec_decode_tokens:
+            runner.rejection_sampler(scheduler.rejection_ms)
         runner.postprocess_sampled(scheduler.recovery_ms)
         runner.speculator.propose(ms=scheduler.draft_ms, num_speculative_tokens=scheduler.k)
         runner.execute_model_state = None
@@ -98,13 +103,13 @@ def _capture_fixture_rank(rank, speculative, backend="native"):
                              requested_memory=900 - rank * 100, available_kv_cache_memory_bytes=500)
     capture = _RankCapture(worker, cuda, speculative, lambda: host[0])
     host[0] += 20_000_000
-    for ids, spec, k, timings in ((["A-native"], {}, 1, (1, 1, 2)),
-                                  (["A-native", "B-native"], {"A-native": [51]}, 1, (3, 1, 4)),
-                                  (["B-native"], {"B-native": [52]}, 0, (5, 2, 0))):
-        verify, recovery, draft = timings
+    for ids, spec, k, timings in ((["A-native"], {}, 1, (1, 0, 1, 2)),
+                                  (["A-native", "B-native"], {"A-native": [51]}, 1, (3, 2, 1, 4)),
+                                  (["B-native"], {"B-native": [52]}, 0, (5, 3, 2, 0))):
+        verify, rejection, recovery, draft = timings
         scheduler = SimpleNamespace(num_scheduled_tokens=dict.fromkeys(ids, 1), total_num_scheduled_tokens=len(ids),
                                     scheduled_spec_decode_tokens=spec, k=k, verify_ms=verify,
-                                    recovery_ms=recovery, draft_ms=draft)
+                                    rejection_ms=rejection, recovery_ms=recovery, draft_ms=draft)
         runner.execute_model(scheduler)
         runner.sample_tokens(scheduler)
     cuda.memory["allocated"] -= 10
@@ -113,6 +118,11 @@ def _capture_fixture_rank(rank, speculative, backend="native"):
     assert runner.execute_model is execute and runner.sample_tokens is sample
     expected_calls = [("sync", rank)] + ([("reset", rank)] if backend == "native" else []) + [("sync", rank)]
     assert cuda.calls == expected_calls
+    report["device_memory"] = {
+        "device_uuid": f"GPU-offline-{rank}", "sample_interval_ns": 20_000_000, "reason": None,
+        "samples": [{"time_ns": ORIGIN + delta_ms * 1_000_000, "used_bytes": used + rank * 100,
+                     "total_bytes": 2000} for delta_ms, used in ((0, 500), (20, 780), (45, 630), (65, 550))],
+    }
     return report
 
 
@@ -147,6 +157,15 @@ def offline_capture(tmp_path):
             "clock_origin_ns": ORIGIN,
             "rank_observations": [_capture_fixture_rank(rank, method != "baseline") for rank in (1, 0)],
         }
+        if method != "baseline":
+            raw["scheduler_observations"] = {
+                "window": {"start_ns": ORIGIN, "end_ns": ORIGIN + 60_000_000},
+                "step_count": 3, "rollback_count": 2, "reason": None,
+                "rollbacks": [{"step": step, "request_id": rid, "rejected_tokens": 1,
+                               "start_ns": ORIGIN + start, "end_ns": ORIGIN + end}
+                              for step, rid, start, end in ((2, "A-native", 34_000_000, 34_002_000),
+                                                            (3, "B-native", 44_000_000, 44_005_000))],
+            }
         for req in fixture["requests"]:
             row = {key: req[key] for key in ("request_id", "arrival_ns", "status", "terminal_ns", "end_reason")}
             row["prompt_token_ids"] = list(range(req["input_tokens"]))
@@ -203,24 +222,33 @@ def test_cli_replays_three_modes_and_uses_trace_summary(offline_capture, tmp_pat
         assert (out / method / "server.json").read_bytes() == (replay / method / "server.json").read_bytes()
         runtime = summary["runtime_observations"]
         assert runtime["complete"] is result["modes"][method]["runtime_observations_complete"] is True
-        assert runtime["whole_device_peak"]["value"] is None
         first, second = runtime["ranks"]
         assert [rank["rank"] for rank in (first, second)] == [0, 1]
         assert first["memory"]["allocated"] == {"start_bytes": 100, "end_bytes": 90, "peak_bytes": 150}
         assert second["memory"]["reserved"]["peak_bytes"] == 450
+        assert first["device_memory"]["observed_peak_bytes"] == 780
+        assert second["device_memory"]["observed_peak_bytes"] == 880
+        assert second["device_memory"]["max_sample_gap_ms"] == 25
         assert second["requested_memory_bytes"]["value"] == 800
         if method == "baseline":
             assert runtime["phase_applicable"] is False
+            assert runtime["scheduler_rollback"] is None
             assert first["phases"] == {}
         else:
+            scheduler = runtime["scheduler_rollback"]
+            assert scheduler["observed_p50_ms"] == 0.002
+            assert scheduler["observed_p95_ms"] == 0.005
+            assert scheduler["observed_busy_ms"] == 0.007
             assert runtime["phase_boundaries"]["recovery"]["boundary"] == "postprocess_sampled"
             assert runtime["slowest_rank_by_phase_p95"]["verify"] == {"rank": 1, "p95_ms": 10}
             assert first["phases"]["draft"]["observed_p50_ms"] == 2
             assert first["phases"]["verify"]["observed_p95_ms"] == 5
+            assert first["phases"]["rejection_sampling"]["observed_p50_ms"] == 2
+            assert first["phases"]["rejection_sampling"]["observed_p95_ms"] == 3
             assert first["phases"]["recovery"]["observed_p50_ms"] == 1
             assert second["phases"]["verify"]["observed_p50_ms"] == 6
-            assert first["observed_stream_busy_ms"] == {"7": 17}
-            assert second["observed_stream_busy_ms"] == {"7": 34}
+            assert first["observed_stream_busy_ms"] == {"7": 22}
+            assert second["observed_stream_busy_ms"] == {"7": 44}
 
 
 def _edit_capture(replay, method, edit):
@@ -261,7 +289,7 @@ def test_runtime_replay_reports_gaps_and_uses_stream_union(offline_capture, tmp_
         "sample_count": 1, "expected_count": 2, "missing_steps": [2],
         "observed_p50_ms": 2, "observed_p95_ms": 2, "reason": "缺少轮内阶段时间",
     }
-    assert first["observed_stream_busy_ms"] == {"7": 16}
+    assert first["observed_stream_busy_ms"] == {"7": 21}
     assert second["phases"]["verify"]["missing_steps"] == [2, 3]
     assert second["phases"]["verify"]["observed_p95_ms"] is None
     assert second["memory"]["allocated"]["peak_bytes"] is None
@@ -273,6 +301,202 @@ def test_runtime_replay_reports_gaps_and_uses_stream_union(offline_capture, tmp_
     assert mtp["complete"] is False
     assert mtp["ranks"][1]["memory"]["allocated"]["reason"] == "分配器不支持此计数口径"
     assert mtp["ranks"][1]["phases"]["verify"]["observed_p50_ms"] == 6
+
+
+def test_runtime_details_keep_missing_partial_and_zero_distinct(offline_capture, tmp_path):
+    plan, replay = offline_capture
+
+    def partial(raw):
+        first, second = raw["rank_observations"]
+        del first["steps"][1]["phases"]["rejection_sampling"]
+        first["device_memory"]["samples"] = first["device_memory"]["samples"][1:3]
+        second["device_memory"]["reason"] = "read failed"
+        raw["scheduler_observations"]["rollbacks"].pop()
+
+    def zero(raw):
+        raw["scheduler_observations"].update(rollback_count=0, rollbacks=[])
+
+    _edit_capture(replay, "dflash_v1", partial)
+    _edit_capture(replay, "mtp", zero)
+    out = tmp_path / "more-gaps"
+    comparison = collect_service_traces(plan, out, replay)
+    assert comparison["modes"]["dflash_v1"]["runtime_observations_complete"] is False
+    assert comparison["modes"]["mtp"]["runtime_observations_complete"] is True
+    partial = summarize_request_trace(out / "dflash_v1" / "trace.json")["runtime_observations"]
+    assert partial["ranks"][1]["phases"]["rejection_sampling"]["missing_steps"] == [2]
+    assert partial["ranks"][1]["device_memory"]["observed_peak_bytes"] == 880
+    assert partial["ranks"][1]["device_memory"]["reason"] == "整卡显存采样未覆盖请求的观测区间"
+    assert partial["ranks"][0]["device_memory"]["reason"] == "read failed"
+    assert partial["ranks"][0]["memory"]["allocated"]["peak_bytes"] == 150
+    assert partial["scheduler_rollback"]["observed_p95_ms"] == 0.002
+    assert partial["scheduler_rollback"]["expected_count"] == 2
+    assert partial["scheduler_rollback"]["complete"] is False
+    zero = summarize_request_trace(out / "mtp" / "trace.json")["runtime_observations"]["scheduler_rollback"]
+    assert zero["complete"] is True and zero["expected_count"] == 0
+    assert zero["observed_busy_ms"] == 0 and zero["observed_p95_ms"] is None
+
+
+def test_runtime_replays_legacy_worker_rows_with_explicit_missing_detail(offline_capture, tmp_path):
+    plan, replay = offline_capture
+
+    def legacy(raw):
+        del raw["scheduler_observations"]
+        for rank in raw["rank_observations"]:
+            del rank["device_memory"]
+            for step in rank["steps"]:
+                step["phases"].pop("rejection_sampling", None)
+
+    _edit_capture(replay, "dflash_v1", legacy)
+    out = tmp_path / "legacy"
+    collect_service_traces(plan, out, replay)
+    runtime = summarize_request_trace(out / "dflash_v1" / "trace.json")["runtime_observations"]
+    assert not runtime["complete"]
+    assert runtime["scheduler_rollback"]["expected_count"] is None
+    assert runtime["scheduler_rollback"]["observed_busy_ms"] is None
+    rank = runtime["ranks"][0]
+    assert rank["device_memory"]["observed_peak_bytes"] is None
+    assert rank["phases"]["rejection_sampling"]["missing_steps"] == [2, 3]
+    assert rank["phases"]["verify"]["observed_p95_ms"] == 5
+
+
+@pytest.mark.parametrize(("path", "value", "message"), [
+    (("rank_observations", 0, "device_memory", "samples", 1, "used_bytes"), 3000, "整卡显存用量"),
+    (("rank_observations", 0, "device_memory", "samples", 2, "time_ns"), ORIGIN, "采样时间逆序"),
+    (("scheduler_observations", "rollbacks", 0, "request_id"), "B-native", "CPU 回退批次"),
+    (("scheduler_observations", "rollbacks", 0, "end_ns"), ORIGIN + 70_000_000, "CPU 回退时间"),
+    (("scheduler_observations", "rollback_count"), 1, "超出声明次数"),
+])
+def test_independent_telemetry_rejects_invalid_samples(offline_capture, tmp_path, path, value, message):
+    plan, replay = offline_capture
+
+    def bad(raw):
+        item = raw
+        for key in path[:-1]:
+            item = item[key]
+        item[path[-1]] = value
+
+    _edit_capture(replay, "dflash_v1", bad)
+    with pytest.raises(ValueError, match=message):
+        collect_service_traces(plan, tmp_path / "invalid-detail", replay)
+
+
+def _scheduler_update_fixture(self, scheduler_output, model_runner_output):
+    req_id = scheduler_output.request_id
+    request, output_is_stale, num_rejected = model_runner_output
+    self.clock[0] += 100
+    if not output_is_stale:
+        if request.num_computed_tokens > 0:
+            request.num_computed_tokens -= num_rejected
+        if request.num_output_placeholders > 0:
+            request.num_output_placeholders -= num_rejected
+    self.clock[0] += 200
+    return request.num_computed_tokens
+
+
+def test_scheduler_hook_times_only_native_counter_updates():
+    clock = [1000]
+
+    class Request(SimpleNamespace):
+        def __setattr__(self, name, value):
+            clock[0] += 10
+            super().__setattr__(name, value)
+
+    request = Request(num_computed_tokens=12, num_output_placeholders=4)
+    capture = _SchedulerCapture(lambda: clock[0])
+    scheduler = SimpleNamespace(clock=clock, _simverse_rollback=capture)
+    capture.steps = 2
+    update = _instrument_rollback(_scheduler_update_fixture)
+    batch = SimpleNamespace(request_id="A", total_num_scheduled_tokens=2)
+    start = clock[0] + 100
+    assert update(scheduler, batch, (request, False, 2)) == 10
+    assert request.num_output_placeholders == 2
+    assert update(scheduler, batch, (request, True, 3)) == 10
+    assert update(scheduler, batch, (request, False, 0)) == 10
+    assert capture.finish(None)["rollbacks"] == [
+        {"step": 2, "request_id": "A", "rejected_tokens": 2, "start_ns": start, "end_ns": start + 20},
+    ]
+    with pytest.raises(ValueError, match="回退代码块"):
+        _instrument_rollback(test_scheduler_hook_times_only_native_counter_updates)
+
+
+@pytest.mark.parametrize("async_scheduling", [False, True])
+def test_scheduler_factory_drains_native_variant_through_core_utility(monkeypatch, async_scheduling):
+    class Scheduler:
+        update_from_output = _scheduler_update_fixture
+
+        def __init__(self, *, vllm_config):
+            self.clock = [1000]
+
+    class AsyncScheduler(Scheduler):
+        pass
+
+    class Core:
+        pass
+
+    monkeypatch.setitem(sys.modules, "vllm.v1.core.sched.scheduler", SimpleNamespace(Scheduler=Scheduler))
+    monkeypatch.setitem(sys.modules, "vllm.v1.core.sched.async_scheduler", SimpleNamespace(AsyncScheduler=AsyncScheduler))
+    monkeypatch.setitem(sys.modules, "vllm.v1.engine.core", SimpleNamespace(EngineCore=Core))
+    config = SimpleNamespace(scheduler_config=SimpleNamespace(async_scheduling=async_scheduling))
+    core = Core()
+    core.scheduler = service_trace_scheduler.TraceScheduler(vllm_config=config)
+    assert isinstance(core.scheduler, AsyncScheduler) == async_scheduling
+    batch = SimpleNamespace(request_id="A", total_num_scheduled_tokens=2)
+    warmup = SimpleNamespace(num_computed_tokens=6, num_output_placeholders=2)
+    assert core.scheduler.update_from_output(batch, (warmup, False, 1)) == 5
+    core.simverse_scheduler_trace(True)
+    request = SimpleNamespace(num_computed_tokens=12, num_output_placeholders=4)
+    assert core.scheduler.update_from_output(batch, (request, False, 2)) == 10
+    report = core.simverse_scheduler_trace(False)
+    assert report["reason"] is None and report["step_count"] == report["rollback_count"] == 1
+    assert report["rollbacks"][0]["request_id"] == "A"
+
+
+@pytest.mark.parametrize("poll_fails", [False, True])
+def test_nvml_samples_the_physical_parent_in_a_background_thread(poll_fails):
+    polled = threading.Event()
+    calls = []
+    read_count = 0
+
+    class NVMLError(Exception):
+        value = 1
+
+    def handle(uuid):
+        calls.append(uuid)
+        if uuid.startswith("GPU-"):
+            raise NVMLError()
+        return "mig"
+
+    def parent(mig):
+        assert mig == "mig"
+        return "physical"
+
+    def memory(device):
+        nonlocal read_count
+        assert device == "physical"
+        read_count += 1
+        if threading.current_thread().name == "simverse-nvml":
+            polled.set()
+            if poll_fails:
+                raise NVMLError()
+            return SimpleNamespace(used=880, total=2000)
+        return SimpleNamespace(used=500, total=2000)
+
+    nvml = SimpleNamespace(NVMLError=NVMLError, NVML_ERROR_NOT_FOUND=1, NVML_ERROR_INVALID_ARGUMENT=2,
+                           nvmlInit=lambda: calls.append("init"), nvmlShutdown=lambda: calls.append("shutdown"),
+                           nvmlDeviceGetHandleByUUID=handle, nvmlDeviceGetDeviceHandleFromMigDeviceHandle=parent,
+                           nvmlDeviceGetUUID=lambda _: b"GPU-parent", nvmlDeviceGetMemoryInfo=memory)
+    sampler = service_trace_nvml._DeviceMemorySampler(nvml, "a-device")
+    try:
+        assert polled.wait(2)
+    finally:
+        report = sampler.finish()
+    assert calls == ["init", "GPU-a-device", "MIG-a-device", "shutdown"]
+    assert report["device_uuid"] == "GPU-parent"
+    assert read_count >= 3
+    if poll_fails:
+        assert report["reason"] and len(report["samples"]) == 2
+    else:
+        assert report["reason"] is None and max(row["used_bytes"] for row in report["samples"]) == 880
 
 
 @pytest.mark.parametrize(("field", "value", "message"), [
@@ -307,6 +531,10 @@ def test_service_window_arms_after_warmup_and_finishes_after_core_drain(monkeypa
         order.append((method, args))
         return ["rank-data"]
 
+    async def utility(method, arg):
+        order.append((method, arg))
+        return "scheduler-data"
+
     async def resume():
         order.append("resume")
 
@@ -315,12 +543,14 @@ def test_service_window_arms_after_warmup_and_finishes_after_core_drain(monkeypa
         assert origin > 0
         return ["request-data"]
 
-    engine = SimpleNamespace(pause_generation=pause, collective_rpc=rpc, resume_generation=resume)
+    engine = SimpleNamespace(pause_generation=pause, collective_rpc=rpc, resume_generation=resume,
+                             engine_core=SimpleNamespace(call_utility_async=utility))
     monkeypatch.setattr(service_trace_vllm, "capture_requests", requests)
-    _, rows, ranks = asyncio.run(service_trace_vllm.capture_service_window(engine, None, {}, True))
-    assert (rows, ranks) == (["request-data"], ["rank-data"])
-    assert order == [("wait", False), ("simverse_begin_trace", (True,)), "resume", "requests",
-                     ("wait", False), ("simverse_end_trace", ())]
+    _, rows, ranks, scheduler = asyncio.run(service_trace_vllm.capture_service_window(engine, None, {}, True))
+    assert (rows, ranks, scheduler) == (["request-data"], ["rank-data"], "scheduler-data")
+    assert order == [("wait", False), ("simverse_begin_trace", (True,)), ("simverse_scheduler_trace", True),
+                     "resume", "requests", ("wait", False), ("simverse_scheduler_trace", False),
+                     ("simverse_end_trace", ())]
 
 
 @pytest.mark.parametrize(("field", "value", "message"), [
