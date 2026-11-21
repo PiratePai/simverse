@@ -1,6 +1,6 @@
 # R07b/R09 端到端请求轨迹验收方案
 
-基于 `main@7228e75` 的代码盘点。首轮交付目标是为同一组 Qwen3.6 文本请求，分别核对 baseline、DFlash 和原生 MTP 的服务端产出、阶段计时和资源边界。验收分为离线导入与归约、匹配环境下的服务采集。本文给出离线验收数据和上机条件。离线导入与 TTFT 已通过人工轨迹验收。实际服务采集和部署判定仍需匹配环境。
+基于 `main@7228e75` 的代码盘点。首轮交付目标是为同一组 Qwen3.6 文本请求，分别核对 baseline、DFlash 和原生 MTP 的服务端产出、阶段计时和资源边界。验收分为离线导入与归约、匹配环境下的服务采集。本文给出离线验收数据和上机条件。离线导入、TTFT 和采集重放已通过人工轨迹验收。实际服务采集和部署判定仍需匹配环境。
 
 ## 当前可复用的实现
 
@@ -44,6 +44,55 @@ python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
 - baseline、DFlash、MTP 使用同一目标权重与 tokenizer revision、精度、输入 token 序列、请求到达轨迹、采样配置与输出上限。固定设备和 TP/EP、批处理和并发设置、缓存冷暖状态及测量开关。逐方法另记草稿 checkpoint 或 MTP 头、实现和配置的版本。输出长度或停止原因有差异时逐请求披露，按实际提交 token 计数。
 - 首轮固定一个后端版本与一个同卡规模，先核对三个方法的实际支持路径、模型输出和可分配预算。缺配对时记录缺项并保留已取得的单方法证据。DFlash DT 仿真与 Ascend 条件成本档各自保留现有身份。Ascend 上机条件见 [A-N6](../ascend-validation-plan.md)。
 - 固定请求清单、原始日志、命令、版本和哈希。先预热，再开启观测窗口，排空阶段保留原轨迹。对实际服务比较采用独立进程重复，预先登记 SLO、误差门槛、观察窗口、允许变化的字段和输出一致性判据。记录失败试次与 profiler 开关，必要时以同负载无 profiler 的运行估计采集开销。
+
+## 采集与重放
+
+`simverse collect-service-trace plan.json out-dir` 按 baseline、DFlash、MTP 顺序启动独立的 vLLM 服务端生成进程。三路使用同一份计划、目标模型、tokenizer、BF16、TP/EP、请求 token ID、采样参数和到达调度，关闭前缀缓存。每路先预热并排空，再开始观测。计划时间是发起目标，服务端记录实际到达时刻。超过 `arrival_tolerance_ns` 或运行身份不同会在 `comparison.json` 标为未配对。输出 token ID 和结束状态分别与 baseline 核对。
+
+每个方法目录包含 `plan.json`、原始 `server.json`、带 SHA256 引用的 `trace.json` 和由现有归约器生成的 `summary.json`。实采还保留 `backend.log`。输出目录须为新目录。进程失败时保留已写入的结果和失败日志。
+
+采集点为 vLLM `AsyncLLM.generate` 在服务端生成进程交付增量输出的时刻，使用 `server_emitted` 和 `commit_group`。同一组内的 token 使用同一真实观测时戳。预填充和解码可用 engine-core 原生事件时，记录首次调度至首 token、首 token 至末 token 的请求墙钟区间，并披露缺测。DFlash 与 MTP 保留原生逐轮提议、校验和接受数及其联合分布。服务端输出组可能合并多个后端轮，逐轮提交归属和 draft、verify、recovery 的独立时长仍标为未知。设备空闲显存只用于实采前置检查。
+
+适配器以 [vLLM 11aa1369 的服务端生成入口](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/engine/async_llm.py)、[增量输出队列](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/engine/output_processor.py) 和 [原生统计字段](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/metrics/stats.py) 为准。启动条件为 Linux CUDA、与计划 TP 相同的可见设备数、已登记的空闲显存门槛，以及可导入的固定提交源码安装。固定模型版本和文件身份见 [模型清单](../../assets/identity/required_scenarios_identity.json)。离线验收环境没有 CUDA 设备或 vLLM，实采数据仍待匹配环境。
+
+### 实采计划示例
+
+按实际设备预算、拓扑、版本和预注册负载替换示例值，再运行采集。时间字段均为纳秒。每项请求提供已经由固定 tokenizer 生成的输入 token ID，示例 token 仅用于展示格式。 `warmup_runs` 和 `warmup_timeout_ns` 可省略，默认 1 次和 300 秒。
+
+```json
+{
+  "schema_version": "1.0",
+  "run_id": "qwen36-r07b-r09",
+  "model_revision": "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
+  "tokenizer_revision": "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
+  "draft_revision": "f181eece646affea2c38b2765f1aaa01a9734ccd",
+  "runtime_identity": "填写驱动与运行环境身份",
+  "topology": "填写实际设备与互联拓扑",
+  "tp": 2,
+  "enable_expert_parallel": false,
+  "minimum_device_memory_bytes": 64424509440,
+  "gpu_memory_utilization": 0.9,
+  "max_model_len": 4096,
+  "max_num_seqs": 8,
+  "dflash_k": 15,
+  "mtp_k": 1,
+  "arrival_tolerance_ns": 2000000,
+  "sampling": {"temperature": 0, "seed": 1, "max_tokens": 64, "ignore_eos": false},
+  "window": {"start_ns": 0, "end_ns": 10000000000, "drain_end_ns": 20000000000},
+  "requests": [
+    {"request_id": "r1", "sample_id": "prompt-1", "prompt_token_ids": [9707], "planned_arrival_ns": 100000000},
+    {"request_id": "r2", "sample_id": "prompt-2", "prompt_token_ids": [14924], "planned_arrival_ns": 200000000}
+  ]
+}
+```
+
+```powershell
+python -m simverse.cli collect-service-trace plan.json run-out
+python -m simverse.cli trace-summary run-out/dflash_v1/trace.json
+python -m simverse.cli collect-service-trace plan.json replay-out --replay run-out
+```
+
+可用 `python -m pytest -q tests/test_service_trace.py` 复验三路离线样本。测试复用 A–E 请求、同刻输出和半开窗口，核对每路完成吞吐 100 token/s、事件吞吐 175 token/s、TTFT P50 4 ms 和 P95 6 ms。原生投机分布、计划不匹配、到达偏差和输出差异分别有断言。
 
 ## 最小输入字段
 
@@ -97,7 +146,7 @@ python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
 py -3.12 -c "from simverse.execute.reduce import throughput_tokens_per_ms as t; e = {'A':[8,20,20,50],'B':[10,30,48],'C':[16],'D':[45],'E':[]}; print(t(e, ['A','B','C'], 10, 50, 'completed_requests') * 1000)"
 ```
 
-实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付已验收离线导入、请求指标和手算样本。真实采集、阶段残差和硬件门槛仍待各自验收。
+实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付已验收离线导入、三路同负载重放和手算样本。匹配硬件采集、细分阶段残差和硬件门槛仍待验收。
 
 ## 上游参考
 

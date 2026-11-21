@@ -2,6 +2,7 @@
 
 命令：
   simverse archive {run,sweep,export}  v0.1 离线归档重放
+  simverse collect-service-trace plan.json out-dir [--replay raw-dir]   服务端采集
   simverse trace-summary request-trace.json   离线请求轨迹摘要
   simverse serve [--host --port]                              启动 Web 工作台
   simverse list [models|drafts|devices|formulas]        注册表
@@ -180,6 +181,18 @@ def cmd_export_v2(args):
     _write_v2_exports(bundle, args)
 
 
+def cmd_collect_service_trace(args):
+    from .contracts import js_safe
+    from .execute.service_trace import collect_service_traces
+
+    try:
+        result = collect_service_traces(args.plan, args.out_dir, args.replay)
+    except (ValueError, OSError) as exc:
+        print(f"服务端轨迹采集失败：{exc}", file=sys.stderr)
+        raise SystemExit(2) from None
+    _dump(js_safe(result), None)
+
+
 def cmd_trace_summary(args):
     from .contracts import js_safe
     from .execute.request_trace import summarize_request_trace
@@ -243,6 +256,11 @@ def main(argv=None):
     p_e2.add_argument("--trace", default=None)
     p_e2.add_argument("--html", default=None)
     p_e2.set_defaults(fn=cmd_export_v2)
+    p_collect = sub.add_parser("collect-service-trace", help="采集或离线重放三路同负载服务端轨迹")
+    p_collect.add_argument("plan", type=Path)
+    p_collect.add_argument("out_dir", type=Path)
+    p_collect.add_argument("--replay", type=Path, help="从已有采集目录重放原始服务端记录")
+    p_collect.set_defaults(fn=cmd_collect_service_trace)
     p_trace = sub.add_parser("trace-summary", help="离线请求轨迹校验与服务端 TTFT 摘要")
     p_trace.add_argument("trace_file")
     p_trace.set_defaults(fn=cmd_trace_summary)
