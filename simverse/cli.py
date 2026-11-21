@@ -2,6 +2,7 @@
 
 命令：
   simverse archive {run,sweep,export}  v0.1 离线归档重放
+  simverse trace-summary request-trace.json   离线请求轨迹摘要
   simverse serve [--host --port]                              启动 Web 工作台
   simverse list [models|drafts|devices|formulas]        注册表
 
@@ -179,6 +180,18 @@ def cmd_export_v2(args):
     _write_v2_exports(bundle, args)
 
 
+def cmd_trace_summary(args):
+    from .contracts import js_safe
+    from .execute.request_trace import summarize_request_trace
+
+    try:
+        summary = js_safe(summarize_request_trace(Path(args.trace_file)))
+    except (ValueError, OSError) as exc:
+        print(f"轨迹导入失败：{exc}", file=sys.stderr)
+        raise SystemExit(2) from None
+    _dump(summary, None)
+
+
 def cmd_list(args):
     if args.what == "formulas":
         from .formula_registry import formulas_json
@@ -230,6 +243,9 @@ def main(argv=None):
     p_e2.add_argument("--trace", default=None)
     p_e2.add_argument("--html", default=None)
     p_e2.set_defaults(fn=cmd_export_v2)
+    p_trace = sub.add_parser("trace-summary", help="离线请求轨迹校验与服务端 TTFT 摘要")
+    p_trace.add_argument("trace_file")
+    p_trace.set_defaults(fn=cmd_trace_summary)
     p_srv = sub.add_parser("serve", help="Web 工作台")
     p_srv.add_argument("--host", default="127.0.0.1")
     p_srv.add_argument("--port", type=int, default=8765)

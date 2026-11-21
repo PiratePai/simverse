@@ -1,17 +1,43 @@
 # R07b/R09 端到端请求轨迹验收方案
 
-基于 `main@7228e75` 的代码盘点。首轮交付目标是为同一组 Qwen3.6 文本请求，分别核对 baseline、DFlash 和原生 MTP 的服务端产出、阶段计时和资源边界。验收分为离线导入与归约、匹配环境下的服务采集。本文给出离线验收数据和上机条件。导入器、采集和部署排名仍待各自验收。
+基于 `main@7228e75` 的代码盘点。首轮交付目标是为同一组 Qwen3.6 文本请求，分别核对 baseline、DFlash 和原生 MTP 的服务端产出、阶段计时和资源边界。验收分为离线导入与归约、匹配环境下的服务采集。本文给出离线验收数据和上机条件。离线导入与 TTFT 已通过人工轨迹验收。实际服务采集和部署判定仍需匹配环境。
 
 ## 当前可复用的实现
 
 | 实现 | 现有用途和边界 |
 | --- | --- |
-| [`execute/reduce.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/reduce.py#L12-L133) 与 [V08 人工轨迹测试](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tests/test_metrics_v08.py#L26-L67) | 可复用窗口事件计数、请求平均 ITL、最近秩分位和 busy 区间并集。完成请求计数、吞吐与 goodput 共用窗口判定，手算样本已补跨窗回归。现有 goodput 仅检查平均 ITL，尚无到达时间、TTFT 或组合 SLO 输入。 |
+| [`execute/reduce.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/reduce.py#L12-L133) 与 [V08 人工轨迹测试](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tests/test_metrics_v08.py#L26-L67) | 可复用窗口事件计数、请求平均 ITL、最近秩分位和 busy 区间并集。完成请求计数、吞吐与 goodput 共用窗口判定，手算样本已补跨窗回归。离线入口在请求层计算 TTFT 和组合 SLO，复用窗口、吞吐、平均 ITL 与分位数归约。 |
 | [`execute/validate.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/validate.py#L17-L79) 与 [`resource_core.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/execute/resource_core.py#L111-L146) | 事件核可核对依赖、资源互斥和消息顺序，主要输入为仿真事件。并发采集的区间只有在独占资源和时钟语义明确时才使用对应互斥检查。 |
 | [`ResultBundle`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/contracts/run.py#L49-L93) 与 [trace CSV 导出](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/exports.py#L67-L77) | 已有结果身份和仿真轮事件导出。现有 CSV 缺少请求到达、提交输出、失败状态及观测窗口，无法还原服务端指标。 |
 | [`methods/acceptance.py`](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/simverse/methods/acceptance.py#L78-L125) 与 [Ascend 蒸馏工具](https://github.com/PiratePai/simverse/blob/7228e7505273ae66b99ea66c5fabb94ebfd54a66/tools/distill_ascend_cost_records.py#L21-L44) | 接受率实现消费场景假设，采集尚未接入。蒸馏工具的源文件与哈希登记可作为参考，现有读入范围是局部算子与通信成本。 |
 
-完成请求吞吐的跨窗过滤已修复。下一步实现单份 JSON 的字段校验、来源核验和服务端 TTFT 归约，复用现有归约函数。已有 CLI、HTTP 工作台和仿真 `ResultBundle` 可以继续独立运行。现有用例可通过 `py -3.12 -m pytest -q tests/test_metrics_v08.py tests/test_resource_core.py` 复验。
+## 运行离线摘要
+
+在仓库根目录运行验收样本。命令向标准输出写入 JSON，输入文件保留原样。
+
+```powershell
+python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
+```
+
+样本输出完成吞吐 100 token/s、事件吞吐 175 token/s、TTFT P50 4 ms 和 P95 6 ms。TTFT 分位数按最后提交位于观测窗口内的成功请求计算，样本数为 2。单请求 TTFT 和 E2E 另列，无输出的请求标为未知。TTFT 与平均 ITL 的组合 SLO 仅在提供 `slo` 时计算。导入失败返回退出码 2，并在标准错误中报告问题字段。复验命令为 `python -m pytest -q tests/test_request_trace.py tests/test_metrics_v08.py tests/test_resource_core.py`。
+
+## 已实现的 JSON 协议
+
+输入使用 UTF-8 JSON，顶层 `schema_version` 为字符串 `1.0`。纳秒时间戳为本次运行同一单调时钟上的非负 64 位整数。
+
+| 字段 | 类型和约束 |
+| --- | --- |
+| `manifest` | 对象。包含 `run_id`、`source_kind`、`method` 和 `workload_sha256`。支持 `synthetic` 和 `captured`，方法为 `baseline`、`dflash_v1` 或 `mtp`。 |
+| `manifest.workload_sha256` | 用 `simverse.contracts.digest` 对按 `request_id` 排序的数组计算。每项仅含 `request_id`、`sample_id`、`input_tokens`、`arrival_ns`。输出轨迹使用输入文件的完整 SHA256 标识。 |
+| 采集清单 | `captured` 须提供 `backend_revision`、`model_revision`、`tokenizer_revision`、`device`、`topology`、`precision`、`command`、`runtime_identity`、正整数 `tp` 与 `ep`，以及 `method_config` 对象。DFlash 与 MTP 还须提供 `method_config.revision`。`raw_files` 是相对路径到完整 `sha256:…` 的映射，导入时逐文件核对。文件位于轨迹所在目录内。 |
+| `window` | 对象。包含 `start_ns`、`end_ns`、`clock_id`、`time_basis` 与 `granularity`。时间基准为 `committed` 或 `server_emitted`，提交粒度为 `token` 或 `commit_group`。可选 `warmup_end_ns`、`drain_end_ns` 分别位于窗口起点之前或相等、终点之后或相等。 |
+| `requests[]` | 每项包含 `request_id`、`sample_id`、`input_tokens`、`arrival_ns`、`status`、`output_tokens` 和 `emissions`。可选 `admit_ns` 缺省或为 null 时仅检查到达时刻。状态为 `completed`、`cancelled`、`failed` 或 `in_flight`。已结束请求另存 `terminal_ns` 与 `end_reason`。 |
+| `emissions[]` | 每项包含 `time_ns` 和非空 `token_indices`。请求内序号自 0 连续，时间允许同刻。逐 token 输入每项只有一个序号。客户端流块须保留在独立采集记录，服务端摘要按本表的观测基准导入。 |
+| `slo` | 可选对象。包含 `ttft_max_ns` 和 `mean_itl_max_ns`，阈值取等号。 |
+| `rounds[]` | 可选。每项包含 `request_id`、全局唯一的 `round_id`、`configured_k`、`proposed`、`verified`、`accepted`、`committed` 和提交起始序号 `token_start`。导入检查数量上界和提交区间归属。提议数为 0 时另存 `end_reason`。 |
+| `batches` 与 `spans[]` | 可选。批 ID 映射到请求 ID 数组。阶段记录提供 `span_id`、`request_id` 或 `batch_id`、`stage`、`role`、`resource`、`timing_boundary` 和 `start_ns`、`end_ns`。时长未知时两端均为 null，并提供 `timing_reason`。可选 `round_id` 须关联同一请求或批内请求。 |
+
+请求、提交、阶段与轮记录可省略重复的 `clock_id` 和 `time_basis`。若提供，两者须与窗口一致。原始文件 SHA256 验证内容身份，服务执行和硬件指标仍按采集证据独立验收。
 
 ## 采集输入与配对
 
@@ -21,7 +47,7 @@
 
 ## 最小输入字段
 
-以下字段是拟实现的离线输入协议，首版可用单个 JSON 对象表示。时间使用距本次采集起点的整数纳秒，展示时转换为毫秒。缺失值使用 `null` 和原因。跨进程或跨设备的时钟仅在对齐依据与误差可追溯时计算差值。
+以下为完整采集目标。离线导入已支持上表字段，实际设备、容量和硬件阶段证据按采集计划归档。时间使用距本次采集起点的整数纳秒，展示时转换为毫秒。缺失值使用 `null` 和原因。跨进程或跨设备的时钟仅在对齐依据与误差可追溯时计算差值。
 
 | 对象 | 必采字段 |
 | --- | --- |
@@ -71,7 +97,7 @@
 py -3.12 -c "from simverse.execute.reduce import throughput_tokens_per_ms as t; e = {'A':[8,20,20,50],'B':[10,30,48],'C':[16],'D':[45],'E':[]}; print(t(e, ['A','B','C'], 10, 50, 'completed_requests') * 1000)"
 ```
 
-实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付验收第一阶段的设计和手算对照。导入器、采集结果和硬件门槛仍待各自验收。
+实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付已验收离线导入、请求指标和手算样本。真实采集、阶段残差和硬件门槛仍待各自验收。
 
 ## 上游参考
 
