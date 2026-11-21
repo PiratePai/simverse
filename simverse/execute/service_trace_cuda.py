@@ -5,10 +5,11 @@ import time
 from functools import wraps
 
 from .request_trace import NS_PER_MS
+from .service_trace_nvml import _DeviceMemorySampler
 
 
 class _RankCapture:
-    def __init__(self, worker, cuda, speculative, now=time.monotonic_ns):
+    def __init__(self, worker, cuda, speculative, now=time.monotonic_ns, *, nvml=None):
         self.cuda = cuda
         self.rank = worker.rank
         self.device = worker.device
@@ -31,6 +32,8 @@ class _RankCapture:
 
         if speculative:
             self._instrument(worker.model_runner)
+        uuid = str(getattr(cuda.get_device_properties(self.device), "uuid", "") or "") if nvml else ""
+        self.device_memory = _DeviceMemorySampler(nvml, uuid, now)
 
     def _memory_bytes(self):
         return {name: getattr(self.cuda, f"memory_{name}")(self.device)
@@ -57,6 +60,8 @@ class _RankCapture:
             return
         for obj, name, wrap in hooks:
             self._patch(obj, name, wrap)
+        if callable(getattr(runner, "rejection_sampler", None)):
+            self._patch(runner, "rejection_sampler", self._rejection_sampling)
 
     def _execute(self, original):
         def execute(scheduler_output, intermediate_tensors=None, dummy_run=False, *args, **kwargs):
@@ -143,16 +148,27 @@ class _RankCapture:
 
         return recover
 
+    def _rejection_sampling(self, original):
+        def sample(*args, **kwargs):
+            if self.step and self.step["verify_request_ids"]:
+                return self._record("rejection_sampling", original, args, kwargs)
+            return original(*args, **kwargs)
+
+        return sample
+
     def finish(self):
         try:
-            self.cuda.synchronize(self.device)
-            end_ns = self.now()
-            memory = None
-            if self.backend == "native":
-                end_bytes = self._memory_bytes()
-                memory = {name: {"start_bytes": start, "end_bytes": end_bytes[name],
-                                 "peak_bytes": getattr(self.cuda, f"max_memory_{name}")(self.device)}
-                          for name, start in self.start_bytes.items()}
+            try:
+                self.cuda.synchronize(self.device)
+                end_ns = self.now()
+                memory = None
+                if self.backend == "native":
+                    end_bytes = self._memory_bytes()
+                    memory = {name: {"start_bytes": start, "end_bytes": end_bytes[name],
+                                     "peak_bytes": getattr(self.cuda, f"max_memory_{name}")(self.device)}
+                              for name, start in self.start_bytes.items()}
+            finally:
+                device_memory = self.device_memory.finish()
             anchors = {}
             for step, phase, stream, start, end, host_start, host_end in self.pending:
                 anchor = anchors.setdefault(stream, start)
@@ -168,7 +184,7 @@ class _RankCapture:
                     "requested_memory_bytes": self.requested_memory_bytes,
                     "kv_cache_budget_bytes": self.kv_cache_budget_bytes,
                     "window": {"start_ns": self.start_ns, "end_ns": end_ns}, "memory": memory,
-                    "steps": self.steps, "phase_reason": self.phase_reason}
+                    "device_memory": device_memory, "steps": self.steps, "phase_reason": self.phase_reason}
         finally:
             for obj, name, original in reversed(self.patches):
                 setattr(obj, name, original)
@@ -179,8 +195,13 @@ class ServiceTraceWorkerExtension:
 
     def simverse_begin_trace(self, speculative):
         from torch import cuda
+        from vllm.utils.import_utils import import_pynvml
 
-        self._simverse_capture = _RankCapture(self, cuda, speculative)
+        try:
+            nvml = import_pynvml()
+        except ImportError:
+            nvml = None
+        self._simverse_capture = _RankCapture(self, cuda, speculative, nvml=nvml)
 
     def simverse_end_trace(self):
         try:

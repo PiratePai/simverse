@@ -242,7 +242,8 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
                    "time_basis": "server_emitted", "granularity": "commit_group"},
         "requests": requests, "spans": spans, "slo": plan.get("slo"),
         "runtime_observations": {"clock_origin_ns": capture.get("clock_origin_ns"),
-                                 "ranks": capture.get("rank_observations", [])},
+                                 "ranks": capture.get("rank_observations", []),
+                                 "scheduler": capture.get("scheduler_observations")},
     }
     (directory / "server.json").write_bytes(server_raw)
     (directory / "plan.json").write_bytes(plan_raw)

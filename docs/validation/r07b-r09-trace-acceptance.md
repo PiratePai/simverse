@@ -62,14 +62,20 @@ python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
 | 阶段 | 计时边界 |
 | --- | --- |
 | `draft` | 调度候选数大于零时，记录 `speculator.propose` 在当前 CUDA stream 上的区间。 |
-| `verify` | 批次含待校验候选时，从 `kv_connector.pre_forward` 入口至 `finish_forward` 入口，包括目标模型 forward 或 CUDA Graph replay。混合批次的区间同时包含同批普通请求的 forward。拒绝采样留待单独观测。 |
-| `recovery` | 含候选的批次执行 `postprocess_sampled` 的区间，包括提交状态更新和拒绝后修正。CPU scheduler 回退的独立耗时保持未知。 |
+| `verify` | 批次含待校验候选时，从 `kv_connector.pre_forward` 入口至 `finish_forward` 入口，包括目标模型 forward 或 CUDA Graph replay。混合批次的区间同时包含同批普通请求的 forward。 |
+| `rejection_sampling` | 含候选的批次调用 `rejection_sampler` 的 CUDA stream 区间。边界从拒绝采样器进入到返回，采样前准备 logits 的耗时单独留待观测。 |
+| `recovery` | 含候选的批次执行 `postprocess_sampled` 的 CUDA stream 区间，包括提交状态更新和拒绝后修正。 |
+| `scheduler_rollback` | 在 engine-core 中以主机单调时钟计时，仅围住 `update_from_output` 内修改 `num_computed_tokens` 和 `num_output_placeholders` 的回退代码块。仅记录实际有待退回 slot 且会更新计数的请求。 |
 
-worker 在阶段所在 stream 上记录 CUDA 事件，排空后读取时长。同一 rank、同一 stream 的 CUDA 时间从首个阶段事件起算，已采区间的 busy 时间取并集。主机时钟只用于标记事件入队和采集窗口。分位数按 rank 计算，某阶段在所有 rank 上完整时才比较 P95。实采需单独评估 CUDA 事件和记录开销。[vLLM 11aa1369 GPUModelRunner 源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/worker/gpu/model_runner.py) · [PyTorch CUDA Event](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.Event.html)
+worker 在阶段所在 stream 上记录 CUDA 事件，排空后读取时长。同一 rank、同一 stream 的 CUDA 时间从首个阶段事件起算，已采区间的 busy 时间取并集。CUDA 阶段的主机时钟标记事件入队和采集窗口。分位数按 rank 计算，某阶段在所有 rank 上完整时才比较 P95。[vLLM 11aa1369 GPUModelRunner 源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/worker/gpu/model_runner.py) · [PyTorch CUDA Event](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.Event.html)
 
-三路都在预热排空后逐 rank 重置 PyTorch native CUDA allocator 的峰值计数，工作负载排空后读取 `allocated`、`reserved` 的峰值和窗口边界值。vLLM 初始化登记的显存和 KV 预算单列。空闲显存属于前置检查。整卡显存峰值和未分项观测的 KV、workspace、graph、通信池峰值仍为未知。[vLLM 11aa1369 GPU worker 源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/worker/gpu_worker.py) · [PyTorch allocated 计数](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.memory.max_memory_allocated.html) · [PyTorch reserved 计数](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.memory.max_memory_reserved.html)
+CPU 回退原始记录位于 `server.json` 的 `scheduler_observations`，按请求和批次归属。适配器在固定版本的单一回退代码块前后插入计时，沿用 vLLM 原有同步或异步调度。CPU 回退使用自己的分位数和区间并集，保持独立于 CUDA stream 和端到端时间。完整窗口内有零次回退时，busy 时间为 0，分位数为空。挂点缺失或样本不完整时，摘要给出原因。[vLLM 11aa1369 scheduler 回退源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/core/sched/scheduler.py#L2361-L2374)
 
-摘要记录每个阶段的预期轮次、已采样本数和缺失轮 ID。缺失 rank、缺失阶段或不支持的 allocator 会将运行时观测标记为不完整，已有样本和服务端吞吐仍可查看。轮归属冲突、窗口越界和峰值低于边界读数会使归约失败。
+三路都在预热排空后逐 rank 重置 PyTorch native CUDA allocator 的峰值计数，工作负载排空后读取 `allocated`、`reserved` 的峰值和窗口边界值。vLLM 初始化登记的显存和 KV 预算单列。空闲显存属于前置检查。未分项观测的 KV、workspace、graph 和通信池峰值仍为未知。[vLLM 11aa1369 GPU worker 源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/v1/worker/gpu_worker.py) · [PyTorch allocated 计数](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.memory.max_memory_allocated.html) · [PyTorch reserved 计数](https://docs.pytorch.org/docs/2.15/generated/torch.cuda.memory.max_memory_reserved.html)
+
+同一窗口前后，worker 用 NVML 按物理 GPU UUID 读取显存用量，并在后台以 20 ms 为目标间隔继续读数。MIG rank 使用父 GPU 的 UUID，同卡数值可能覆盖其他进程和 MIG 实例，不能跨 rank 相加。`device_memory` 记录采样窗口、样本数、实际最大间隔和采样最大值。短于采样间隔的使用峰值可能漏采。实采需单独评估 CUDA 事件、CPU 计时和 NVML 轮询的开销。[NVIDIA NVML 显存查询](https://docs.nvidia.com/deploy/nvml-api/620/api/group__nvmlDeviceQueries.html)
+
+摘要记录每个阶段的预期轮次、已采样本数和缺失轮 ID。缺失 rank、CPU 回退、CUDA 阶段或显存采样会将运行时观测标为不完整，已有样本和服务端吞吐仍可查看。轮归属冲突、越界时戳、allocator 峰值低于边界读数或整卡使用量超过容量会使归约失败。
 
 ### 实采计划示例
 
@@ -108,7 +114,7 @@ python -m simverse.cli trace-summary run-out/dflash_v1/trace.json
 python -m simverse.cli collect-service-trace plan.json replay-out --replay run-out
 ```
 
-可用 `python -m pytest -q tests/test_service_trace.py` 复验三路离线样本。测试复用 A–E 请求、同刻输出和半开窗口，核对每路完成吞吐 100 token/s、事件吞吐 175 token/s、TTFT P50 4 ms 和 P95 6 ms。双 rank 合成样本经 worker 探针采集后重放，核对 rank 0 的 draft P50 为 2 ms、verify P95 为 5 ms、recovery P50 为 1 ms，以及各 rank 显存峰值、区间并集和缺项。原生投机分布、计划不匹配、到达偏差和输出差异分别有断言。
+可用 `python -m pytest -q tests/test_service_trace.py` 复验三路离线样本。测试复用 A–E 请求、同刻输出和半开窗口，核对每路完成吞吐 100 token/s、事件吞吐 175 token/s、TTFT P50 4 ms 和 P95 6 ms。双 rank 合成样本核对 rank 0 拒绝采样 P95 为 3 ms，CPU 回退 P95 为 5 μs，整卡采样峰值分别为 780 B 和 880 B，并验证 allocator 数据、区间并集、零次回退及缺项。原生投机分布、计划不匹配、到达偏差和输出差异分别有断言。
 
 ## 最小输入字段
 
