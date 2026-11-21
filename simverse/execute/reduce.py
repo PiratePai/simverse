@@ -23,20 +23,21 @@ def window_token_count(emissions: Dict[str, Sequence[float]],
     return sum(1 for ts in emissions.values() for t in ts if start_ms <= t < end_ms)
 
 
-def _completed_emissions_in_window(emissions: Dict[str, Sequence[float]],
-                                   completed: Iterable[str],
-                                   start_ms: float, end_ms: float) -> Iterator[Sequence[float]]:
+def completed_request_ids_in_window(emissions: Dict[str, Sequence[float]],
+                                    completed: Iterable[str],
+                                    start_ms: float, end_ms: float) -> Iterator[str]:
+    """Yield completed IDs with a last output in [start_ms, end_ms)."""
     for rid in completed:
         ts = emissions.get(rid) or ()
         if ts and start_ms <= ts[-1] < end_ms:
-            yield ts
+            yield rid
 
 
 def window_completed_requests(emissions: Dict[str, Sequence[float]],
                               completed: Iterable[str],
                               start_ms: float, end_ms: float) -> int:
     """窗口内完成的请求数（完成=最后一个 emission 在窗口内且请求已完结）。"""
-    return sum(1 for _ in _completed_emissions_in_window(emissions, completed, start_ms, end_ms))
+    return sum(1 for _ in completed_request_ids_in_window(emissions, completed, start_ms, end_ms))
 
 
 def throughput_tokens_per_ms(emissions: Dict[str, Sequence[float]],
@@ -52,7 +53,8 @@ def throughput_tokens_per_ms(emissions: Dict[str, Sequence[float]],
         return None
     if count_basis == "token_events":
         return window_token_count(emissions, start_ms, end_ms) / wall
-    toks = sum(len(ts) for ts in _completed_emissions_in_window(emissions, completed, start_ms, end_ms))
+    toks = sum(len(emissions[rid])
+               for rid in completed_request_ids_in_window(emissions, completed, start_ms, end_ms))
     return toks / wall
 
 
@@ -68,7 +70,8 @@ def goodput_tokens_per_ms(emissions: Dict[str, Sequence[float]],
     if wall <= 0:
         return None
     toks = 0
-    for ts in _completed_emissions_in_window(emissions, completed, start_ms, end_ms):
+    for rid in completed_request_ids_in_window(emissions, completed, start_ms, end_ms):
+        ts = emissions[rid]
         itl = request_mean_itl(ts)
         # N≤1 的请求平均间隔不适用：单 token 请求无间隔约束，视为满足
         if itl is None or itl <= slo_itl_max_ms:

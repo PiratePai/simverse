@@ -1,0 +1,137 @@
+{
+  "schema_version": "1.0",
+  "manifest": {
+    "run_id": "r07b-r09-oracle",
+    "source_kind": "synthetic",
+    "method": "baseline",
+    "workload_sha256": "sha256:379353ad8bc668836e1082208251ffe370b26d16c14cb400c22287a0b4c35f56"
+  },
+  "window": {
+    "start_ns": 10000000,
+    "end_ns": 50000000,
+    "warmup_end_ns": 10000000,
+    "drain_end_ns": 50000000,
+    "clock_id": "server",
+    "time_basis": "committed",
+    "granularity": "commit_group"
+  },
+  "slo": {
+    "ttft_max_ns": 5000000,
+    "mean_itl_max_ns": 20000000
+  },
+  "requests": [
+    {
+      "request_id": "A",
+      "sample_id": "a",
+      "input_tokens": 4,
+      "arrival_ns": 0,
+      "admit_ns": 0,
+      "status": "completed",
+      "terminal_ns": 50000000,
+      "end_reason": "stop",
+      "output_tokens": 4,
+      "emissions": [
+        {
+          "time_ns": 8000000,
+          "token_indices": [
+            0
+          ]
+        },
+        {
+          "time_ns": 20000000,
+          "token_indices": [
+            1,
+            2
+          ]
+        },
+        {
+          "time_ns": 50000000,
+          "token_indices": [
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "request_id": "B",
+      "sample_id": "b",
+      "input_tokens": 4,
+      "arrival_ns": 4000000,
+      "admit_ns": 4000000,
+      "status": "completed",
+      "terminal_ns": 48000000,
+      "end_reason": "stop",
+      "output_tokens": 3,
+      "emissions": [
+        {
+          "time_ns": 10000000,
+          "token_indices": [
+            0
+          ]
+        },
+        {
+          "time_ns": 30000000,
+          "token_indices": [
+            1
+          ]
+        },
+        {
+          "time_ns": 48000000,
+          "token_indices": [
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "request_id": "C",
+      "sample_id": "c",
+      "input_tokens": 4,
+      "arrival_ns": 12000000,
+      "admit_ns": 12000000,
+      "status": "completed",
+      "terminal_ns": 16000000,
+      "end_reason": "stop",
+      "output_tokens": 1,
+      "emissions": [
+        {
+          "time_ns": 16000000,
+          "token_indices": [
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "request_id": "D",
+      "sample_id": "d",
+      "input_tokens": 4,
+      "arrival_ns": 41000000,
+      "admit_ns": 41000000,
+      "status": "cancelled",
+      "terminal_ns": 49000000,
+      "end_reason": "cancel",
+      "output_tokens": 1,
+      "emissions": [
+        {
+          "time_ns": 45000000,
+          "token_indices": [
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "request_id": "E",
+      "sample_id": "e",
+      "input_tokens": 4,
+      "arrival_ns": 42000000,
+      "admit_ns": 42000000,
+      "status": "failed",
+      "terminal_ns": 43000000,
+      "end_reason": "error",
+      "output_tokens": 0,
+      "emissions": []
+    }
+  ]
+}
