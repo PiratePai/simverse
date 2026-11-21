@@ -6,7 +6,7 @@ busy 段，输出 TPOT（请求口径）/吞吐（窗口口径）/goodput（SLO�
 """
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 
 def request_mean_itl(emitted_ms: Sequence[float]) -> Optional[float]:
@@ -23,16 +23,20 @@ def window_token_count(emissions: Dict[str, Sequence[float]],
     return sum(1 for ts in emissions.values() for t in ts if start_ms <= t < end_ms)
 
 
+def _completed_emissions_in_window(emissions: Dict[str, Sequence[float]],
+                                   completed: Iterable[str],
+                                   start_ms: float, end_ms: float) -> Iterator[Sequence[float]]:
+    for rid in completed:
+        ts = emissions.get(rid) or ()
+        if ts and start_ms <= ts[-1] < end_ms:
+            yield ts
+
+
 def window_completed_requests(emissions: Dict[str, Sequence[float]],
                               completed: Iterable[str],
                               start_ms: float, end_ms: float) -> int:
     """窗口内完成的请求数（完成=最后一个 emission 在窗口内且请求已完结）。"""
-    n = 0
-    for rid in completed:
-        ts = emissions.get(rid) or ()
-        if ts and start_ms <= ts[-1] < end_ms:
-            n += 1
-    return n
+    return sum(1 for _ in _completed_emissions_in_window(emissions, completed, start_ms, end_ms))
 
 
 def throughput_tokens_per_ms(emissions: Dict[str, Sequence[float]],
@@ -48,8 +52,7 @@ def throughput_tokens_per_ms(emissions: Dict[str, Sequence[float]],
         return None
     if count_basis == "token_events":
         return window_token_count(emissions, start_ms, end_ms) / wall
-    toks = sum(len(emissions.get(rid) or ()) for rid in completed
-               if (emissions.get(rid) or () and start_ms <= emissions[rid][-1] < end_ms))
+    toks = sum(len(ts) for ts in _completed_emissions_in_window(emissions, completed, start_ms, end_ms))
     return toks / wall
 
 
@@ -65,10 +68,7 @@ def goodput_tokens_per_ms(emissions: Dict[str, Sequence[float]],
     if wall <= 0:
         return None
     toks = 0
-    for rid in completed:
-        ts = emissions.get(rid) or ()
-        if not (ts and start_ms <= ts[-1] < end_ms):
-            continue
+    for ts in _completed_emissions_in_window(emissions, completed, start_ms, end_ms):
         itl = request_mean_itl(ts)
         # N≤1 的请求平均间隔不适用：单 token 请求无间隔约束，视为满足
         if itl is None or itl <= slo_itl_max_ms:
