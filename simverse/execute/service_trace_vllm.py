@@ -133,6 +133,19 @@ async def capture_requests(engine, params, plan, epoch_ns, now=time.monotonic_ns
     return await asyncio.gather(*(capture(request) for request in ordered))
 
 
+async def capture_service_window(engine, params, plan, speculative):
+    # Pause waits for the core's scheduler and outstanding batches, including on DP=1.
+    await asyncio.wait_for(engine.pause_generation(mode="wait", clear_cache=False), timeout=60)
+    await engine.collective_rpc("simverse_begin_trace", timeout=60, args=(speculative,))
+    await engine.resume_generation()
+    # Let the first scheduled tasks arm their timers before the capture origin.
+    origin = time.monotonic_ns() + 100_000_000
+    rows = await capture_requests(engine, params, plan, origin)
+    await asyncio.wait_for(engine.pause_generation(mode="wait", clear_cache=False), timeout=60)
+    ranks = await engine.collective_rpc("simverse_end_trace", timeout=60)
+    return origin, rows, ranks
+
+
 async def _run(plan, plan_raw, method, command):
     runtime, free_bytes = _preflight(plan)
     from vllm import SamplingParams
@@ -150,6 +163,7 @@ async def _run(plan, plan_raw, method, command):
         max_model_len=plan["max_model_len"], max_num_seqs=plan["max_num_seqs"],
         gpu_memory_utilization=plan["gpu_memory_utilization"], enable_prefix_caching=False,
         trust_remote_code=False, speculative_config=spec,
+        worker_extension_cls="simverse.execute.service_trace_cuda.ServiceTraceWorkerExtension",
         disable_log_stats=False, per_request_spec_decode_metrics="detailed" if spec else "none",
     )
     engine = AsyncLLM.from_engine_args(args)
@@ -165,15 +179,13 @@ async def _run(plan, plan_raw, method, command):
             [warmup] = await capture_requests(engine, params, warmup_plan, time.monotonic_ns())
             if warmup["status"] != "completed":
                 raise ValueError(f"预热失败：{warmup['end_reason']}")
-        # Let the first scheduled tasks arm their timers before the capture origin.
-        origin = time.monotonic_ns() + 100_000_000
-        rows = await capture_requests(engine, params, plan, origin)
+        origin, rows, rank_observations = await capture_service_window(engine, params, plan, spec is not None)
     finally:
         engine.shutdown()
     return {"method": method, "plan_sha256": _sha(plan_raw), "source_kind": "captured",
             "runtime": runtime, "clock_id": SERVER_CLOCK_ID, "clock_origin_ns": origin,
             "preflight_free_bytes": free_bytes, "warmup_runs": warmup_runs, "command": command,
-            "speculative_config": spec, "requests": rows}
+            "speculative_config": spec, "requests": rows, "rank_observations": rank_observations}
 
 
 def main():

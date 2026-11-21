@@ -241,6 +241,8 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
         "window": {**base, "warmup_end_ns": base["start_ns"], "clock_id": clock_id,
                    "time_basis": "server_emitted", "granularity": "commit_group"},
         "requests": requests, "spans": spans, "slo": plan.get("slo"),
+        "runtime_observations": {"clock_origin_ns": capture.get("clock_origin_ns"),
+                                 "ranks": capture.get("rank_observations", [])},
     }
     (directory / "server.json").write_bytes(server_raw)
     (directory / "plan.json").write_bytes(plan_raw)
@@ -257,11 +259,8 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
         "native_acceptance_histogram": dict(sorted(histogram.items())) if request_coverage["native_speculation"] else None,
         "native_round_distribution": [{"proposed": p, "verified": v, "accepted": a, "count": count}
                                       for (p, v, a), count in sorted(all_steps.items())],
-        "fine_phase_reason": (
-            "服务端输出与后端轮之间缺少关联，draft/verify/recovery 时长和逐轮提交保持未知"
-            if native_config is not None else None
-        ),
-        "memory_peak_reason": "实采前置检查记录空闲显存。运行时峰值待单独采集",
+        "runtime_observations_complete": summary["runtime_observations"]["complete"],
+        "round_commit_reason": "服务端输出组与后端轮缺少关联" if native_config is not None else None,
         "status_counts": summary["status_counts"],
     }, outputs
 
