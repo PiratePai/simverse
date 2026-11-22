@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..contracts import digest
 from .request_trace import METHODS, _finite_float, _unique_object, summarize_request_trace
+from .service_comparison import compare_modes, comparison_metrics, memory_coverage
 from .trace_fields import _integer, _list, _object, _text, _tokens
 
 VLLM_REVISION = "11aa1369e297f67bc4dc26e119d10830f39956c6"
@@ -40,7 +41,7 @@ def read_plan(path):
         "runtime_identity", "topology", "tp", "minimum_device_memory_bytes", "max_model_len",
         "max_num_seqs", "dflash_k", "mtp_k", "enable_expert_parallel", "gpu_memory_utilization",
         "sampling", "window", "arrival_tolerance_ns", "warmup_runs", "warmup_timeout_ns",
-        "requests", "slo",
+        "requests", "slo", "max_unattributed_ns",
     }
     if extra:
         raise ValueError(f"plan 含未支持的字段：{', '.join(sorted(extra))}")
@@ -84,6 +85,8 @@ def read_plan(path):
         for key in ("ttft_max_ns", "mean_itl_max_ns"):
             _integer(slo, key, "slo")
     _integer(plan, "arrival_tolerance_ns", "plan")
+    if "max_unattributed_ns" in plan:
+        _integer(plan, "max_unattributed_ns", "plan")
     for key in ("warmup_runs", "warmup_timeout_ns"):
         if key in plan and _integer(plan, key, "plan") == 0:
             raise ValueError(f"plan.{key} 必须大于零")
@@ -164,7 +167,7 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
             raise ValueError(f"{field}.emitted_token_count 与服务端输出组不符")
         if len(ids) > plan["sampling"]["max_tokens"]:
             raise ValueError(f"{field} 的实际输出超出计划上限")
-        outputs[rid] = (row.get("status"), row.get("end_reason"), ids)
+        outputs[rid] = (actual_arrival, (row.get("status"), row.get("end_reason"), row.get("stop_reason"), ids))
         request = {
             "request_id": rid, "sample_id": source["sample_id"],
             "input_tokens": len(source["prompt_token_ids"]), "arrival_ns": actual_arrival,
@@ -220,6 +223,12 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
                                  "ranks": capture.get("rank_observations", []),
                                  "scheduler": capture.get("scheduler_observations")},
     }
+    if "stage_attribution" in capture:
+        trace["stage_attribution"] = _object(capture["stage_attribution"], "server.stage_attribution")
+        spans.extend(_list(capture.get("stage_spans", []), "server.stage_spans"))
+        trace["batches"] = _object(capture.get("stage_batches", {}), "server.stage_batches")
+    elif "stage_spans" in capture or "stage_batches" in capture:
+        raise ValueError("server.stage_spans 和 stage_batches 须同时登记 stage_attribution")
     (directory / "server.json").write_bytes(server_raw)
     (directory / "plan.json").write_bytes(plan_raw)
     _save(directory / "trace.json", trace)
@@ -228,6 +237,9 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
     round_commits = summary.get("round_commits", {})
     if round_commits.get("native_request_count"):
         request_coverage["native_speculation"] = round_commits["native_request_count"]
+    preflight = capture.get("preflight_free_bytes", [])
+    budget_met = (isinstance(preflight, list) and len(preflight) == plan["tp"] and
+                  all(type(value) is int and value >= plan["minimum_device_memory_bytes"] for value in preflight))
     return {
         "source_kind": kind, "runtime": runtime, "max_arrival_drift_ns": max_drift,
         "arrivals_within_tolerance": max_drift <= plan["arrival_tolerance_ns"],
@@ -237,16 +249,28 @@ def _package_mode(plan, plan_raw, mode, directory, server_raw):
         "runtime_observations_complete": summary["runtime_observations"]["complete"],
         "round_commit_reason": round_commits.get("reason"),
         "status_counts": summary["status_counts"],
+        "window": summary["window"], "metrics": comparison_metrics(summary),
+        "stage_reconciliation": summary["stage_reconciliation"],
+        "memory_coverage": memory_coverage(summary["runtime_observations"]["ranks"]),
+        "preflight_budget_met": budget_met,
     }, outputs
 
 
 def collect_service_traces(plan_path: Path, output: Path, replay: Path | None = None):
     plan, raw = read_plan(plan_path)
+    if replay is not None and not replay.is_dir():
+        raise ValueError(f"重放目录不存在：{replay}")
     output.mkdir(parents=True, exist_ok=False)
     (output / "plan.json").write_bytes(raw)
-    modes, output_sequences = {}, {}
+    modes, output_sequences, missing_modes = {}, {}, {}
     for method in METHODS:
         directory = output / method
+        if replay is not None:
+            try:
+                server_raw = (replay / method / "server.json").read_bytes()
+            except FileNotFoundError:
+                missing_modes[method] = "缺少原始 server.json"
+                continue
         directory.mkdir()
         if replay is None:
             spool = directory / "captured.json"
@@ -258,23 +282,19 @@ def collect_service_traces(plan_path: Path, output: Path, replay: Path | None = 
             if worker.returncode:
                 raise ValueError(f"{method} 的服务进程退出码 {worker.returncode}，详见 {log_path}")
             server_raw = spool.read_bytes()
-        else:
-            server_raw = (replay / method / "server.json").read_bytes()
         modes[method], output_sequences[method] = _package_mode(plan, raw, method, directory, server_raw)
         if replay is None:
             spool.unlink()
 
-    baseline = modes["baseline"]
+    baseline = modes.get("baseline")
+    eligibility, output_mismatches = compare_modes(plan, modes, output_sequences, missing_modes)
     result = {
-        "run_id": plan["run_id"], "plan_sha256": _sha(raw), "modes": modes,
-        "same_source_and_runtime": all(m["source_kind"] == baseline["source_kind"]
-                                       and m["runtime"] == baseline["runtime"] for m in modes.values()),
-        "arrivals_within_tolerance": all(m["arrivals_within_tolerance"] for m in modes.values()),
-        "output_mismatches": {
-            mode: [rid for rid, observed in output_sequences[mode].items()
-                   if observed != output_sequences["baseline"][rid]]
-            for mode in METHODS if mode != "baseline"
-        },
+        "run_id": plan["run_id"], "plan_sha256": _sha(raw), "modes": modes, "missing_modes": missing_modes,
+        "same_source_and_runtime": not missing_modes and all(m["source_kind"] == baseline["source_kind"]
+                                                            and m["runtime"] == baseline["runtime"] for m in modes.values()),
+        "arrivals_within_tolerance": not missing_modes and all(m["arrivals_within_tolerance"] for m in modes.values()),
+        "output_mismatches": output_mismatches,
+        "comparison_eligibility": eligibility,
     }
     result["paired"] = result["same_source_and_runtime"] and result["arrivals_within_tolerance"]
     _save(output / "comparison.json", result)
