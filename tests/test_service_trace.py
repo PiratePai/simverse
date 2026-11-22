@@ -204,6 +204,7 @@ def test_cli_replays_three_modes_and_uses_trace_summary(offline_capture, tmp_pat
     assert result["paired"] is True
     assert result["output_mismatches"] == {"dflash_v1": [], "mtp": []}
     assert result["modes"]["baseline"]["native_acceptance_histogram"] is None
+    assert result["comparison_eligibility"]["pairs"]["dflash_v1"]["checks"]["unattributed_limit"] == "计划未登记未归属时长门槛"
     assert result["modes"]["dflash_v1"]["native_acceptance_histogram"] == {"2": 1}
     assert result["modes"]["mtp"]["native_acceptance_histogram"] == {"0": 1, "1": 1}
     for method in METHODS:
@@ -418,6 +419,193 @@ def test_replay_rejects_dropped_service_groups(round_commit_capture, tmp_path, i
     _edit_capture(replay, "mtp", lambda raw: raw["requests"][0]["chunks"].pop(index))
     with pytest.raises(ValueError, match=message):
         collect_service_traces(plan, tmp_path / "missing-group", replay)
+
+
+def _rewrite_plan(plan, replay, **changes):
+    updated = json.loads(plan.read_text(encoding="utf-8"))
+    updated.update(changes)
+    plan.write_text(json.dumps(updated), encoding="utf-8")
+    plan_sha = "sha256:" + hashlib.sha256(plan.read_bytes()).hexdigest()
+    for method in METHODS:
+        _edit_capture(replay, method, lambda raw: raw.update(plan_sha256=plan_sha))
+
+
+@pytest.fixture
+def matched_attribution(round_commit_capture):
+    plan, replay = round_commit_capture
+    _rewrite_plan(plan, replay, max_unattributed_ns=15_000_000)
+
+    def span(span_id, stage, start, end, resource, rank=None):
+        row = {"span_id": span_id, "request_id": "A", "stage": stage, "role": "target",
+               "resource": resource, "timing_boundary": "synthetic_aligned_resource",
+               "start_ns": start * 1_000_000, "end_ns": end * 1_000_000}
+        if rank is not None:
+            row["rank"] = rank
+        return row
+
+    def edit(raw):
+        for request in raw["requests"]:
+            chunks = request["chunks"]
+            if chunks:
+                request["phase_spans"] = {"prefill": {"start_ns": request["arrival_ns"],
+                                                      "end_ns": chunks[0]["time_ns"]}}
+                if request["emitted_token_count"] > 1:
+                    request["phase_spans"]["decode"] = {"start_ns": chunks[0]["time_ns"],
+                                                        "end_ns": chunks[-1]["time_ns"]}
+        spans = [span("lane-0-prefill", "prefill", 8, 20, "stream-0", 0),
+                 span("lane-0-decode", "decode", 18, 25, "stream-0", 0),
+                 span("lane-1-decode", "decode", 40, 55, "stream-0", 1)]
+        if raw["method"] != "baseline":
+            for index, stage in enumerate(("draft", "verify", "recovery", "rejection_sampling"), 10):
+                spans.append(span(stage, stage, index, index + 1, "stream-0", 0))
+            spans.append(span("cpu-rollback", "scheduler_rollback", 43, 44, "scheduler"))
+        raw["stage_spans"] = spans
+        ledger = {}
+        for row in spans:
+            ledger.setdefault(row["stage"], []).append(row["span_id"])
+        raw["stage_attribution"] = ledger
+
+    for method in METHODS:
+        _edit_capture(replay, method, edit)
+    return plan, replay
+
+
+def test_matched_reconciliation_unions_overlaps_and_keeps_eligibility_scoped(matched_attribution, tmp_path):
+    plan, replay = matched_attribution
+    out = tmp_path / "reconciliation"
+    result = collect_service_traces(plan, out, replay)
+    assert result["paired"] is True
+    eligibility = result["comparison_eligibility"]
+    assert eligibility["eligible"] is True and eligibility["hardware_eligible"] is False
+    for method in METHODS:
+        summary = summarize_request_trace(out / method / "trace.json")
+        mode = result["modes"][method]
+        reconciled = summary["stage_reconciliation"]
+        assert mode["stage_reconciliation"] == reconciled
+        assert mode["metrics"]["completed_token_per_s"] == 100
+        assert reconciled["phase_coverage_complete"]
+        assert reconciled["request_phases"]["prefill"]["expected_count"] == 4
+        assert reconciled["request_phases"]["decode"]["expected_count"] == 2
+        residual = reconciled["attribution"]
+        assert (residual["wall_ns"], residual["observed_aligned_ns"], residual["unattributed_ns"]) == (
+            40_000_000, 25_000_000, 15_000_000,
+        )
+        assert residual["coverage"]["ratio"] == 1
+        assert reconciled["observed_request_wall_ns"] == 40_000_000
+        lanes = {row["rank"]: row for row in residual["resources"] if row["rank"] is not None}
+        assert lanes[0]["observed_busy_ns"] == 15_000_000
+        assert lanes[1]["observed_busy_ns"] == 10_000_000
+        assert lanes[1]["window"] == {"start_ns": 40_000_000, "end_ns": 50_000_000}
+        if method != "baseline":
+            assert reconciled["runtime_phases"]["verify"]["expected_count"] == 4
+            pair = eligibility["pairs"][method]
+            assert pair["service_metrics_comparable"] and not pair["hardware_eligible"]
+            assert pair["candidate_minus_baseline"]["completed_token_per_s"] == 0
+            assert pair["hardware_reason"] == "两路须均为硬件采集记录"
+
+
+def test_cross_clock_attribution_keeps_local_busy_but_not_residual(matched_attribution, tmp_path):
+    plan, replay = matched_attribution
+    _edit_capture(replay, "mtp", lambda raw: raw["stage_spans"][2].update(clock_id="cuda_rank1_stream0"))
+    result = collect_service_traces(plan, tmp_path / "cross-clock", replay)
+    residual = result["modes"]["mtp"]["stage_reconciliation"]["attribution"]
+    assert residual["observed_aligned_ns"] == 16_000_000
+    assert residual["unattributed_ns"] is None and residual["unaligned_span_ids"] == ["lane-1-decode"]
+    local = next(row for row in residual["resources"] if row["scope"] == "local_clock")
+    assert local["observed_busy_ns"] == 15_000_000
+    pairs = result["comparison_eligibility"]["pairs"]
+    assert pairs["dflash_v1"]["eligible"]
+    assert pairs["mtp"]["service_metrics_comparable"] and not pairs["mtp"]["eligible"]
+    assert pairs["mtp"]["checks"]["unattributed_limit"] == "未归属时长未知"
+
+
+def test_cross_mode_clock_suppresses_paired_deltas(matched_attribution, tmp_path):
+    plan, replay = matched_attribution
+    _edit_capture(replay, "mtp", lambda raw: raw.update(clock_id="another_observation_clock"))
+    result = collect_service_traces(plan, tmp_path / "cross-mode-clock", replay)
+    pair = result["comparison_eligibility"]["pairs"]["mtp"]
+    assert not pair["service_metrics_comparable"] and pair["max_arrival_delta_ns"] is None
+    assert all(value is None for value in pair["candidate_minus_baseline"].values())
+    assert pair["checks"]["window_and_clock"]
+
+
+def test_missing_resource_and_runtime_phase_leave_residual_unknown(matched_attribution, tmp_path):
+    plan, replay = matched_attribution
+    _edit_capture(replay, "dflash_v1", lambda raw: raw["stage_spans"].pop(2))
+    _edit_capture(replay, "mtp", lambda raw: raw["rank_observations"][0]["steps"][1]["phases"].pop("recovery"))
+    result = collect_service_traces(plan, tmp_path / "stage-gaps", replay)
+    first = result["modes"]["dflash_v1"]["stage_reconciliation"]
+    assert first["phase_coverage_complete"]
+    assert first["attribution"]["missing_span_ids"] == ["lane-1-decode"]
+    assert first["attribution"]["unattributed_ns"] is None
+    second = result["modes"]["mtp"]["stage_reconciliation"]
+    assert second["runtime_phases"]["recovery"]["ratio"] == 0.75
+    assert second["attribution"]["observed_aligned_ns"] == 25_000_000
+    assert second["attribution"]["unattributed_ns"] is None
+    assert result["comparison_eligibility"]["pairs"]["mtp"]["checks"]["stage_coverage"]
+
+
+def test_eligibility_reports_residual_threshold_memory_and_round_gaps(matched_attribution, tmp_path):
+    plan, replay = matched_attribution
+    _rewrite_plan(plan, replay, max_unattributed_ns=14_999_999)
+    _edit_capture(replay, "dflash_v1", lambda raw: raw["rank_observations"][0].pop("device_memory"))
+    _edit_capture(replay, "mtp", lambda raw: raw["scheduler_observations"]["rounds"].pop(0))
+    result = collect_service_traces(plan, tmp_path / "evidence-gates", replay)
+    pairs = result["comparison_eligibility"]["pairs"]
+    assert not result["comparison_eligibility"]["eligible"]
+    assert pairs["dflash_v1"]["checks"]["memory_coverage"]
+    assert pairs["mtp"]["checks"]["round_commits"]
+    assert all(pair["checks"]["unattributed_limit"] == "未归属时长超过计划门槛" for pair in pairs.values())
+
+
+def test_native_rounds_prevent_empty_worker_inventory_from_qualifying(matched_attribution, tmp_path):
+    plan, replay = matched_attribution
+
+    def edit(raw):
+        for rank in raw["rank_observations"]:
+            rank["steps"] = []
+
+    _edit_capture(replay, "mtp", edit)
+    result = collect_service_traces(plan, tmp_path / "empty-worker-rounds", replay)
+    reconciliation = result["modes"]["mtp"]["stage_reconciliation"]
+    verify = reconciliation["runtime_phases"]["verify"]
+    assert verify["expected_count"] is None
+    assert verify["reason"] == "原生投机轮缺少对应阶段的预期记录"
+    assert reconciliation["attribution"]["unattributed_ns"] is None
+
+
+def test_pair_checks_observed_arrival_drift_between_modes(matched_attribution, tmp_path):
+    plan, replay = matched_attribution
+    _rewrite_plan(plan, replay, arrival_tolerance_ns=1)
+
+    def edit(raw, deviation):
+        request = raw["requests"][1]
+        request["arrival_ns"] += deviation
+        request["phase_spans"]["prefill"]["start_ns"] += deviation
+
+    _edit_capture(replay, "baseline", lambda raw: edit(raw, -1))
+    _edit_capture(replay, "mtp", lambda raw: edit(raw, 1))
+    result = collect_service_traces(plan, tmp_path / "pair-drift", replay)
+    assert result["paired"]
+    pair = result["comparison_eligibility"]["pairs"]["mtp"]
+    assert pair["max_arrival_delta_ns"] == 2 and not pair["service_metrics_comparable"]
+    assert pair["checks"]["arrival_alignment"]
+
+
+@pytest.mark.parametrize("missing", ["baseline", "mtp"])
+def test_reconciliation_retains_available_modes_when_a_record_is_missing(matched_attribution, tmp_path, missing):
+    plan, replay = matched_attribution
+    (replay / missing / "server.json").unlink()
+    out = tmp_path / "missing-mode"
+    result = collect_service_traces(plan, out, replay)
+    assert result["missing_modes"] == {missing: "缺少原始 server.json"}
+    assert not result["paired"] and not result["comparison_eligibility"]["eligible"]
+    for method in set(METHODS) - {missing}:
+        assert summarize_request_trace(out / method / "trace.json")["completed_token_per_s"] == 100
+    pairs = result["comparison_eligibility"]["pairs"]
+    assert pairs["mtp"]["missing_modes"] == [missing]
+    assert result["output_mismatches"]["mtp"] is None
+    assert pairs["dflash_v1"]["eligible"] == (missing != "baseline")
 
 
 def test_runtime_replay_reports_gaps_and_uses_stream_union(offline_capture, tmp_path):
@@ -760,6 +948,9 @@ def test_comparison_preserves_arrival_and_output_mismatches(offline_capture, tmp
     assert result["paired"] is False
     assert result["modes"]["mtp"]["max_arrival_drift_ns"] == 1
     assert result["output_mismatches"]["mtp"] == ["B"]
+    pair = result["comparison_eligibility"]["pairs"]["mtp"]
+    assert pair["checks"]["output_consistency"]
+    assert all(value is None for value in pair["candidate_minus_baseline"].values())
 
 
 def test_replay_rejects_invalid_native_acceptance(offline_capture, tmp_path):

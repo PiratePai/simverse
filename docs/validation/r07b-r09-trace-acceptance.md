@@ -36,8 +36,9 @@ python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
 | `slo` | 可选对象。包含 `ttft_max_ns` 和 `mean_itl_max_ns`，阈值取等号。 |
 | `rounds[]` | 可选。每项包含 `request_id`、全局唯一的 `round_id`、`configured_k`、`proposed`、`verified`、`accepted`、`committed` 和提交起始序号 `token_start`。导入检查数量上界和提交区间归属。提议数为 0 时另存 `end_reason`。 |
 | `batches` 与 `spans[]` | 可选。批 ID 映射到请求 ID 数组。阶段记录提供 `span_id`、`request_id` 或 `batch_id`、`stage`、`role`、`resource`、`timing_boundary` 和 `start_ns`、`end_ns`。时长未知时两端均为 null，并提供 `timing_reason`。可选 `round_id` 须关联同一请求或批内请求。 |
+| `stage_attribution` | 可选。按阶段登记资源 span ID 数组。这里登记的 `spans[]` 使用具体资源身份，按需附带 `rank`。`request_wall` 保留请求阶段边界。 |
 
-请求、提交、阶段与轮记录可省略重复的 `clock_id` 和 `time_basis`。若提供，两者须与窗口一致。原始文件 SHA256 验证内容身份，服务执行和硬件指标仍按采集证据独立验收。
+请求、提交、阶段与轮记录可继承窗口的 `clock_id` 和 `time_basis`。显式登记资源覆盖清单后，资源 span 可以声明自己的本地 `clock_id`。本地时钟上的区间保留在各自的时钟域。原始文件 SHA256 验证内容身份，服务执行和硬件指标仍按采集证据独立验收。
 
 ## 采集输入与配对
 
@@ -47,7 +48,7 @@ python -m simverse.cli trace-summary tests/fixtures/r07b_r09_request_trace.json
 
 ## 采集与重放
 
-`simverse collect-service-trace plan.json out-dir` 按 baseline、DFlash、MTP 顺序启动独立的 vLLM 服务端生成进程。三路使用同一份计划、目标模型、tokenizer、BF16、TP/EP、请求 token ID、采样参数和到达调度，关闭前缀缓存。每路先预热并排空，再开始观测。计划时间是发起目标，服务端记录实际到达时刻。超过 `arrival_tolerance_ns` 或运行身份不同会在 `comparison.json` 标为未配对。输出 token ID 和结束状态分别与 baseline 核对。
+`simverse collect-service-trace plan.json out-dir` 按 baseline、DFlash、MTP 顺序启动独立的 vLLM 服务端生成进程。三路使用同一份计划、目标模型、tokenizer、BF16、TP/EP、请求 token ID、采样参数和到达调度，关闭前缀缓存。每路先预热并排空，再开始观测。计划时间是发起目标，服务端记录实际到达时刻。超过 `arrival_tolerance_ns` 或运行身份不同会在 `comparison.json` 标为未配对。输出 token ID、结束状态和停止原因分别与 baseline 核对。
 
 每个方法目录包含 `plan.json`、原始 `server.json`、带 SHA256 引用的 `trace.json` 和由现有归约器生成的 `summary.json`。实采还保留 `backend.log`。输出目录须为新目录。进程失败时保留已写入的结果和失败日志。
 
@@ -86,6 +87,16 @@ CPU 回退原始记录位于 `server.json` 的 `scheduler_observations`，按请
 同一窗口前后，worker 用 NVML 按物理 GPU UUID 读取显存用量，并在后台以 20 ms 为目标间隔继续读数。MIG rank 使用父 GPU 的 UUID，同卡数值可能覆盖其他进程和 MIG 实例，不能跨 rank 相加。`device_memory` 记录采样窗口、样本数、实际最大间隔和采样最大值。短于采样间隔的使用峰值可能漏采。实采需单独评估 CUDA 事件、CPU 计时和 NVML 轮询的开销。[NVIDIA NVML 显存查询](https://docs.nvidia.com/deploy/nvml-api/620/api/group__nvmlDeviceQueries.html)
 
 摘要记录每个阶段的预期轮次、已采样本数和缺失轮 ID。缺失 rank、CPU 回退、CUDA 阶段或显存采样会将运行时观测标为不完整，已有样本和服务端吞吐仍可查看。轮归属冲突、越界时戳、allocator 峰值低于边界读数或整卡使用量超过容量会使归约失败。
+
+### 三路阶段对账与比较资格
+
+`trace-summary` 输出 `stage_reconciliation`。请求级覆盖率按适用请求计算，prefill 至少有一个输出 token，decode 至少有两个。投机 CUDA 阶段按 rank 与轮计数，CPU 回退按 scheduler 记录计数。预期数未知或明确为零时，比例留空。各 rank 的本地 CUDA busy 时间和慢 rank 仍在 `runtime_observations` 查看。
+
+重放可在 `server.json` 提供 `stage_attribution` 与 `stage_spans`，批引用通过可选的 `stage_batches` 声明。已归一化到本次服务端窗口坐标的资源 span 使用窗口时钟。仍在设备或 stream 本地域的 span 声明独立 `clock_id`。`trace-summary` 按时钟、rank 与资源归约，并将对齐后的区间裁剪到 `[start,end)` 后取并集。请求级 `request_wall` 区间单列，CUDA 的主机入队时间也不计入资源并集。阶段、资源 span 或时钟对齐任一缺项时，保存可核实的区间和原因，`unattributed_ns` 保持 `null`。当前采集的 CUDA 事件只提供各 stream 的相对时间，整窗资源残差还需要同钟资源记录。
+
+`comparison.json` 将 DFlash 和 MTP 分别与 baseline 对账。`service_metrics_comparable` 核对来源、运行身份、窗口与服务时钟、计划与逐请求配对的到达偏差、输出及停止原因，以及成功请求样本。通过后报告相对 baseline 的吞吐、TTFT 与 goodput 差值。`eligible` 还要求阶段和逐轮输出证据完整、各 rank 的 allocator 和整卡用量及预算可用，并且两路 `unattributed_ns` 都不超过计划登记的 `max_unattributed_ns`。`hardware_eligible` 另要求两路均为硬件采集，且有达到前置显存门槛的记录。合成样本用于验收对账逻辑。真实运行可在实采前登记 `max_unattributed_ns`，缺少门槛时保留各指标与未通过原因。
+
+重放目录缺少某一路的 `server.json` 时，`comparison.json` 在 `missing_modes` 登记缺项，已有方法仍生成摘要。受影响的配对保留未通过原因，另一组配对按已有证据判定。
 
 ### 实采计划示例
 
@@ -171,7 +182,7 @@ python -m simverse.cli collect-service-trace plan.json replay-out --replay run-o
 - 修复前，非空输出列表会跳过最后提交的窗口检查，使完成吞吐误计为 200 token/s。V08 回归现在断言完成吞吐为 100 token/s、完成请求数为 2，并核对左边界计入和事件吞吐。
 - B 的 TTFT 为 6 ms，E2E 为 44 ms，ITL 为 20、18 ms，请求平均间隔为 19 ms。C 的 TTFT 为 4 ms，平均间隔为 `null`。示例 SLO 取 TTFT ≤ 5 ms、请求平均间隔 ≤ 20 ms，只有 C 通过，goodput 为 25 req/s 和 25 token/s。E 的 TTFT 为 `null`。
 - 投机另设手算样本。DFlash 的 `(proposed, verified, accepted, committed)` 可取 `(3,3,0,1)`、`(3,3,3,4)` 及输出上限截断的 `(2,2,1,1)`，接受长度直方图的 0、1、3 档各有 1 轮。MTP 用独立的 `(1,1,0,1)`、`(1,1,1,2)`。baseline 没有投机轮。
-- 残差样本以 `[10,50)` 为墙钟，两种资源的已解释区间为 `[10,20)`、`[18,25)`、`[40,50)`。并集为 25 ms，未解释为 15 ms。不能对齐时钟的变体应输出未知。
+- 残差样本以 `[10,50)` 为墙钟，资源区间裁剪后的并集由 `[10,20)`、`[18,25)` 和 `[40,50)` 得到。三路均得到 25 ms 已归属和 15 ms 未归属。另一时钟的资源区间只保留本地 busy。丢失区间或运行时阶段时，未归属时长均为未知。15 ms 门槛允许合成样本通过离线对账，收紧到 15 ms 减 1 ns 后两组配对均未通过。
 - 负例至少覆盖逆序时间、重复输出、缺失轮引用、接受数超过校验数、混用时钟、采集身份不匹配，以及模拟合成数据被标记为硬件实测。
 
 从仓库根目录运行下列命令，预期输出为 100.0 token/s。
@@ -180,9 +191,10 @@ python -m simverse.cli collect-service-trace plan.json replay-out --replay run-o
 py -3.12 -c "from simverse.execute.reduce import throughput_tokens_per_ms as t; e = {'A':[8,20,20,50],'B':[10,30,48],'C':[16],'D':[45],'E':[]}; print(t(e, ['A','B','C'], 10, 50, 'completed_requests') * 1000)"
 ```
 
-实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付已验收离线导入、三路同负载重放和手算样本。匹配硬件采集、细分阶段残差和硬件门槛仍待验收。
+实施验收按三个阶段进行。先以人工样本完成导入拒错和手算对账。再由匹配环境采三路服务证据，逐请求核对配对、停止与采数覆盖。最后用真实数据验收事先登记的延迟、吞吐、显存和残差门槛。当前交付已验收三路重放、阶段覆盖率、交叠区间、跨时钟隔离、缺项和比较资格。匹配硬件采集及其阶段残差仍待验收。
 
 ## 上游参考
 
 - 阅读了活跃的 vLLM 仓库在 `11aa1369` 的服务基准归约及模拟流测试。借鉴成功请求筛选、区分服务端与客户端时间、剔除无内容流块和覆盖单 token 边界。本仓保留半开窗口、实际提交序号和显式缺值，避免将客户端分块统计直接当作服务端逐 token 指标。所查代码与测试为源码阅读。 [基准源码](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/vllm/benchmarks/serve.py) · [时序测试](https://github.com/vllm-project/vllm/blob/11aa1369e297f67bc4dc26e119d10830f39956c6/tests/benchmarks/test_endpoint_request_func_timing.py)
 - vLLM 官方说明区分提议数、校验数和接受数，部分版本可导出逐轮列表。按实际采集版本核查字段，再与服务端提交事件对账。现有 DFlash 双栈核对和 MTP 头映射仍分别作为实现证据。 [接受统计](https://docs.vllm.ai/en/latest/features/speculative_decoding/acceptance_metrics/) · [DFlash 服务栈审查](dflash-serving-audit-20261112.md) · [MTP forward 映射](qwen36-mtp-forward-20261113.md)
+- 参考了 Perfetto v52.0（`52dc460c`）的时钟快照转换源码及测试。转换依赖有记录的时钟关系。本仓消费已归一化的资源区间，原始异钟区间保留在本地域，用现有 `busy_integral` 归约重叠。所查源码与测试为源码阅读。[Perfetto 时钟源码](https://github.com/google/perfetto/blob/52dc460cd7840c4b948d6151fe9a60dfc583df35/src/trace_processor/importers/common/clock_tracker.cc) · [时钟测试](https://github.com/google/perfetto/blob/52dc460cd7840c4b948d6151fe9a60dfc583df35/src/trace_processor/importers/common/clock_tracker_unittest.cc)

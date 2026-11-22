@@ -14,6 +14,7 @@ from .reduce import (busy_integral, completed_request_ids_in_window, quantile_ne
                      request_mean_itl, throughput_tokens_per_ms,
                      window_token_count)
 from .service_round_commits import summarize_round_commits
+from .stage_reconciliation import summarize_stage_reconciliation
 from .trace_fields import _check_round_counts, _integer, _list, _object, _text
 
 NS_PER_MS = 1_000_000
@@ -38,10 +39,13 @@ class _Request:
     emissions: tuple[int, ...]
 
 
-def _check_timing(obj, window, field):
-    for key in ("clock_id", "time_basis"):
-        if obj.get(key, window[key]) != window[key]:
-            raise ValueError(f"{field}.{key} 与服务端观测窗口不一致")
+def _check_timing(obj, window, field, *, local_clock=False):
+    if local_clock and "clock_id" in obj:
+        _text(obj, "clock_id", field)
+    elif obj.get("clock_id", window["clock_id"]) != window["clock_id"]:
+        raise ValueError(f"{field}.clock_id 与服务端观测窗口不一致")
+    if obj.get("time_basis", window["time_basis"]) != window["time_basis"]:
+        raise ValueError(f"{field}.time_basis 与服务端观测窗口不一致")
 
 
 def _sha256(obj, key, field):
@@ -165,7 +169,8 @@ def _check_details(data, requests, window, manifest):
     for i, row in enumerate(_list(data.get("spans", []), "spans")):
         field = f"spans[{i}]"
         span = _object(row, field)
-        _check_timing(span, window, field)
+        _check_timing(span, window, field, local_clock=data.get("stage_attribution") is not None
+                      and span.get("resource") != "request_wall")
         span_id = _text(span, "span_id", field)
         if span_id in span_ids:
             raise ValueError(f"{field}.span_id 重复")
@@ -572,6 +577,10 @@ def summarize_request_trace(path: str | Path) -> dict:
         runtime["runtime_observations"] = _summarize_runtime(data, manifest)
         if manifest["method"] != "baseline":
             runtime["round_commits"] = summarize_round_commits(data, manifest)
+    if "runtime_observations" in data or "stage_attribution" in data:
+        runtime["stage_reconciliation"] = summarize_stage_reconciliation(
+            data, manifest, runtime.get("runtime_observations", {}), runtime.get("round_commits", {}), ROUND_PHASES,
+        )
     return {
         "schema_version": "1.0",
         "trace_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),

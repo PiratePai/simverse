@@ -82,9 +82,9 @@ def goodput_tokens_per_ms(emissions: Dict[str, Sequence[float]],
 def busy_integral(segments: Sequence[Tuple[float, float]]) -> float:
     """资源 busy 时间积分：区间并集（同资源重叠不双计，V08 反例）。"""
     if not segments:
-        return 0.0
+        return 0
     segs = sorted(segments)
-    total = 0.0
+    total = 0
     cur_s, cur_e = segs[0]
     for s, e in segs[1:]:
         if s > cur_e:
